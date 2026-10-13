@@ -46,7 +46,11 @@ export function AdministradorUsuarios() {
 
   const { mutateAsync: excluir, isPending: excluindo } = useMutation({
     mutationFn: servicoUsuarios.deletar,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
+        queryClient.invalidateQueries({ queryKey: ['tecnicos'] }),
+      ]),
   })
 
   const chaveFiltros = `${busca}|${filtroPerfil}|${filtroLoja}`

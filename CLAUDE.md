@@ -65,6 +65,7 @@ Todo o tráfego HTTP passa por um wrapper nativo (`fetch`) padronizado — **nã
 - **Integração de Alertas:** captura as chaves de erro do backend (`error`, `erro`, `message`, `detalhes`) e exibe o toast automaticamente; falha de rede vira "Não foi possível conectar ao servidor.". Em **5xx** a mensagem ganha " (código: …)" com o `X-Request-ID` da resposta — é o id que o back grava em todas as linhas de log daquele request, então o usuário manda o código e o suporte acha o erro.
 - **Métodos:** `api.get/post/put/patch/delete`, todos genéricos em `<T>`.
 - **React Query (`App.tsx`):** `retry: 1` e `refetchOnWindowFocus: false` — o `api.ts` já trata 401 globalmente, repetir a requisição só atrasaria o redirecionamento.
+- **Cache do React Query:** `staleTime` padrão de **30s** (`App.tsx`) e de **10 min** nos cadastros (`useLojas`/`useSetores`/`useEmpresas`/`useEmpresasTerceirizadas`/`useTecnicos`, `hooks/tempoCache.ts`). Formulários de edição e confirmações buscam com `staleTime: 0`. O Painel do Gestor só busca a lista da aba aberta (`habilitado` nos hooks de lista). ⚠️ **Toda mutação tem que invalidar as chaves que ela altera** — antes o `staleTime: 0` escondia a falta disso (voltar para a lista refazia tudo); hoje o item salvo sumiria por até 30s. Sem cache no servidor, de propósito: para ~20 usuários o Postgres responde sobrando, e invalidar cache por escopo/tenant é onde mora o bug difícil.
 
 ## Contrato com o Back-end
 Regras transversais que valem para **todos** os serviços. Ao criar um endpoint novo, siga estas convenções em vez de inventar outra.

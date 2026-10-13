@@ -90,12 +90,17 @@ export function PainelGestor() {
     useState<SolicitacaoOS | null>(null)
   const [selecaoOS, setSelecaoOS] = useState<SelecaoOS | null>(null)
 
+  // Só a lista da aba aberta é buscada: abrir o painel não baixa as quatro de uma vez.
+  // A que já foi vista fica no cache, então voltar a uma aba é instantâneo. As duas
+  // abas de OS dividem a mesma lista.
+  const abaDeOS =
+    abaSelecionada === 'os-em-andamento' || abaSelecionada === 'os-finalizadas'
   const { data: solicitacoes = [], isLoading: carregandoSolicitacoes } =
-    useTodasSolicitacoes()
+    useTodasSolicitacoes({}, abaSelecionada === 'solicitacoes')
   const { data: ordensServico = [], isLoading: carregandoOrdensServico } =
-    useOrdensServicoTodas()
+    useOrdensServicoTodas({}, abaDeOS)
   const { data: preventivas = [], isLoading: carregandoPreventivas } =
-    usePreventivas()
+    usePreventivas(undefined, abaSelecionada === 'manutencao-preventiva')
 
   async function invalidarSolicitacoesEOrdens() {
     await Promise.all([

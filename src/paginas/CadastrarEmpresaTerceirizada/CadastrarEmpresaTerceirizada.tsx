@@ -22,6 +22,9 @@ export function CadastrarEmpresaTerceirizada() {
 
   const { data: empresaExistente } = useQuery({
     queryKey: ['empresa-terceirizada', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoEmpresasTerceirizadas.obterPorId(Number(id)),
     enabled: emEdicao,
   })

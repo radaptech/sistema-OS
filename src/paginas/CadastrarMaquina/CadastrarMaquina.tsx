@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, PackagePlus } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -46,12 +46,18 @@ export function CadastrarMaquina() {
 
   const { data: maquinaExistente } = useQuery({
     queryKey: ['maquina', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoMaquinas.obterPorId(maquinaId),
     enabled: emEdicao,
   })
 
   const { data: preventivasExistentes = [] } = useQuery({
     queryKey: ['preventivas-da-maquina', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoPreventivas.listar({ maquinaId }),
     enabled: emEdicao,
   })
@@ -138,9 +144,19 @@ export function CadastrarMaquina() {
     }
   }
 
+  // As preventivas viajam junto com a máquina, então as duas listas mudam.
+  const queryClient = useQueryClient()
+  async function invalidarMaquinas() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['maquinas'] }),
+      queryClient.invalidateQueries({ queryKey: ['preventivas'] }),
+    ])
+  }
+
   const { mutateAsync: criar, isPending: criando } = useMutation({
     mutationFn: (dados: DadosCadastrarMaquina) =>
       servicoMaquinas.criar(montarPayload(dados), foto ?? undefined),
+    onSuccess: invalidarMaquinas,
   })
 
   const { mutateAsync: atualizar, isPending: atualizando } = useMutation({
@@ -149,6 +165,7 @@ export function CadastrarMaquina() {
         { id: maquinaId, ...montarPayload(dados) },
         foto ?? undefined,
       ),
+    onSuccess: invalidarMaquinas,
   })
 
   async function aoEnviar(dados: DadosCadastrarMaquina) {

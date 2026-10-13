@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, UserPlus } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -41,6 +41,9 @@ export function CadastrarUsuario() {
 
   const { data: usuarioExistente } = useQuery({
     queryKey: ['usuario', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoUsuarios.obterPorId(Number(id)),
     enabled: emEdicao,
   })
@@ -83,12 +86,23 @@ export function CadastrarUsuario() {
   const acessoTotalSetores = useWatch({ control, name: 'acessoTotalSetores' })
   const area = useWatch({ control, name: 'area' })
 
+  // Técnico é usuário: o select de técnico (useTecnicos) também precisa recarregar.
+  const queryClient = useQueryClient()
+  async function invalidarUsuarios() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['usuarios'] }),
+      queryClient.invalidateQueries({ queryKey: ['tecnicos'] }),
+    ])
+  }
+
   const { mutateAsync: criar, isPending: criando } = useMutation({
     mutationFn: servicoUsuarios.criar,
+    onSuccess: invalidarUsuarios,
   })
 
   const { mutateAsync: atualizar, isPending: atualizando } = useMutation({
     mutationFn: servicoUsuarios.atualizar,
+    onSuccess: invalidarUsuarios,
   })
 
   async function aoEnviar(dados: DadosCadastrarUsuario) {

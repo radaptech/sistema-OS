@@ -15,6 +15,7 @@ type PreventivaServiceInterface interface {
 	CadastrarPreventiva(ctx context.Context, tenantID int64, payload model.PreventivaPayload) (model.Preventiva, error)
 	ListarPreventivas(ctx context.Context, tenantID, usuarioID int64, perfil string, maquinaID *int64) ([]model.Preventiva, error)
 	ObterPreventiva(ctx context.Context, tenantID, id int64) (model.Preventiva, error)
+	HistoricoPreventiva(ctx context.Context, tenantID, usuarioID int64, perfil string, id int64) ([]model.CicloPreventiva, error)
 	AtualizarPreventiva(ctx context.Context, tenantID, id int64, payload model.PreventivaPayload) (model.Preventiva, error)
 	DesativarPreventiva(ctx context.Context, tenantID, id int64) error
 }
@@ -147,6 +148,45 @@ func (p *PreventivaController) Obter() gin.HandlerFunc {
 		}
 
 		ctx.JSON(http.StatusOK, preventiva)
+	}
+}
+
+// Historico é GET /preventivas/:id/historico: os ciclos (OS) que a preventiva
+// já gerou. Aberto a todo perfil autenticado, com o mesmo recorte de escopo de
+// Listar -- é o Gestor quem acompanha, na aba "Manutenção Prev.".
+func (p *PreventivaController) Historico() gin.HandlerFunc {
+
+	return func(ctx *gin.Context) {
+
+		id, ok := idDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		tenantId, ok := tenantDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		usuarioId, perfil, ok := atorDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		ciclos, err := p.service.HistoricoPreventiva(ctx.Request.Context(), tenantId, usuarioId, perfil, id)
+		if err != nil {
+
+			switch {
+			case errors.Is(err, helper.ErrNaoEncontrado):
+				ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			default:
+				slog.ErrorContext(ctx.Request.Context(), "histórico da preventiva", "id", id, "tenant", tenantId, "err", err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter histórico da preventiva"})
+			}
+			return
+		}
+
+		ctx.JSON(http.StatusOK, ciclos)
 	}
 }
 

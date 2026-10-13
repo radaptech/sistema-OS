@@ -14,10 +14,9 @@ import (
 )
 
 // itensMaquinario e itensSemHoraTecnica montam a lista de TAREFAS da migration
-// 000012 sem repetir a struct em cada subteste. A diferença entre os dois é a
-// única regra que o tipo da OS impõe: em 'reparo' a mão de obra é proibida
-// (ck_custo_item_hora_tecnico), então a tarefa vem só com material. Em
-// 'terceiros' ela é permitida desde a 000016 (mão de obra da empresa).
+// 000012 sem repetir a struct em cada subteste: com e sem mão de obra. Desde a
+// 000017 todo tipo de OS aceita os dois (em 'terceiros', mão de obra da
+// empresa, 000016).
 //
 // A descrição é obrigatória (ck_custo_item_descricao) e nunca é o assunto dos
 // testes que usam estes helpers -- quem testa a descrição em si passa a lista
@@ -412,8 +411,8 @@ func TestListarOrdensServico(t *testing.T) {
 		exec(`INSERT INTO os_encerramento (tenant_id, ordem_servico_id, tipo, tipo_defeito, encerrado_por_id, data_fim, defeito_constatado, causa_raiz, solucao)
 		      VALUES ($1, $2, 'maquinario', 'Predial', $3, now(), 'Descalibrada', 'Uso', 'Recalibração')`, tenantID, osBalanca.Id, tecnicoB.Id)
 
-		// Reparo: encerrada e com custo, mas sem custo_hora_tecnico --
-		// ck_custo_por_tipo proíbe hora técnica fora de 'maquinario'. E sem
+		// Reparo: encerrada e com custo, mas sem custo_hora_tecnico -- como os
+		// reparos gravados antes da 000017. E sem
 		// impacto marcado, então afeta_producao é falsa: é a OS que prova
 		// horasParada nula ("Não se aplica").
 		exec(`UPDATE ordem_servico SET status = 'Concluída', iniciada_em = now() - interval '1 hour' WHERE id = $1`, osReparo.Id)
@@ -541,8 +540,8 @@ func TestListarOrdensServico(t *testing.T) {
 			t.Error("custo ainda não lançado devia vir nulo")
 		}
 
-		// Reparo não cobra hora técnica (ck_custo_por_tipo), mas cobra
-		// manutenção: os dois campos são independentes.
+		// Reparo lançado sem mão de obra (como os anteriores à 000017): a
+		// hora técnica vem nula e a manutenção não -- os dois são independentes.
 		reparo := porID(t, osReparo.Id)
 		if reparo.CustoHoraTecnico.Valid {
 			t.Errorf("reparo não tem hora técnica: %+v", reparo.CustoHoraTecnico)
@@ -1349,8 +1348,8 @@ func TestAcionarTerceiro(t *testing.T) {
 
 // TestEncerrar cobre POST /ordens-servico/:id/encerrar: Em Andamento ->
 // Concluída, gravando os_encerramento E os_custo na mesma escrita
-// (docs/modelagem, 2.3 revisão 4), custoHoraTecnico só em 'maquinario'
-// (ck_custo_por_tipo espelhado no service) e `finalizada` virando true na
+// (docs/modelagem, 2.3 revisão 4), custoHoraTecnico em todo tipo de OS
+// (000017) e `finalizada` virando true na
 // hora, já que custo nasce junto do encerramento.
 func TestEncerrar(t *testing.T) {
 
@@ -1502,7 +1501,8 @@ func TestEncerrar(t *testing.T) {
 		}
 	})
 
-	t.Run("reparo com item de hora técnica é erro de validação", func(t *testing.T) {
+	// Migration 000017: reparo passou a cobrar mão de obra como qualquer OS.
+	t.Run("reparo com mão de obra é aceito e soma no total", func(t *testing.T) {
 		sol, err := svcSolicitacao.CadastrarSolicitacaoReparo(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoReparoPayload{
 			Item: "Lâmpada queimada", Descricao: "Corredor",
 			FotoChave: "tenant/1/reparo.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
@@ -1519,9 +1519,18 @@ func TestEncerrar(t *testing.T) {
 		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
 			t.Fatalf("erro ao iniciar: %v", err)
 		}
-		_, err = svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
-		if !errors.Is(err, helper.ErrValidacao) {
-			t.Fatalf("erro = %v, esperado ErrValidacao", err)
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
+		if err != nil {
+			t.Fatalf("reparo com mão de obra devia ser aceito: %v", err)
+		}
+		if encerrada.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if encerrada.Custo.CustoHoraTecnico == nil || *encerrada.Custo.CustoHoraTecnico != 45 {
+			t.Errorf("custoHoraTecnico = %v, esperado 45", encerrada.Custo.CustoHoraTecnico)
+		}
+		if encerrada.Custo.CustoTotal != 165.5 {
+			t.Errorf("custoTotal = %v, esperado 165.5", encerrada.Custo.CustoTotal)
 		}
 	})
 
@@ -1835,13 +1844,17 @@ func TestCorrigirCusto(t *testing.T) {
 		}
 	})
 
-	t.Run("reparo com item de hora técnica é erro de validação", func(t *testing.T) {
+	// Migration 000017: reparo passou a cobrar mão de obra como qualquer OS.
+	t.Run("reparo com item de mão de obra é aceito", func(t *testing.T) {
 		os := osConcluidaReparo("PAT-CUSTO-4")
-		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
 			Itens: itensMaquinario(custoHoraOriginal, 50),
 		})
-		if !errors.Is(err, helper.ErrValidacao) {
-			t.Fatalf("erro = %v, esperado ErrValidacao", err)
+		if err != nil {
+			t.Fatalf("reparo com mão de obra devia ser aceito: %v", err)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != custoHoraOriginal {
+			t.Errorf("custoHoraTecnico = %v, esperado %v", corrigida.Custo.CustoHoraTecnico, custoHoraOriginal)
 		}
 	})
 

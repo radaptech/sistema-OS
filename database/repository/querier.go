@@ -120,9 +120,9 @@ type Querier interface {
 	// `false` aqui, ck_custo_nota_fiscal exige os dois campos NULL, que é
 	// exatamente o que este INSERT deixa.
 	//
-	// custo_hora_tecnico é quem o service decide se manda ou NULL
-	// (pgtype.Float8{Valid: false}): só existe em 'maquinario'
-	// (ck_custo_por_tipo), reparo e terceiros não cobram hora técnica. Os dois
+	// custo_hora_tecnico é a mão de obra somada das tarefas, gravada
+	// em todo tipo de OS desde a 000017 (antes, reparo e terceiros
+	// ficavam NULL por ck_custo_por_tipo). Os dois
 	// (e custo_manutencao, sempre obrigatório) já saem tipados
 	// `pgtype.Float8` pelos overrides de coluna em sqlc.yaml -- não
 	// `shopspring/decimal`, que sairia como string no JSON contra um front
@@ -636,6 +636,18 @@ type Querier interface {
 	// Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
 	// ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
 	ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHistoricoOsDaMaquinaParams) ([]ListarHistoricoOsDaMaquinaRow, error)
+	// Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+	// solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+	// transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+	// tabela própria.
+	//
+	// aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+	// (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+	// duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+	//
+	// LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+	// ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+	ListarHistoricoPreventiva(ctx context.Context, arg ListarHistoricoPreventivaParams) ([]ListarHistoricoPreventivaRow, error)
 	// Sem paginação nem filtro de busca de propósito: /lojas devolve array simples
 	// e o front pagina/filtra no cliente (front-end/CLAUDE.md item 12). Só
 	// /usuarios e /solicitacoes/minhas paginam no servidor.
@@ -1101,6 +1113,15 @@ type Querier interface {
 	// que lê o estado antes de chamar esta query (ObterOrdemServicoPorID) e
 	// repassa esse valor pra CriarPausa.status_anterior logo abaixo.
 	PausarOrdemServico(ctx context.Context, arg PausarOrdemServicoParams) (OrdemServico, error)
+	// Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+	// o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+	// ListarPreventivas, NULL é o administrador. Separado do histórico para a
+	// rota responder 404 a quem não alcança, em vez de uma lista vazia que
+	// pareceria "nunca rodou".
+	//
+	// Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+	// sendo histórico.
+	PreventivaNoEscopo(ctx context.Context, arg PreventivaNoEscopoParams) (int64, error)
 	// Espelho de DesativarMaquina. As preventivas não voltam junto porque nunca
 	// saíram: desativar a máquina não mexe nelas, e o job já pula máquina inativa
 	// (ListarPreventivasVencidas filtra m.ativa).

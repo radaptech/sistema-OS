@@ -37,10 +37,9 @@ type EncerramentoOrdemServico struct {
 // CustoOrdemServico espelha CustoOrdemServico do front.
 //
 // CustoHoraTecnico é ponteiro e sem `omitempty` (front: `number | null`, sem
-// `?`): ck_custo_por_tipo proíbe mão de obra em 'reparo', onde o serviço não
-// cobra hora. Em 'terceiros' (000016) a coluna é a mão de obra da EMPRESA, e
-// a tela troca o rótulo. `null` ali é a regra de negócio aparecendo, não dado
-// faltando (ou OS de terceiros anterior à 000016).
+// `?`): reparos anteriores à 000017 e OS de terceiros anteriores à 000016
+// foram gravados sem mão de obra, e `null` ali é esse histórico aparecendo.
+// Em 'terceiros' a coluna é a mão de obra da EMPRESA.
 //
 // TemNotaFiscal é a declaração do Técnico no encerramento: houve compra (peça,
 // material, fatura da empresa) ou foi só mão de obra? É ela que decide se a
@@ -155,10 +154,8 @@ type EncerramentoOrdemServicoPayload struct {
 // como campo vazio. Mesma armadilha que os custos escalares já evitavam.
 //
 // CustoHoraTecnico é ponteiro e opcional: uma tarefa pode ser só material (a
-// peça que o Técnico trocou sem cobrar hora). A regra "reparo não tem mão de
-// obra" NÃO cabe no binding: ela depende do tipo da OS, que só o service
-// conhece -- é ele quem responde 400 nomeando o campo, antes de
-// ck_custo_item_hora_tecnico estourar como 422 genérico.
+// peça que o Técnico trocou sem cobrar hora). Desde a 000017 todo tipo de OS
+// aceita mão de obra.
 type ItemCustoPayload struct {
 	Descricao        string   `json:"descricao" binding:"required"`
 	CustoManutencao  float64  `json:"custoManutencao" binding:"gte=0"`
@@ -373,8 +370,8 @@ func MontarOrdemServico(
 	}
 
 	// Mesmo critério, com custo_manutencao (NOT NULL em os_custo).
-	// custo_hora_tecnico não serviria: ele é nulo por regra em reparo e
-	// terceiros, mesmo com a linha existindo.
+	// custo_hora_tecnico não serviria: ele é nulo em reparos e OS de terceiros
+	// antigos (antes das 000016/000017), mesmo com a linha existindo.
 	if os.CustoManutencao.Valid {
 		horaTecnico := floatOuNil(os.CustoHoraTecnico)
 		// CustoTotal é somado aqui, e não no SELECT: uma expressão a mais na

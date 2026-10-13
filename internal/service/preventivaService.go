@@ -224,6 +224,42 @@ func (s *PreventivaService) ObterPreventiva(ctx context.Context, tenantID, id in
 	return model.MontarPreventiva(repository.ListarPreventivasRow(preventiva)), nil
 }
 
+// HistoricoPreventiva é GET /preventivas/:id/historico: os ciclos que a
+// preventiva já gerou, mais recente primeiro. Quem não alcança a máquina da
+// preventiva recebe ErrNaoEncontrado -- mesmo recorte de ListarPreventivas,
+// e 404 em vez de 403 para não confirmar que o id existe em outro setor.
+func (s *PreventivaService) HistoricoPreventiva(ctx context.Context, tenantID, usuarioID int64, perfil string, id int64) ([]model.CicloPreventiva, error) {
+
+	repo := repository.New(s.Pool)
+
+	if _, err := repo.PreventivaNoEscopo(ctx, repository.PreventivaNoEscopoParams{
+		ID:              id,
+		TenantID:        tenantID,
+		EscopoUsuarioID: escopoDe(usuarioID, perfil),
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, helper.ErrNaoEncontrado
+		}
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	ciclos, err := repo.ListarHistoricoPreventiva(ctx, repository.ListarHistoricoPreventivaParams{
+		TenantID:     tenantID,
+		PreventivaID: &id,
+	})
+	if err != nil {
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	// Não-nil: preventiva que ainda não venceu nenhuma vez devolve [], não null.
+	dto := make([]model.CicloPreventiva, 0, len(ciclos))
+	for _, c := range ciclos {
+		dto = append(dto, model.MontarCicloPreventiva(c))
+	}
+
+	return dto, nil
+}
+
 // AtualizarPreventiva é PUT /preventivas/:id. Sem maquina_id: mover a
 // preventiva de máquina deixaria as solicitações que ela já gerou apontando
 // para outra máquina (ver preventiva.sql). O front manda o campo; o service

@@ -214,6 +214,75 @@ func (q *Queries) DesativarPreventivasDaMaquina(ctx context.Context, arg Desativ
 	return err
 }
 
+const listarHistoricoPreventiva = `-- name: ListarHistoricoPreventiva :many
+SELECT
+    os.id,
+    os.status,
+    sol.criado_em AS aberta_em,
+    os.iniciada_em,
+    enc.data_fim,
+    t.nome AS tecnico_nome
+FROM solicitacao_os sol
+JOIN ordem_servico os ON os.tenant_id = sol.tenant_id AND os.solicitacao_id = sol.id
+JOIN usuario t ON t.tenant_id = os.tenant_id AND t.id = os.tecnico_id
+LEFT JOIN os_encerramento enc ON enc.ordem_servico_id = os.id
+WHERE sol.tenant_id = $1
+  AND sol.preventiva_id = $2
+ORDER BY sol.criado_em DESC, os.id DESC
+`
+
+type ListarHistoricoPreventivaParams struct {
+	TenantID     int64
+	PreventivaID *int64
+}
+
+type ListarHistoricoPreventivaRow struct {
+	ID          int64
+	Status      StatusOs
+	AbertaEm    pgtype.Timestamptz
+	IniciadaEm  pgtype.Timestamptz
+	DataFim     pgtype.Timestamptz
+	TecnicoNome string
+}
+
+// Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+// solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+// transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+// tabela própria.
+//
+// aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+// (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+// duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+//
+// LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+// ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+func (q *Queries) ListarHistoricoPreventiva(ctx context.Context, arg ListarHistoricoPreventivaParams) ([]ListarHistoricoPreventivaRow, error) {
+	rows, err := q.db.Query(ctx, listarHistoricoPreventiva, arg.TenantID, arg.PreventivaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarHistoricoPreventivaRow
+	for rows.Next() {
+		var i ListarHistoricoPreventivaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.AbertaEm,
+			&i.IniciadaEm,
+			&i.DataFim,
+			&i.TecnicoNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listarPreventivas = `-- name: ListarPreventivas :many
 SELECT
     p.id, p.tenant_id, p.maquina_id, p.descricao, p.intervalo_dias, p.proxima_data, p.ativa, p.criado_em, p.tecnico_id,
@@ -559,4 +628,45 @@ func (q *Queries) ObterPreventivaVencidaParaAbertura(ctx context.Context, arg Ob
 		&i.SetorID,
 	)
 	return i, err
+}
+
+const preventivaNoEscopo = `-- name: PreventivaNoEscopo :one
+SELECT p.id
+FROM preventiva p
+JOIN maquina m ON m.tenant_id = p.tenant_id AND m.id = p.maquina_id
+JOIN setor   s ON s.tenant_id = m.tenant_id AND s.id = m.setor_id
+WHERE p.id = $1
+  AND p.tenant_id = $2
+  AND (
+    $3::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $3
+        AND ue.loja_id = s.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+`
+
+type PreventivaNoEscopoParams struct {
+	ID              int64
+	TenantID        int64
+	EscopoUsuarioID *int64
+}
+
+// Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+// o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+// ListarPreventivas, NULL é o administrador. Separado do histórico para a
+// rota responder 404 a quem não alcança, em vez de uma lista vazia que
+// pareceria "nunca rodou".
+//
+// Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+// sendo histórico.
+func (q *Queries) PreventivaNoEscopo(ctx context.Context, arg PreventivaNoEscopoParams) (int64, error) {
+	row := q.db.QueryRow(ctx, preventivaNoEscopo, arg.ID, arg.TenantID, arg.EscopoUsuarioID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }

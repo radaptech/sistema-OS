@@ -81,3 +81,30 @@ func MontarPreventiva(p repository.ListarPreventivasRow) Preventiva {
 		Vencida:       p.Vencida,
 	}
 }
+
+// CicloPreventiva é um item de GET /preventivas/:id/historico -- espelha
+// CicloPreventiva no front. Cada ciclo é a OS que o job abriu quando a
+// preventiva venceu; Id é o da OS.
+//
+// "Feita" é Status == "Concluída", e o front deriva isso do status em vez de
+// receber um bool: o status já diz, e um segundo campo poderia discordar dele.
+// DataFim só existe em OS encerrada; DataInicio, só depois de o Técnico iniciar.
+type CicloPreventiva struct {
+	Id           int64          `json:"id"`
+	Status       string         `json:"status"`
+	DataAbertura *config.DataBr `json:"dataAbertura"`
+	DataInicio   *config.DataBr `json:"dataInicio,omitempty"`
+	DataFim      *config.DataBr `json:"dataFim,omitempty"`
+	TecnicoNome  string         `json:"tecnicoNome"`
+}
+
+func MontarCicloPreventiva(c repository.ListarHistoricoPreventivaRow) CicloPreventiva {
+	return CicloPreventiva{
+		Id:           c.ID,
+		Status:       string(c.Status),
+		DataAbertura: dataBrOuNil(c.AbertaEm),
+		DataInicio:   dataBrOuNil(c.IniciadaEm),
+		DataFim:      dataBrOuNil(c.DataFim),
+		TecnicoNome:  c.TecnicoNome,
+	}
+}

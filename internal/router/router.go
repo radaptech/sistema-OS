@@ -166,6 +166,8 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// máquina.
 	preventivas.GET("", c.Prevent.Listar())
 	preventivas.GET("/:id", middleware.Permitir("administrador"), c.Prevent.Obter())
+	// Sem Permitir: o escopo é o recorte (404 fora dele), como no GET da lista.
+	preventivas.GET("/:id/historico", c.Prevent.Historico())
 	// Este POST é só a preventiva avulsa (ModalManutencaoPreventiva). As
 	// preventivas do formulário de máquina não passam por aqui: viajam dentro
 	// de POST/PUT /maquinas e gravam na mesma transação da máquina.

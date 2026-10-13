@@ -5,7 +5,6 @@ import { CheckCircle2, XCircle } from 'lucide-react'
 import { Alternador } from '../../../componentes/Alternador'
 import { Botao } from '../../../componentes/Botao'
 import { CampoItensCusto } from '../../../componentes/CampoItensCusto'
-import { cobraMaoDeObra } from '../../../utilitarios/rotulosCustoOS'
 import { CampoNotasFiscais } from '../../../componentes/CampoNotasFiscais'
 import { CampoTextoArea } from '../../../componentes/CampoTextoArea'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
@@ -13,7 +12,7 @@ import { formatarDataHora } from '../../../utilitarios/formatarData'
 import { formatarHoras } from '../../../utilitarios/formatarHoras'
 import type { OrdemServico } from '../../../tipos/ordemServico'
 import {
-  criarEsquemaLancarCustoManutencao,
+  esquemaLancarCustoManutencao,
   type DadosLancarCustoManutencao,
 } from '../esquemaLancarCustoManutencao'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
@@ -32,8 +31,6 @@ export function ModalLancarCustoManutencao({
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar)
 
   const ehTerceiros = ordemServico.tipo === 'terceiros'
-  // Mão de obra em maquinário (do Técnico) e em terceiros (da empresa); Pequenos Reparos não.
-  const mostrarCustoHoraTecnico = cobraMaoDeObra(ordemServico.tipo)
 
   const {
     register,
@@ -41,7 +38,7 @@ export function ModalLancarCustoManutencao({
     handleSubmit,
     formState: { errors },
   } = useForm<DadosLancarCustoManutencao>({
-    resolver: zodResolver(criarEsquemaLancarCustoManutencao(mostrarCustoHoraTecnico)),
+    resolver: zodResolver(esquemaLancarCustoManutencao),
     defaultValues: {
       // Pré-preenchido com o que o Técnico lançou: o Administrador CONFERE contra a nota,
       // então ele precisa ver a discriminação dele, não uma tela em branco.
@@ -53,7 +50,8 @@ export function ModalLancarCustoManutencao({
         ? ordemServico.custo.itens.map((item) => ({
             descricao: item.descricao,
             custoManutencao: item.custoManutencao,
-            // null no contrato (a tarefa não cobrou hora, ou o tipo da OS proíbe) vira
+            // null no contrato (a tarefa não cobrou mão de obra, ou é um reparo anterior à
+            // migration 000017, quando o tipo proibia) vira
             // undefined no formulário: o campo tem que nascer VAZIO, não com zero.
             custoHoraTecnico: item.custoHoraTecnico ?? undefined,
           }))
@@ -149,12 +147,6 @@ export function ModalLancarCustoManutencao({
               </span>{' '}
               — confira o Valor Peças e o Valor Mão de Obra contra a nota fiscal da
               empresa.
-            </p>
-          )}
-
-          {ordemServico.tipo === 'reparo' && (
-            <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
-              Pequenos Reparos não têm Custo Hora Técnico — só o Custo de Manutenção.
             </p>
           )}
 

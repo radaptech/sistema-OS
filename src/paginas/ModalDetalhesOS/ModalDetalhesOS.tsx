@@ -31,8 +31,6 @@ export function ModalDetalhesOS({
   // Nome da loja, do técnico e da empresa vêm resolvidos na própria OS; horas e custo
   // total vêm calculados do servidor.
   const custo = ordemServico.custo
-  // Em terceiros os dois valores são peças e mão de obra da empresa (rotulosCustoOS).
-  const rotulos = rotulosCustoOS(ordemServico.tipo)
   // Sem o marcador "Afeta Produção" a máquina seguiu operando: não há tempo de parada a
   // reportar, e o servidor nem devolve `horasParada`.
   const horasParada = ordemServico.afetaProducao
@@ -210,7 +208,7 @@ export function ModalDetalhesOS({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">{rotulos.custoMaoDeObra}</p>
+                <p className="text-xs text-slate-400">{rotulosCustoOS.custoMaoDeObra}</p>
                 <p className="font-mono font-semibold text-slate-700">
                   {custo?.custoHoraTecnico != null
                     ? formatarMoeda(custo.custoHoraTecnico)
@@ -218,7 +216,7 @@ export function ModalDetalhesOS({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">{rotulos.custoMaterial}</p>
+                <p className="text-xs text-slate-400">{rotulosCustoOS.custoMaterial}</p>
                 <p className="font-mono font-semibold text-slate-700">
                   {custo ? formatarMoeda(custo.custoManutencao) : '—'}
                 </p>

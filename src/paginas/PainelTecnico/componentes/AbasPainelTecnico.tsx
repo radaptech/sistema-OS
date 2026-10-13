@@ -1,4 +1,4 @@
-export type AbaPainelTecnico = 'em-aberto' | 'pendentes-pausadas' | 'concluidas'
+import type { AbaPainelTecnico } from '../abasPainelTecnico'
 
 const ABAS: { chave: AbaPainelTecnico; rotulo: string }[] = [
   { chave: 'em-aberto', rotulo: 'OS em Aberto' },

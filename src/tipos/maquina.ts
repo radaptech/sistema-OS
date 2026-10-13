@@ -1,3 +1,5 @@
+import type { StatusExecucaoOS } from './ordemServico'
+
 export const niveisCriticidade = ['Baixa', 'Média', 'Alta'] as const
 
 export type NivelCriticidade = (typeof niveisCriticidade)[number]
@@ -56,6 +58,19 @@ export interface PreventivaListada extends PreventivaManutencao {
   tecnicoNome?: string
   // Calculado no servidor: a preventiva venceu e já gerou solicitação automática.
   vencida?: boolean
+}
+
+// Um ciclo de GET /preventivas/:id/historico: a OS que o servidor abriu quando a
+// preventiva venceu (`id` é o da OS). "Feito" é `status === 'Concluída'` — derivado na
+// tela, não um booleano a mais que poderia discordar do status. `dataAbertura` é quando
+// o ciclo venceu; `dataFim` só existe na OS encerrada.
+export interface CicloPreventiva {
+  id: number
+  status: StatusExecucaoOS
+  dataAbertura: string
+  dataInicio?: string
+  dataFim?: string
+  tecnicoNome: string
 }
 
 // A loja não é enviada: ela é derivada do setor no servidor, evitando um par

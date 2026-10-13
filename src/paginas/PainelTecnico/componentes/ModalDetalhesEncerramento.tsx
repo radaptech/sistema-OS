@@ -20,7 +20,6 @@ export function ModalDetalhesEncerramento({
   aoFechar,
 }: ModalDetalhesEncerramentoProps) {
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar)
-  const rotulos = rotulosCustoOS(ordemServico.tipo)
 
   // Só a OS marcada como "Afeta Produção" acumula tempo de máquina parada; nas demais a
   // máquina seguiu operando durante o atendimento. Conta desde a solicitação, não desde a
@@ -111,10 +110,10 @@ export function ModalDetalhesEncerramento({
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                {rotulos.custoMaoDeObra}
+                {rotulosCustoOS.custoMaoDeObra}
               </span>
               <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
-                {rotulos.custoMaterial}
+                {rotulosCustoOS.custoMaterial}
               </span>
               <p className="font-mono text-slate-700">
                 {ordemServico.custo?.custoHoraTecnico != null

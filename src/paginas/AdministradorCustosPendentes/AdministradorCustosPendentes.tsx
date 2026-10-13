@@ -15,7 +15,7 @@ import { obterNomeAlvo } from '../../utilitarios/alvoOS'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import { formatarMoeda } from '../../utilitarios/formatarMoeda'
-import { cobraMaoDeObra, rotulosCustoOS } from '../../utilitarios/rotulosCustoOS'
+import { rotulosCustoOS } from '../../utilitarios/rotulosCustoOS'
 import type { OrdemServico, TipoOS } from '../../tipos/ordemServico'
 import { ModalLancarCustoManutencao } from './componentes/ModalLancarCustoManutencao'
 import type { DadosLancarCustoManutencao } from './esquemaLancarCustoManutencao'
@@ -80,11 +80,11 @@ export function AdministradorCustosPendentes() {
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-4 py-6 sm:px-8 lg:max-w-6xl 2xl:max-w-[88rem]">
         <p className="text-sm text-slate-500">
-          Toda OS chega com Custo Hora do Técnico e Custo de Manutenção
-          preenchidos pelo próprio Técnico no encerramento — edite aqui só se
-          precisar corrigir algo. Confira o Custo de Manutenção contra a nota
-          fiscal que o embasa (a fatura da empresa terceirizada, a nota da peça
-          ou do material) e registre o número dela aqui.
+          Toda OS chega com Valor Peças e Valor Mão de Obra preenchidos pelo
+          próprio Técnico no encerramento — edite aqui só se precisar corrigir
+          algo. Confira os valores contra a nota fiscal que o embasa (a fatura
+          da empresa terceirizada, a nota da peça ou do material) e registre o
+          número dela aqui.
         </p>
 
         <FiltroRevisaoCusto
@@ -144,91 +144,92 @@ export function AdministradorCustosPendentes() {
             </div>
           )}
 
-          {ordensConcluidas.map((ordem, indice) => {
-            const mostrarCustoHoraTecnico = cobraMaoDeObra(ordem.tipo)
-            const rotulos = rotulosCustoOS(ordem.tipo)
-
-            return (
-              <div
-                key={ordem.id}
-                style={atrasoEntrada(indice)}
-                className="animate-surgir shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200 sm:flex-row sm:items-start sm:justify-between"
-              >
-                <div className="min-w-0 flex-1">
-                  {/* Uma linha só: sem flex-wrap o badge nunca cai para a linha de baixo,
+          {ordensConcluidas.map((ordem, indice) => (
+            <div
+              key={ordem.id}
+              style={atrasoEntrada(indice)}
+              className="animate-surgir shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="min-w-0 flex-1">
+                {/* Uma linha só: sem flex-wrap o badge nunca cai para a linha de baixo,
                       então todo card tem a mesma altura de cabeçalho e a coluna alinha. */}
-                  <div className="flex items-center gap-2">
-                    <span className="bg-marca-600 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white">
-                      #{ordem.id}
+                <div className="flex items-center gap-2">
+                  <span className="bg-marca-600 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white">
+                    #{ordem.id}
+                  </span>
+                  <span className="truncate font-semibold text-slate-800">
+                    {obterNomeAlvo(ordem)}
+                  </span>
+                  {ordem.maquinaCodigo && (
+                    <span className="shrink-0 font-mono text-sm text-slate-400">
+                      · {ordem.maquinaCodigo}
                     </span>
-                    <span className="truncate font-semibold text-slate-800">
-                      {obterNomeAlvo(ordem)}
-                    </span>
-                    {ordem.maquinaCodigo && (
-                      <span className="shrink-0 font-mono text-sm text-slate-400">
-                        · {ordem.maquinaCodigo}
-                      </span>
-                    )}
-                    <BadgeTipoOS tipo={ordem.tipo} />
-                  </div>
-                  <p className="mt-1 truncate text-xs text-slate-400">
-                    {lojas.find((loja) => loja.id === ordem.lojaId)?.nome ??
-                      ordem.lojaId}{' '}
-                    · {ordem.setorNome} · Encerrada em{' '}
-                    {ordem.dataFim ? formatarDataHora(ordem.dataFim) : '—'}
-                  </p>
+                  )}
+                  <BadgeTipoOS tipo={ordem.tipo} />
+                </div>
+                <p className="mt-1 truncate text-xs text-slate-400">
+                  {lojas.find((loja) => loja.id === ordem.lojaId)?.nome ??
+                    ordem.lojaId}{' '}
+                  · {ordem.setorNome} · Encerrada em{' '}
+                  {ordem.dataFim ? formatarDataHora(ordem.dataFim) : '—'}
+                </p>
 
-                  <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
-                    {mostrarCustoHoraTecnico && (
-                      <p className="text-slate-400">
-                        {rotulos.custoMaoDeObra}{' '}
-                        <span className="font-mono font-semibold text-slate-600">
-                          {ordem.custo?.custoHoraTecnico != null
-                            ? formatarMoeda(ordem.custo.custoHoraTecnico)
-                            : '—'}
-                        </span>
-                      </p>
-                    )}
-                    <p className="text-slate-400">
-                      {rotulos.custoMaterial}{' '}
-                      <span className="font-mono font-semibold text-slate-600">
-                        {ordem.custo?.custoManutencao !== undefined
-                          ? formatarMoeda(ordem.custo.custoManutencao)
-                          : '—'}
-                      </span>
-                    </p>
-                  </div>
-                  {/* A linha só existe quando o Técnico declarou nota no encerramento —
+                <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+                  <p className="text-slate-400">
+                    {rotulosCustoOS.custoMaoDeObra}{' '}
+                    <span className="font-mono font-semibold text-slate-600">
+                      {ordem.custo?.custoHoraTecnico != null
+                        ? formatarMoeda(ordem.custo.custoHoraTecnico)
+                        : '—'}
+                    </span>
+                  </p>
+                  <p className="text-slate-400">
+                    {rotulosCustoOS.custoMaterial}{' '}
+                    <span className="font-mono font-semibold text-slate-600">
+                      {ordem.custo?.custoManutencao !== undefined
+                        ? formatarMoeda(ordem.custo.custoManutencao)
+                        : '—'}
+                    </span>
+                  </p>
+                </div>
+                {/* A linha só existe quando o Técnico declarou nota no encerramento —
                       OS de mão de obra pura não tem o que informar. Com a declaração, o
                       âmbar deixa de ser alarme falso e vira pendência de verdade: alguém
                       disse que há um documento e ele ainda não foi registrado. */}
-                  {ordem.custo?.temNotaFiscal && (
-                    <p className="mt-1 text-xs text-slate-400">
-                      {ordem.custo.notasFiscais.length > 1 ? 'Notas Fiscais' : 'Nota Fiscal'}{' '}
-                      {ordem.custo.notasFiscais.length > 0 ? (
-                        <span className="font-mono font-semibold text-slate-600">
-                          {ordem.custo.notasFiscais
-                            .map((nota) => (nota.serie ? `${nota.numero} / série ${nota.serie}` : nota.numero))
-                            .join(' · ')}
-                        </span>
-                      ) : (
-                        <span className="font-semibold text-amber-600">ainda não informada</span>
-                      )}
-                    </p>
-                  )}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setOrdemParaLancarCusto(ordem)}
-                  className="bg-marca-600 font-display shadow-card hover:shadow-card-hover focus:ring-marca-500 flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 focus:ring-2 focus:outline-none active:scale-[0.98]"
-                >
-                  <CircleDollarSign size={14} />
-                  Editar Custos
-                </button>
+                {ordem.custo?.temNotaFiscal && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    {ordem.custo.notasFiscais.length > 1
+                      ? 'Notas Fiscais'
+                      : 'Nota Fiscal'}{' '}
+                    {ordem.custo.notasFiscais.length > 0 ? (
+                      <span className="font-mono font-semibold text-slate-600">
+                        {ordem.custo.notasFiscais
+                          .map((nota) =>
+                            nota.serie
+                              ? `${nota.numero} / série ${nota.serie}`
+                              : nota.numero,
+                          )
+                          .join(' · ')}
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-amber-600">
+                        ainda não informada
+                      </span>
+                    )}
+                  </p>
+                )}
               </div>
-            )
-          })}
+
+              <button
+                type="button"
+                onClick={() => setOrdemParaLancarCusto(ordem)}
+                className="bg-marca-600 font-display shadow-card hover:shadow-card-hover focus:ring-marca-500 hover:bg-marca-800 flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 focus:ring-2 focus:outline-none active:scale-[0.98]"
+              >
+                <CircleDollarSign size={14} />
+                Editar Custos
+              </button>
+            </div>
+          ))}
         </div>
       </main>
 

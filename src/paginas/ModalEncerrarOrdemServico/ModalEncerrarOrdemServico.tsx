@@ -8,13 +8,12 @@ import { CampoItensCusto } from '../../componentes/CampoItensCusto'
 import { CampoSelecao } from '../../componentes/CampoSelecao'
 import { CampoTextoArea } from '../../componentes/CampoTextoArea'
 import { calcularHoras } from '../../utilitarios/calcularHoras'
-import { cobraMaoDeObra } from '../../utilitarios/rotulosCustoOS'
 import { formatarHoras } from '../../utilitarios/formatarHoras'
 import { agoraParaBackend } from '../../utilitarios/dataBackend'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import { tiposDefeito, type OrdemServico } from '../../tipos/ordemServico'
 import {
-  criarEsquemaEncerrarOrdemServico,
+  esquemaEncerrarOrdemServico,
   type DadosEncerrarOrdemServico,
 } from './esquemaEncerrarOrdemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
@@ -40,9 +39,6 @@ export function ModalEncerrarOrdemServico({
 
   const dataInicio = ordemServico.dataInicio ?? ordemServico.dataAbertura
   const agora = agoraParaBackend()
-  // Mão de obra em maquinário (do Técnico) e em terceiros (da empresa); só 'reparo' não
-  // cobra — o serviço é pequeno demais para justificar mão de obra à parte.
-  const exigirCustoHoraTecnico = cobraMaoDeObra(ordemServico.tipo)
 
   // Prévia local, só para o Técnico conferir antes de encerrar. Os valores definitivos
   // são calculados pelo servidor a partir do histórico de pausas e voltam na resposta.
@@ -60,7 +56,7 @@ export function ModalEncerrarOrdemServico({
     handleSubmit,
     formState: { errors },
   } = useForm<DadosEncerrarOrdemServico>({
-    resolver: zodResolver(criarEsquemaEncerrarOrdemServico(exigirCustoHoraTecnico)),
+    resolver: zodResolver(esquemaEncerrarOrdemServico),
     defaultValues: {
       tipoDefeito: undefined,
       defeitoConstatado: '',
@@ -159,12 +155,6 @@ export function ModalEncerrarOrdemServico({
               Serviço executado por {ordemServico.empresaTerceirizadaNome ?? 'empresa terceirizada'}:
               lance o Valor Peças e o Valor Mão de Obra cobrados pela empresa, separados como na
               nota fiscal dela.
-            </p>
-          )}
-
-          {ordemServico.tipo === 'reparo' && (
-            <p className="rounded-lg bg-slate-100 px-3 py-2.5 text-xs text-slate-600">
-              Pequenos Reparos não têm Custo Hora Técnico — informe apenas o Custo de Manutenção.
             </p>
           )}
 

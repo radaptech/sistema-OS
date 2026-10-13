@@ -1,19 +1,16 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Inbox } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
 import { FiltroTipoOS } from '../../componentes/FiltroTipoOS'
-import { Paginacao } from '../../componentes/Paginacao'
-import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
 import { useTodasSolicitacoes } from '../../hooks/useTodasSolicitacoes'
 import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
 import { usePreventivas } from '../../hooks/usePreventivas'
 import { useLojas } from '../../hooks/useLojas'
-import { useSetores } from '../../hooks/useSetores'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
-import { agruparPorEscopoGestor } from '../../utilitarios/acessoGestor'
 import { dataEstaNoIntervalo } from '../../utilitarios/dataEstaNoIntervalo'
 import { obterNomeAlvo } from '../../utilitarios/alvoOS'
 import type {
@@ -25,12 +22,9 @@ import { ModalAbrirOrdemServico } from '../ModalAbrirOrdemServico/ModalAbrirOrde
 import type { DadosAbrirOrdemServico } from '../ModalAbrirOrdemServico/esquemaAbrirOrdemServico'
 import { ModalDetalhesOS } from '../ModalDetalhesOS/ModalDetalhesOS'
 import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetalhesSolicitacao'
-import {
-  AbasPainelGestor,
-  type AbaPainelGestor,
-} from './componentes/AbasPainelGestor'
+import { AbasPainelGestor } from './componentes/AbasPainelGestor'
+import { ABAS_PAINEL_GESTOR, type AbaPainelGestor } from './abasPainelGestor'
 import { AcoesRapidas } from './componentes/AcoesRapidas'
-import { BlocoLoja } from './componentes/BlocoLoja'
 import { CardSolicitacaoGestor } from './componentes/CardSolicitacaoGestor'
 import {
   FiltroStatusSolicitacao,
@@ -38,8 +32,9 @@ import {
 } from './componentes/FiltroStatusSolicitacao'
 import { CardOSEmExecucao } from './componentes/CardOSEmExecucao'
 import { CardOSFinalizada } from './componentes/CardOSFinalizada'
-import { CardPreventiva } from './componentes/CardPreventiva'
 import { ModalRejeitarSolicitacao } from './componentes/ModalRejeitarSolicitacao'
+import { SeletorPreventivas } from './componentes/SeletorPreventivas'
+import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
 import type { DadosRejeitarSolicitacao } from './esquemaRejeitarSolicitacao'
 import { ModalFiltrosOS } from './componentes/ModalFiltrosOS'
 import {
@@ -47,7 +42,17 @@ import {
   type FiltrosAvancadosOS,
 } from './filtrosOS'
 
+// Só a lista de um setor pagina: OS Finalizadas é histórico e cresce sem parar.
 const TAMANHO_PAGINA_FINALIZADAS = 12
+
+function rotuloOS(quantidade: number) {
+  return quantidade === 1 ? '1 OS' : `${quantidade} OS`
+}
+
+// Selo vermelho dos cards de loja/setor: máquina parada é o que o Gestor ataca primeiro.
+function rotuloAfetaProducao(quantidade: number) {
+  return quantidade === 1 ? '1 afeta produção' : `${quantidade} afetam produção`
+}
 
 interface SelecaoOS {
   ordem: OrdemServico
@@ -59,17 +64,24 @@ export function PainelGestor() {
   const escoposGestor =
     useEstadoAutenticacao((estado) => estado.escoposGestor) ?? []
   const { data: lojas = [] } = useLojas()
-  // Resolve o nome do setor no cabeçalho de cada subgrupo, inclusive quando ele está vazio.
-  const { data: setores = [] } = useSetores()
-  const [abaSelecionada, setAbaSelecionada] =
-    useState<AbaPainelGestor>('solicitacoes')
+  // A aba mora na URL (?aba=), junto com os níveis de loja/setor das abas navegáveis
+  // (utilitarios/navegacaoNiveis.ts): o F5 e o voltar do navegador reabrem onde o Gestor estava, e
+  // duas abas usando `loja`/`setor` não herdam o caminho uma da outra.
+  const [parametros, setParametros] = useSearchParams()
+  const abaDaUrl = parametros.get('aba')
+  const abaSelecionada: AbaPainelGestor =
+    ABAS_PAINEL_GESTOR.find((aba) => aba === abaDaUrl) ?? 'solicitacoes'
+
+  // Trocar de aba começa do topo dela: os níveis da aba anterior não valem aqui.
+  function aoSelecionarAba(aba: AbaPainelGestor) {
+    setParametros({ aba })
+  }
   const [filtroTipo, setFiltroTipo] = useState<TipoOS | ''>('')
   const [filtroStatus, setFiltroStatus] = useState<StatusFilaGestor>('Pendente')
   const [filtrosAvancados, setFiltrosAvancados] = useState<FiltrosAvancadosOS>(
     FILTROS_AVANCADOS_OS_VAZIOS,
   )
   const [modalFiltrosAberto, setModalFiltrosAberto] = useState(false)
-  const [paginaFinalizadas, setPaginaFinalizadas] = useState(1)
   const [solicitacaoParaAbrirOS, setSolicitacaoParaAbrirOS] =
     useState<SolicitacaoOS | null>(null)
   const [solicitacaoParaRejeitar, setSolicitacaoParaRejeitar] =
@@ -232,64 +244,6 @@ export function PainelGestor() {
   const quantidadeFiltrosAtivos =
     Object.values(filtrosAvancados).filter(Boolean).length
 
-  const gruposSolicitacoesDaFila = agruparPorEscopoGestor(
-    solicitacoesDaFila,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-  const gruposOSEmExecucao = agruparPorEscopoGestor(
-    ordensEmExecucao,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-  // Paginação client-side das finalizadas: a lista cresce sem parar (é histórico), e as
-  // demais abas não precisam porque esvaziam conforme o fluxo anda. Volta para a página 1
-  // quando os filtros mudam -- ajuste durante a renderização, mesmo padrão das listagens
-  // do Administrador.
-  const chaveFiltrosFinalizadas = `${filtroTipo}|${JSON.stringify(filtrosAvancados)}`
-  const [chaveFiltrosFinalizadasAnterior, setChaveFiltrosFinalizadasAnterior] =
-    useState(chaveFiltrosFinalizadas)
-  if (chaveFiltrosFinalizadas !== chaveFiltrosFinalizadasAnterior) {
-    setChaveFiltrosFinalizadasAnterior(chaveFiltrosFinalizadas)
-    setPaginaFinalizadas(1)
-  }
-  const totalPaginasFinalizadas = Math.max(
-    1,
-    Math.ceil(ordensFinalizadas.length / TAMANHO_PAGINA_FINALIZADAS),
-  )
-  const paginaAtualFinalizadas = Math.min(
-    paginaFinalizadas,
-    totalPaginasFinalizadas,
-  )
-  const ordensFinalizadasDaPagina = ordensFinalizadas.slice(
-    (paginaAtualFinalizadas - 1) * TAMANHO_PAGINA_FINALIZADAS,
-    paginaAtualFinalizadas * TAMANHO_PAGINA_FINALIZADAS,
-  )
-  // Agrupa só a página atual. Com alguma OS no total, esconde loja/setor sem item NESTA
-  // página: senão a página 2 diria "Nenhuma OS finalizada" para uma loja que tem OS na 1.
-  const gruposOSFinalizadas = agruparPorEscopoGestor(
-    ordensFinalizadasDaPagina,
-    escoposGestor,
-    lojas,
-    setores,
-  ).flatMap((grupo) => {
-    if (ordensFinalizadas.length === 0) {
-      return [grupo]
-    }
-    const subgrupos = grupo.subgrupos.filter(
-      (subgrupo) => subgrupo.itens.length > 0,
-    )
-    return subgrupos.length > 0 ? [{ ...grupo, subgrupos }] : []
-  })
-  const gruposPreventivas = agruparPorEscopoGestor(
-    preventivas,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-
   return (
     <div className="flex min-h-svh flex-col bg-slate-50">
       <CabecalhoTopo />
@@ -312,7 +266,7 @@ export function PainelGestor() {
 
         <AbasPainelGestor
           abaSelecionada={abaSelecionada}
-          aoSelecionarAba={setAbaSelecionada}
+          aoSelecionarAba={aoSelecionarAba}
         />
 
         {abaSelecionada !== 'manutencao-preventiva' && (
@@ -339,129 +293,83 @@ export function PainelGestor() {
         )}
 
         {abaSelecionada === 'solicitacoes' && (
-          <div className="flex flex-col gap-6">
-            {carregandoSolicitacoes && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
+          <NavegacaoLojaSetor
+            itens={solicitacoesDaFila}
+            carregando={carregandoSolicitacoes}
+            mensagemVazio={
+              filtroStatus === 'Pendente'
+                ? 'Nenhuma solicitação pendente.'
+                : 'Nenhuma solicitação rejeitada.'
+            }
+            rotuloNavegacao="Navegação das solicitações"
+            rotuloQuantidade={(n) =>
+              n === 1 ? '1 solicitação' : `${n} solicitações`
+            }
+            ehDestaque={(solicitacao) =>
+              solicitacao.impactos.includes('Afeta Produção')
+            }
+            rotuloDestaques={rotuloAfetaProducao}
+            renderItem={(solicitacao) => (
+              <CardSolicitacaoGestor
+                solicitacao={solicitacao}
+                // Rejeitada é histórico: sobra só o botão de visualizar.
+                aoAbrirOS={
+                  filtroStatus === 'Pendente'
+                    ? setSolicitacaoParaAbrirOS
+                    : undefined
+                }
+                aoRejeitar={
+                  filtroStatus === 'Pendente'
+                    ? setSolicitacaoParaRejeitar
+                    : undefined
+                }
+                aoVisualizar={setSolicitacaoParaVisualizar}
+              />
             )}
-
-            {!carregandoSolicitacoes &&
-              gruposSolicitacoesDaFila.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio={
-                    filtroStatus === 'Pendente'
-                      ? 'Nenhuma solicitação pendente.'
-                      : 'Nenhuma solicitação rejeitada.'
-                  }
-                  obterChave={(solicitacao) => solicitacao.id}
-                  renderItem={(solicitacao) => (
-                    <CardSolicitacaoGestor
-                      solicitacao={solicitacao}
-                      // Rejeitada é histórico: sobra só o botão de visualizar.
-                      aoAbrirOS={
-                        filtroStatus === 'Pendente'
-                          ? setSolicitacaoParaAbrirOS
-                          : undefined
-                      }
-                      aoRejeitar={
-                        filtroStatus === 'Pendente'
-                          ? setSolicitacaoParaRejeitar
-                          : undefined
-                      }
-                      aoVisualizar={setSolicitacaoParaVisualizar}
-                    />
-                  )}
-                />
-              ))}
-          </div>
+          />
         )}
 
         {abaSelecionada === 'os-em-andamento' && (
-          <div className="flex flex-col gap-6">
-            {carregandoOrdensServico && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
+          <NavegacaoLojaSetor
+            itens={ordensEmExecucao}
+            carregando={carregandoOrdensServico}
+            mensagemVazio="Nenhuma OS em aberto, em andamento ou pausada no momento."
+            rotuloNavegacao="Navegação das OS em andamento"
+            rotuloQuantidade={rotuloOS}
+            ehDestaque={(ordemServico) => ordemServico.afetaProducao}
+            rotuloDestaques={rotuloAfetaProducao}
+            renderItem={(ordemServico) => (
+              <CardOSEmExecucao ordemServico={ordemServico} />
             )}
-
-            {!carregandoOrdensServico &&
-              gruposOSEmExecucao.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma OS em aberto, em andamento ou pausada no momento."
-                  obterChave={(ordemServico) => ordemServico.id}
-                  renderItem={(ordemServico) => (
-                    <CardOSEmExecucao ordemServico={ordemServico} />
-                  )}
-                />
-              ))}
-          </div>
+          />
         )}
 
         {abaSelecionada === 'os-finalizadas' && (
-          <div className="flex flex-col gap-6">
-            {carregandoOrdensServico && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
-            )}
-
-            {!carregandoOrdensServico &&
-              gruposOSFinalizadas.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma OS finalizada ainda — a OS só aparece aqui depois que o Técnico encerra o atendimento e o Administrador lança o custo de manutenção."
-                  obterChave={(ordemServico) => ordemServico.id}
-                  renderItem={(ordemServico) => (
-                    <CardOSFinalizada
-                      ordemServico={ordemServico}
-                      aoVisualizar={(ordem) =>
-                        setSelecaoOS({ ordem, imprimir: false })
-                      }
-                      aoImprimir={(ordem) =>
-                        setSelecaoOS({ ordem, imprimir: true })
-                      }
-                    />
-                  )}
-                />
-              ))}
-
-            {!carregandoOrdensServico && totalPaginasFinalizadas > 1 && (
-              <Paginacao
-                pagina={paginaAtualFinalizadas}
-                totalPaginas={totalPaginasFinalizadas}
-                aoMudarPagina={setPaginaFinalizadas}
+          <NavegacaoLojaSetor
+            itens={ordensFinalizadas}
+            carregando={carregandoOrdensServico}
+            mensagemVazio="Nenhuma OS finalizada ainda — a OS só aparece aqui depois que o Técnico encerra o atendimento e o Administrador lança o custo de manutenção."
+            rotuloNavegacao="Navegação das OS finalizadas"
+            rotuloQuantidade={rotuloOS}
+            tamanhoPagina={TAMANHO_PAGINA_FINALIZADAS}
+            renderItem={(ordemServico) => (
+              <CardOSFinalizada
+                ordemServico={ordemServico}
+                aoVisualizar={(ordem) =>
+                  setSelecaoOS({ ordem, imprimir: false })
+                }
+                aoImprimir={(ordem) => setSelecaoOS({ ordem, imprimir: true })}
               />
             )}
-          </div>
+          />
         )}
 
         {abaSelecionada === 'manutencao-preventiva' && (
-          <div className="flex flex-col gap-6">
-            {carregandoPreventivas && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
-            )}
-
-            {!carregandoPreventivas &&
-              gruposPreventivas.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma preventiva cadastrada."
-                  obterChave={(preventiva) => preventiva.id}
-                  renderItem={(preventiva) => (
-                    <CardPreventiva preventiva={preventiva} />
-                  )}
-                />
-              ))}
-          </div>
+          <SeletorPreventivas
+            preventivas={preventivas}
+            lojas={lojas}
+            carregando={carregandoPreventivas}
+          />
         )}
       </main>
 

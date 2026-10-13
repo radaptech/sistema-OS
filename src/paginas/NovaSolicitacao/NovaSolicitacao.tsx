@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Botao } from '../../componentes/Botao'
@@ -126,6 +126,8 @@ export function NovaSolicitacao() {
   const limites = LIMITES_DESCRICAO[tipo]
   const aparencia = APARENCIA_POR_TIPO[tipo]
 
+  // Minhas Solicitações e os números da Home precisam mostrar o pedido recém-enviado.
+  const queryClient = useQueryClient()
   const { mutateAsync, isPending } = useMutation({
     mutationFn: (dados: DadosNovaSolicitacao) =>
       servicoSolicitacoes.criarPorTipo(
@@ -133,6 +135,11 @@ export function NovaSolicitacao() {
         foto as File,
         video ?? undefined,
       ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['solicitacoes-os'] }),
+        queryClient.invalidateQueries({ queryKey: ['solicitacoes-resumo'] }),
+      ]),
   })
 
   // Trocar o tipo limpa o que não se aplica ao novo formulário, mas preserva o que o

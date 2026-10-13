@@ -30,6 +30,9 @@ export function ModalExcluirMaquinaDefinitivo({
 
   const { data: historico } = useQuery({
     queryKey: ['maquinas', maquina.id, 'historico'],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoMaquinas.historico(maquina.id),
   })
 

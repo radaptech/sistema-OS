@@ -23,6 +23,9 @@ export function CadastrarSetor() {
 
   const { data: setorExistente } = useQuery({
     queryKey: ['setor', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoSetores.obterPorId(Number(id)),
     enabled: emEdicao,
   })

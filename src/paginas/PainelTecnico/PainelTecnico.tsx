@@ -248,8 +248,13 @@ export function PainelTecnico() {
           rotuloNavegacao="Navegação das ordens de serviço"
           rotuloQuantidade={(n) => (n === 1 ? '1 OS' : `${n} OS`)}
           // Mesmo critério do BadgeAfetaProducao do card: máquina parada é o que o
-          // Técnico ataca primeiro, e o selo mostra em que loja/setor ela está.
-          ehDestaque={(ordemServico) => ordemServico.afetaProducao}
+          // Técnico ataca primeiro, e o selo mostra em que loja/setor ela está. Em
+          // Concluídas não há o que atacar: a OS já foi encerrada e o selo enganaria.
+          ehDestaque={
+            abaSelecionada === 'concluidas'
+              ? undefined
+              : (ordemServico) => ordemServico.afetaProducao
+          }
           rotuloDestaques={(n) =>
             n === 1 ? '1 máquina parada' : `${n} máquinas paradas`
           }

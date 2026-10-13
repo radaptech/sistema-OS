@@ -105,8 +105,8 @@ func TestOrdemServicoCustoTotal(t *testing.T) {
 	}{
 		// Maquinário: os dois lançados, total é a soma.
 		{"hora técnica mais manutenção", f8(150.50), f8(320.25), true, 470.75, false},
-		// Reparo/terceiros: ck_custo_por_tipo proíbe hora técnica, mas a linha
-		// de custo existe. Total é só a manutenção -- hora ausente vale zero,
+		// Reparo/terceiros antigos (antes das 000016/000017): sem hora técnica,
+		// mas a linha de custo existe. Total é só a manutenção -- hora ausente vale zero,
 		// mesmo COALESCE de vw_os_finalizada.
 		{"sem hora técnica", pgtype.Float8{}, f8(18.90), true, 18.90, true},
 		// Sem linha em os_custo: o bloco inteiro não existe.

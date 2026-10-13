@@ -120,9 +120,9 @@ type Querier interface {
 	// `false` aqui, ck_custo_nota_fiscal exige os dois campos NULL, que é
 	// exatamente o que este INSERT deixa.
 	//
-	// custo_hora_tecnico é quem o service decide se manda ou NULL
-	// (pgtype.Float8{Valid: false}): só existe em 'maquinario'
-	// (ck_custo_por_tipo), reparo e terceiros não cobram hora técnica. Os dois
+	// custo_hora_tecnico é a mão de obra somada das tarefas, gravada
+	// em todo tipo de OS desde a 000017 (antes, reparo e terceiros
+	// ficavam NULL por ck_custo_por_tipo). Os dois
 	// (e custo_manutencao, sempre obrigatório) já saem tipados
 	// `pgtype.Float8` pelos overrides de coluna em sqlc.yaml -- não
 	// `shopspring/decimal`, que sairia como string no JSON contra um front

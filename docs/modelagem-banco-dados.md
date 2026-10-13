@@ -733,23 +733,20 @@ BEGIN
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
 
--- Custo hora do técnico só existe no Maquinário: em 'terceiros' quem trabalhou foi a
--- empresa, e em 'reparo' o serviço não cobra hora técnica. A descrição do serviço, o
--- espelho disso: só em 'terceiros', porque conta o que a EMPRESA EXTERNA fez.
--- (Nota fiscal estava nesta segunda cláusula até a migration 000010 — ver 2.3.)
+-- A descrição do serviço só existe em 'terceiros', porque conta o que a EMPRESA
+-- EXTERNA fez. (Nota fiscal estava aqui até a migration 000010 — ver 2.3. A cláusula
+-- de hora técnica — só em 'maquinario' — foi afrouxada na 000016, liberando
+-- 'terceiros', e removida na 000017, liberando 'reparo': todo tipo de OS lança
+-- Valor Peças + Valor Mão de Obra por tarefa.)
 ALTER TABLE os_custo ADD CONSTRAINT ck_custo_por_tipo CHECK (
-  (tipo = 'maquinario' OR custo_hora_tecnico IS NULL) AND
-  (tipo = 'terceiros'  OR descricao_servico_terceiro IS NULL));
+  tipo = 'terceiros' OR descricao_servico_terceiro IS NULL);
 
--- Revisão 4.3: a mesma regra de hora técnica, agora por TAREFA. os_custo_item
--- pendura em ordem_servico (não em os_custo) justamente para carregar o par
--- (id, tipo) e deixar este CHECK ser local, sem trigger -- ver 1.6.1.
+-- Revisão 4.3: os_custo_item pendura em ordem_servico (não em os_custo) para carregar
+-- o par (id, tipo) e deixar o CHECK de hora técnica por TAREFA ser local, sem trigger
+-- -- ver 1.6.1. Esse CHECK (ck_custo_item_hora_tecnico) saiu na 000017; a FK ficou.
 ALTER TABLE os_custo_item ADD CONSTRAINT fk_custo_item_os_tipo
   FOREIGN KEY (ordem_servico_id, tipo) REFERENCES ordem_servico (id, tipo)
   ON UPDATE CASCADE;
-
-ALTER TABLE os_custo_item ADD CONSTRAINT ck_custo_item_hora_tecnico CHECK (
-  tipo = 'maquinario' OR custo_hora_tecnico IS NULL);
 ```
 
 > **O que saiu daqui na revisão 4:** a FK composta `(solicitacao_id, tipo)` entre OS e

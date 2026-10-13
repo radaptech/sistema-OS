@@ -1,5 +1,14 @@
-import type { PreventivaListada, PreventivaManutencao } from '../../tipos/maquina'
-import { lojas, maquinas, obterUsuarioSessao, preventivas, usuarios, type PreventivaInterna } from '../bancoMock'
+import type { CicloPreventiva, PreventivaListada, PreventivaManutencao } from '../../tipos/maquina'
+import {
+  lojas,
+  maquinas,
+  obterUsuarioSessao,
+  ordensServico,
+  preventivas,
+  solicitacoes,
+  usuarios,
+  type PreventivaInterna,
+} from '../bancoMock'
 import { preventivaEstaVencida, sincronizarPreventivasVencidas, usuarioAlcanca } from '../regrasMock'
 import { atraso, gerarId, responderErro, responderJson, type Rota } from '../utilidadesMock'
 
@@ -53,6 +62,48 @@ export const rotasPreventivas: Rota[] = [
         .filter((item) => usuarioAlcanca(usuario, item.lojaId, item.setorId))
 
       return responderJson(listadas)
+    },
+  },
+  {
+    // Espelha ListarHistoricoPreventiva do back: um ciclo por solicitação automática
+    // da preventiva, com a OS que nasceu dela, mais recente primeiro.
+    metodo: 'GET',
+    padrao: /^\/preventivas\/(\d+)\/historico$/,
+    async tratar({ params }) {
+      await atraso()
+      sincronizarPreventivasVencidas()
+
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+
+      const preventiva = preventivas.find((item) => item.id === Number(params[0]))
+      const listada = preventiva ? paraPreventivaListada(preventiva) : null
+      if (!listada || !usuarioAlcanca(usuario, listada.lojaId, listada.setorId)) {
+        return responderErro('Preventiva não encontrada.', 404)
+      }
+
+      const ciclos: CicloPreventiva[] = solicitacoes
+        .filter((solicitacao) => solicitacao.preventivaId === listada.id)
+        .flatMap((solicitacao) => {
+          const ordem = ordensServico.find((item) => item.solicitacaoId === solicitacao.id)
+          return ordem
+            ? [
+                {
+                  id: ordem.id,
+                  status: ordem.statusExecucao,
+                  dataAbertura: ordem.dataSolicitacao,
+                  dataInicio: ordem.dataInicio,
+                  dataFim: ordem.dataFim,
+                  tecnicoNome: ordem.tecnicoNome ?? '—',
+                },
+              ]
+            : []
+        })
+        .sort((a, b) => b.id - a.id)
+
+      return responderJson(ciclos)
     },
   },
   {

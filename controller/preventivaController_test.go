@@ -71,6 +71,13 @@ func (p preventivaFake) AtualizarPreventiva(_ context.Context, _, id int64, payl
 	return p.resposta(id), nil
 }
 
+func (p preventivaFake) HistoricoPreventiva(_ context.Context, _, _ int64, _ string, _ int64) ([]model.CicloPreventiva, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return []model.CicloPreventiva{}, nil
+}
+
 func (p preventivaFake) DesativarPreventiva(_ context.Context, _, _ int64) error {
 	return p.err
 }
@@ -121,6 +128,12 @@ func TestPreventivaMapeiaErroParaStatus(t *testing.T) {
 		{"atualizar inexistente", "atualizar", "999", helper.ErrNaoEncontrado, http.StatusNotFound},
 		{"atualizar descrição em branco", "atualizar", "3", descricaoVazia, http.StatusBadRequest},
 
+		// Fora do escopo do Gestor também volta ErrNaoEncontrado do service.
+		{"histórico sucesso", "historico", "3", nil, http.StatusOK},
+		{"histórico id malformado", "historico", "abc", nil, http.StatusBadRequest},
+		{"histórico inexistente ou fora do escopo", "historico", "999", helper.ErrNaoEncontrado, http.StatusNotFound},
+		{"histórico interno", "historico", "3", fmt.Errorf("conexão recusada"), http.StatusInternalServerError},
+
 		{"desativar sucesso", "desativar", "3", nil, http.StatusOK},
 		{"desativar inexistente", "desativar", "999", helper.ErrNaoEncontrado, http.StatusNotFound},
 		{"desativar id malformado", "desativar", "abc", nil, http.StatusBadRequest},
@@ -144,6 +157,9 @@ func TestPreventivaMapeiaErroParaStatus(t *testing.T) {
 			case "atualizar":
 				w, ctx = requisicaoPreventiva(http.MethodPut, c.id, "", corpoPreventiva)
 				ctrl.Atualizar()(ctx)
+			case "historico":
+				w, ctx = requisicaoPreventiva(http.MethodGet, c.id, "/historico", "")
+				ctrl.Historico()(ctx)
 			case "desativar":
 				w, ctx = requisicaoPreventiva(http.MethodDelete, c.id, "", "")
 				ctrl.Desativar()(ctx)

@@ -260,3 +260,57 @@ WHERE p.id = $1
   AND m.ativa
   AND p.proxima_data <= (now() AT TIME ZONE 'America/Sao_Paulo')::date
 FOR UPDATE OF p;
+
+-- name: PreventivaNoEscopo :one
+-- Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+-- o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+-- ListarPreventivas, NULL é o administrador. Separado do histórico para a
+-- rota responder 404 a quem não alcança, em vez de uma lista vazia que
+-- pareceria "nunca rodou".
+--
+-- Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+-- sendo histórico.
+SELECT p.id
+FROM preventiva p
+JOIN maquina m ON m.tenant_id = p.tenant_id AND m.id = p.maquina_id
+JOIN setor   s ON s.tenant_id = m.tenant_id AND s.id = m.setor_id
+WHERE p.id = sqlc.arg(id)
+  AND p.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = s.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  );
+
+-- name: ListarHistoricoPreventiva :many
+-- Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+-- solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+-- transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+-- tabela própria.
+--
+-- aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+-- (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+-- duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+--
+-- LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+-- ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+SELECT
+    os.id,
+    os.status,
+    sol.criado_em AS aberta_em,
+    os.iniciada_em,
+    enc.data_fim,
+    t.nome AS tecnico_nome
+FROM solicitacao_os sol
+JOIN ordem_servico os ON os.tenant_id = sol.tenant_id AND os.solicitacao_id = sol.id
+JOIN usuario t ON t.tenant_id = os.tenant_id AND t.id = os.tecnico_id
+LEFT JOIN os_encerramento enc ON enc.ordem_servico_id = os.id
+WHERE sol.tenant_id = sqlc.arg(tenant_id)
+  AND sol.preventiva_id = sqlc.arg(preventiva_id)
+ORDER BY sol.criado_em DESC, os.id DESC;

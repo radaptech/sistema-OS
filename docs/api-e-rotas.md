@@ -119,7 +119,7 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   | `GET /lojas`, `GET /setores` | **qualquer perfil autenticado** |
   | `GET·PUT·DELETE /lojas/:id`, `POST /lojas` | administrador |
   | `GET·PUT·DELETE /setores/:id`, `POST /setores` | administrador |
-  | `GET /maquinas`, `GET /preventivas` | **qualquer perfil autenticado** (filtrado por escopo) |
+  | `GET /maquinas`, `GET /preventivas`, `GET /preventivas/:id/historico` | **qualquer perfil autenticado** (filtrado por escopo) |
   | `GET·PUT·DELETE /maquinas/:id`, `POST /maquinas` | administrador |
   | `GET·PUT·DELETE /preventivas/:id`, `POST /preventivas` | administrador |
   | `GET /empresas-terceirizadas` | **técnico**, administrador |
@@ -148,6 +148,7 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   denormalizado na OS. **Sem escopo no `WHERE`**, diferente de `/maquinas` e
   `/preventivas`: a entidade não pende de loja nem setor, é do tenant inteiro, e por isso
   o service nem recebe `usuarioId`/`perfil`.
+- **`GET /preventivas/:id/historico`** devolve os ciclos da preventiva, mais recente primeiro: cada ciclo é a OS que o job abriu quando ela venceu (`solicitacao_os.preventiva_id` → `ordem_servico`), sem tabela própria. O front pinta `status === 'Concluída'` de verde e o resto de vermelho. Fora do escopo responde **404** (`PreventivaNoEscopo`), não lista vazia — vazio quer dizer "ainda não venceu".
 - **`POST /preventivas` é só a preventiva avulsa** (`ModalManutencaoPreventiva`). As
   preventivas do formulário de máquina **não passam por essa rota**: viajam dentro do
   corpo de `POST`/`PUT /maquinas` e gravam na mesma transação da máquina

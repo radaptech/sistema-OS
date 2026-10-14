@@ -7,6 +7,7 @@ import { rotasMaquinas } from './rotas/maquinas'
 import { rotasNotificacoes } from './rotas/notificacoes'
 import { rotasOrdensServico } from './rotas/ordensServico'
 import { rotasPreventivas } from './rotas/preventivas'
+import { rotasPush } from './rotas/push'
 import { rotasSetores } from './rotas/setores'
 import { rotasSolicitacoes } from './rotas/solicitacoes'
 import { rotasTecnicos, rotasUsuarios } from './rotas/usuarios'
@@ -27,6 +28,7 @@ const rotas: Rota[] = [
   ...rotasOrdensServico,
   ...rotasIndicadores,
   ...rotasNotificacoes,
+  ...rotasPush,
 ]
 
 // Substitui a chamada a fetch() em api.ts quando VITE_USE_MOCKS === 'true'. Recebe o

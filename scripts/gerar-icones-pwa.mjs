@@ -17,14 +17,28 @@ const CHAVE =
 // desenho fica menor e o verde vai até a borda. `any` é o ícone "como está": quadrado
 // arredondado com margem transparente, que é como o Chrome desktop e a lista de apps
 // mostram.
-function svg({ tamanho, fracaoDesenho, raio, margem = 0 }) {
+//
+// semFundo: só a chave, sem o quadrado verde -- é o `badge` da notificação push, o
+// ícone pequeno da barra de status do Android. Ele usa só a transparência do PNG (pinta
+// tudo de uma cor), então o ícone normal viraria um quadrado branco.
+function svg({
+  tamanho,
+  fracaoDesenho,
+  raio,
+  margem = 0,
+  semFundo = false,
+  traco = 2,
+}) {
   const lado = tamanho - margem * 2
   const escala = (tamanho * fracaoDesenho) / 24
   const deslocamento = (tamanho - 24 * escala) / 2
+  const fundo = semFundo
+    ? ''
+    : `<rect x="${margem}" y="${margem}" width="${lado}" height="${lado}" rx="${raio}" fill="${VERDE}"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${tamanho}" height="${tamanho}" viewBox="0 0 ${tamanho} ${tamanho}">
-  <rect x="${margem}" y="${margem}" width="${lado}" height="${lado}" rx="${raio}" fill="${VERDE}"/>
+  ${fundo}
   <g transform="translate(${deslocamento} ${deslocamento}) scale(${escala})">
-    <path d="${CHAVE}" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${CHAVE}" fill="none" stroke="#ffffff" stroke-width="${traco}" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>`
 }
@@ -58,6 +72,16 @@ const ICONES = [
     tamanho: 180,
     fracaoDesenho: 0.5,
     raio: 0,
+  },
+  // Barra de status do Android (notificação push): monocromático, traço mais grosso
+  // pra continuar legível em 24dp.
+  {
+    arquivo: 'badge-96.png',
+    tamanho: 96,
+    fracaoDesenho: 0.8,
+    raio: 0,
+    semFundo: true,
+    traco: 2.5,
   },
 ]
 

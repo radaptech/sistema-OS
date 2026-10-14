@@ -5,7 +5,11 @@ import 'react-toastify/dist/ReactToastify.css'
 import './index.css'
 import App from './App.tsx'
 import { AvisoNovaVersao } from './componentes/AvisoNovaVersao'
+import { capturarNotificacaoDaUrl } from './utilitarios/notificacaoDoPush'
 import { registrarServiceWorker } from './utilitarios/registrarServiceWorker'
+
+// Antes do router montar -- ver notificacaoDoPush.ts.
+capturarNotificacaoDaUrl()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

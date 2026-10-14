@@ -10,8 +10,10 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useListaNotificacoes } from '../hooks/useNotificacoes'
+import { usePush } from '../hooks/usePush'
 import type { Notificacao, TipoNotificacao } from '../tipos/notificacao'
 import { tempoRelativo } from '../utilitarios/tempoRelativo'
+import { AvisoAtivarPush, RodapePushAtivo } from './AtivacaoPush'
 import { Esqueleto } from './Esqueleto'
 
 // Ícone e tinta por evento -- mesmo formato tingido dos badges. Só pares que o bloco
@@ -61,6 +63,7 @@ export function PainelNotificacoes({
     fetchNextPage,
     isFetchingNextPage,
   } = useListaNotificacoes(true)
+  const push = usePush()
 
   const notificacoes = data?.pages.flatMap((pagina) => pagina.dados) ?? []
 
@@ -86,6 +89,12 @@ export function PainelNotificacoes({
           </button>
         )}
       </div>
+
+      <AvisoAtivarPush
+        estado={push.estado}
+        processando={push.processando}
+        aoAtivar={push.ativar}
+      />
 
       <div className="flex-1 overflow-y-auto">
         {isLoading && (
@@ -138,6 +147,13 @@ export function PainelNotificacoes({
           </div>
         )}
       </div>
+
+      {push.estado === 'ativado' && (
+        <RodapePushAtivo
+          processando={push.processando}
+          aoDesativar={push.desativar}
+        />
+      )}
     </div>
   )
 }

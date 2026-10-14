@@ -21,8 +21,8 @@ estiver em dúvida sobre onde uma regra deve morar.
   `provisionamento.go` também passou a usar `auth.HashPassword`; não reintroduza bcrypt
   em nenhum caminho de senha nova.
 - **Resend** (`resend-go/v2`) para o e-mail de recuperação de senha
-  (`internal/service/EmailService.go`) e **Evolution API** (HTTP cru, sem SDK) para o
-  WhatsApp — os dois opcionais: sem a chave, a rota responde e só o envio falha no log.
+  (`internal/service/EmailService.go`) — opcional: sem a chave, a rota responde e só o
+  envio falha no log.
 - Infra alvo: **Railway** (app, plano Hobby), **Supabase** (Postgres) e **Cloudflare R2**
   (bucket de fotos/vídeos, S3-compatível). O Postgres **não** é do plugin do Railway e
   **não** é conexão direta: é o Supabase atrás do **Session Pooler** (Supavisor), host
@@ -251,8 +251,14 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
     numa **struct** (`FiltrosOrdemServico`) em vez de parâmetros soltos — são seis, e
     dois deles são `*int64` vizinhos (`LojaId`/`TecnicoId`): trocá-los de lugar numa
     assinatura posicional compila e devolve a lista errada, calado.
-  - `notificacaoService.go` — `NotificacaoService`, o cliente da Evolution API (WhatsApp).
-    Ver "Notificação" em `docs/fluxo-de-negocio.md`.
+  - `notificacaoService.go` — `NotificadorInterface` + `DadosNotificacao` (o contrato
+    que `SolicitacaoService`/`PreventivaService` usam) e `NotificacaoService`, a
+    implementação: grava em `notificacao` (o sininho) e serve as rotas `/notificacoes`.
+    Todo envio passa por `entregar`, que grava e depois manda o Web Push. Também serve as
+    rotas `/push` (inscrição do aparelho). Ver "Notificações" em `docs/fluxo-de-negocio.md`.
+  - `pushService.go` — `EnviadorPush` (interface, pro teste trocar por fake) e `WebPush`, o
+    de verdade (`SherClockHolmes/webpush-go`: cifra RFC 8291 + VAPID RFC 8292), mais
+    `validarEndpointPush`/`validarChavesPush`. `NewWebPush` devolve nil sem as chaves.
   - `recuperacaoSenhaService.go` + `EmailService.go` — `esqueci-senha`/`redefinir-senha`.
     O service depende de `EnviadorEmailRecuperacao` (interface, pro teste trocar o Resend
     por um fake, mesmo motivo de `NotificadorInterface`); `NewEmailService` recebe

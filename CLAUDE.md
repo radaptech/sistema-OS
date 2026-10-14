@@ -10,7 +10,7 @@ API Go/Gin, multi-tenant por subdomínio, consumida pelo front em `../sistema-OS
 | testes | `go test -race ./...` com o compose de pé (default `localhost:5431`); fora disso, `TEST_DB_DSN=...` — verde rápido demais = `t.Skip` |
 | dev | `docker compose up -d` (um nível acima) → `http://<tenant>.localhost:8090` |
 | sqlc / migration | `sqlc generate` (nunca edite `database/repository/` na mão) · `make migration nome` |
-| jobs de CLI | `make provisionar-admin ARGS="..."` · `make backup-banco` · `make preventivas-vencidas` |
+| jobs de CLI | `make provisionar-admin ARGS="..."` · `make backup-banco` · `make preventivas-vencidas` · `make chaves-vapid` (imprime um par VAPID pro .env) |
 
 ## Diretrizes rápidas
 

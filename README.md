@@ -13,8 +13,7 @@ front em React ([`sistema-OSm--Front-end`](../sistema-OSm--Front-end)).
 ## Stack
 
 Go + Gin · Postgres (pgx, sqlc, golang-migrate) · JWT em cookie HttpOnly · senha em
-argon2id · Cloudflare R2 para fotos/vídeos e backup · Resend (e-mail) e Evolution API
-(WhatsApp), ambos opcionais. Produção: Railway + Supabase.
+argon2id · Cloudflare R2 para fotos/vídeos e backup · Resend (e-mail, opcional). Produção: Railway + Supabase.
 
 ## Rodando local
 

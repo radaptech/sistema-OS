@@ -1,3 +1,9 @@
+# Nome do projeto fixo: sem ele o compose usa o nome da pasta ("sistema-os-infra"),
+# e o traefik abaixo só aceita containers com o label de projeto "sistema-os" --
+# todas as rotas sumiam e /api respondia 404. Também é o que dá nome à rede
+# (sistema-os_default) que o --providers.docker.network aponta.
+name: sistema-os
+
 services:
 
   # Proxy reverso. Serve front e API na MESMA origem (http://<tenant>.localhost:8090):
@@ -32,19 +38,22 @@ services:
     networks:
       default:
         # IP fixo só pra existir o que declarar em TRUSTED_PROXIES da api.
-        ipv4_address: 172.29.0.2
+        ipv4_address: 172.31.0.250
 
   postgres:
     image: postgres:16-alpine
     container_name: postgres_container-sistema-OS
-    restart: always  
+    restart: always
+    # 5431 no host porque a 5432 é do postgres do sgeepi-infra. Dentro do container o
+    # Postgres escuta só na 5432 -- o lado direito TEM que ser 5432, senão a porta
+    # publicada não tem ninguém do outro lado e o go test pula a integração calado.
     ports:
-      - "5431:5431"
+      - "5431:5432"
     environment:
-      - TZ=America/Sao_Paulo
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=sistema-OS
+      TZ: America/Sao_Paulo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sistema-OS
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -52,7 +61,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
 
   pgadmin:
     image: dpage/pgadmin4
@@ -66,14 +74,12 @@ services:
     depends_on:
       - postgres
 
-
   api:
     container_name: api_sistema-OS
-    restart: on-failure:5
+    restart: unless-stopped
     build:
       context: ./sistema-OSm--Back-end
       dockerfile: dockerfile.dev
-    # Propriedades movidas para o nível correto do serviço:
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,7 +89,7 @@ services:
       # Só o traefik pode ditar o X-Forwarded-For; de resto o ClientIP é o IP da
       # conexão. Sem isto o rate limit do login cai com um header forjado.
       # Em produção: o endereço do proxy do Railway, não este.
-      - TRUSTED_PROXIES=172.29.0.2/32
+      TRUSTED_PROXIES: 172.31.0.250/32
     volumes:
       - ./sistema-OSm--Back-end:/app
     # Sem "ports": quem publica é o traefik. Prioridade alta pra /api ganhar do
@@ -95,11 +101,10 @@ services:
       - "traefik.http.routers.os-api.priority=100"
       - "traefik.http.services.os-api.loadbalancer.server.port=8081"
 
-
   front:
     image: node:22-alpine
     container_name: front_sistema-OS
-    restart: on-failure:5
+    restart: unless-stopped
     working_dir: /app
     # --host 0.0.0.0 pro Vite aceitar conexão de fora do container. O Vite já libera
     # *.localhost por padrão, então o subdomínio do tenant passa sem allowedHosts.
@@ -108,8 +113,8 @@ services:
       # Mesma origem: api.ts monta /api/... em cima do host que serviu a página, e é
       # window.location.hostname que vira o X-tenant-ID. Um valor absoluto aqui fixaria
       # um tenant só.
-      - REACT_APP_URL_API=/api
-      - VITE_USE_MOCKS=false
+      REACT_APP_URL_API: /api
+      VITE_USE_MOCKS: "false"
     volumes:
       - ./sistema-OSm--Front-end:/app
     labels:
@@ -122,10 +127,10 @@ services:
 volumes:
   postgres_data:
 
-# Sub-rede declarada (172.29 estava livre) só pra o traefik poder ter IP fixo --
-# ver TRUSTED_PROXIES na api.
+# Sub-rede declarada (172.31 estava livre nesta máquina) só pro traefik poder ter IP
+# fixo -- ver TRUSTED_PROXIES na api. Mudou a sub-rede, muda o TRUSTED_PROXIES junto.
 networks:
   default:
     ipam:
       config:
-        - subnet: 172.29.0.0/16
+        - subnet: 172.31.0.0/16

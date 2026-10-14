@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Inbox } from 'lucide-react'
 import { toast } from 'react-toastify'
@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
 import { FiltroTipoOS } from '../../componentes/FiltroTipoOS'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useTodasSolicitacoes } from '../../hooks/useTodasSolicitacoes'
 import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
 import { usePreventivas } from '../../hooks/usePreventivas'
@@ -97,10 +98,50 @@ export function PainelGestor() {
     abaSelecionada === 'os-em-andamento' || abaSelecionada === 'os-finalizadas'
   const { data: solicitacoes = [], isLoading: carregandoSolicitacoes } =
     useTodasSolicitacoes({}, abaSelecionada === 'solicitacoes')
-  const { data: ordensServico = [], isLoading: carregandoOrdensServico } =
-    useOrdensServicoTodas({}, abaDeOS)
+  const {
+    data: ordensServico = [],
+    isLoading: carregandoOrdensServico,
+    refetch: recarregarOrdensServico,
+  } = useOrdensServicoTodas({}, abaDeOS)
   const { data: preventivas = [], isLoading: carregandoPreventivas } =
     usePreventivas(undefined, abaSelecionada === 'manutencao-preventiva')
+
+  // Link de notificação (sininho/push): ?solicitacao=N abre o detalhe do pedido na aba
+  // de solicitações; ?os=N abre o detalhe da OS (a concluída, que o Técnico acabou de
+  // encerrar). O parâmetro sai da URL antes da busca: o modal abre uma vez só.
+  const [solicitacaoDaUrl] = useIdDaUrl('solicitacao')
+  const [osDaUrl, consumirOSDaUrl] = useIdDaUrl('os')
+
+  useEffect(() => {
+    if (solicitacaoDaUrl === null) {
+      return
+    }
+    // Trocar pra aba de solicitações já tira o ?solicitacao= (setParametros substitui
+    // a query inteira): o card do pedido fica atrás do modal, pronto pra Abrir OS.
+    setParametros({ aba: 'solicitacoes' }, { replace: true })
+    // Não encontrada (fora do escopo, já apagada): o api.ts já mostra o toast do 404.
+    servicoSolicitacoes
+      .obterPorId(solicitacaoDaUrl)
+      .then(setSolicitacaoParaVisualizar)
+      .catch(() => {})
+  }, [solicitacaoDaUrl, setParametros])
+
+  useEffect(() => {
+    if (osDaUrl === null) {
+      return
+    }
+    consumirOSDaUrl()
+    // Não há GET /ordens-servico/:id: a OS sai da lista do escopo, buscada de novo
+    // (refetch ignora o `habilitado`) pra não abrir uma versão de antes do encerramento.
+    recarregarOrdensServico().then(({ data }) => {
+      const ordem = data?.find((item) => item.id === osDaUrl)
+      if (ordem) {
+        setSelecaoOS({ ordem, imprimir: false })
+      } else {
+        toast.info(`A OS #${osDaUrl} não está mais no seu painel.`)
+      }
+    })
+  }, [osDaUrl, consumirOSDaUrl, recarregarOrdensServico])
 
   async function invalidarSolicitacoesEOrdens() {
     await Promise.all([

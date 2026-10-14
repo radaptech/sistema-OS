@@ -11,6 +11,7 @@ import type {
 import type { NovaSolicitacaoReparoPayload } from '../../tipos/reparo'
 import { lojas, maquinas, obterUsuarioSessao, ordensServico, setores, solicitacoes, usuarios } from '../bancoMock'
 import { construirEscoposGestor, gestorTemAcesso, sincronizarPreventivasVencidas } from '../regrasMock'
+import { notificarAbertura, notificarNovaSolicitacao, notificarRejeicao } from '../notificacoesMock'
 import {
   atraso,
   extrairCorpo,
@@ -92,6 +93,7 @@ export const rotasSolicitacoes: Rota[] = [
       }
 
       solicitacoes.push(nova)
+      notificarNovaSolicitacao(nova)
       return responderJson(nova, 201)
     },
   },
@@ -179,6 +181,8 @@ export const rotasSolicitacoes: Rota[] = [
 
       solicitacoes.push(nova)
       ordensServico.push(novaOrdem)
+      // Direta: só o Técnico (quem "pediu" é o próprio Gestor).
+      notificarAbertura(novaOrdem, null)
       return responderJson(novaOrdem, 201)
     },
   },
@@ -223,6 +227,7 @@ export const rotasSolicitacoes: Rota[] = [
       }
 
       solicitacoes.push(nova)
+      notificarNovaSolicitacao(nova)
       return responderJson(nova, 201)
     },
   },
@@ -402,6 +407,10 @@ export const rotasSolicitacoes: Rota[] = [
 
       ordensServico.push(novaOrdem)
       solicitacao.status = 'Convertida'
+      notificarAbertura(
+        novaOrdem,
+        solicitacao.origem === 'solicitante' ? solicitacao.solicitanteId : null,
+      )
 
       return responderJson(novaOrdem, 201)
     },
@@ -430,6 +439,7 @@ export const rotasSolicitacoes: Rota[] = [
       solicitacao.status = 'Rejeitada'
       solicitacao.motivoRejeicao = dados.motivo
       solicitacao.rejeitadoPorNome = usuario.nome
+      notificarRejeicao(solicitacao)
 
       return responderJson(solicitacao)
     },

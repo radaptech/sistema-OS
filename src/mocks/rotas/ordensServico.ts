@@ -21,6 +21,7 @@ import {
   somarItensDeCusto,
 } from '../regrasMock'
 import { atraso, gerarId, responderBlob, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import { notificarConclusao } from '../notificacoesMock'
 
 function gerarIdPausa(): number {
   return gerarId(ordensServico.flatMap((ordem) => ordem.pausas ?? []))
@@ -279,6 +280,7 @@ export const rotasOrdensServico: Rota[] = [
         revisadoEm: null,
       }
       ordem.finalizada = calcularFinalizada(ordem)
+      notificarConclusao(ordem)
 
       return responderJson(ordem)
     },

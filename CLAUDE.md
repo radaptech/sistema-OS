@@ -14,6 +14,7 @@
 - **Sessão mock:** sem cookie real, o "usuário logado" fica em `sessionStorage` (sobrevive a reload da aba, cai ao fechar) — mesmo efeito prático da restauração via `PortaoSessao`/`useSessao`.
 - **Regras de negócio replicadas (`regrasMock.ts`):** preventiva vencida → solicitação automática (`origem: 'preventiva'`, mesmo mecanismo do antigo `gerarSolicitacoesPreventivasVencidas`), ciclo de vida completo da OS (iniciar/pausar/retomar/acionar-terceiro/encerrar/custo), cálculo de Horas Trabalhadas/Parada, `finalizada`, escopo por perfil (Gestor por `escoposGestor`, Técnico pelo próprio `tecnicoId`) e indicadores de máquina computados do histórico real de OS `Concluída` no banco mock — nada é mais um valor fixo por máquina. `somarItensDeCusto` replica a regra do servidor de somar as tarefas em vez de aceitar um total do cliente: sem ela o modo mock inventaria uma segunda aritmética de custo, e a tela passaria em mock e falharia contra a API real.
 - **Rotas (`src/mocks/rotas/*.ts`):** um arquivo por domínio, mesma divisão de `servico*.ts`, cada um exportando uma lista de `{ metodo, padrao, tratar }` casada contra `endpoint` em `apiMock.ts`. Ao adicionar um endpoint novo num serviço real, adicione o par correspondente aqui.
+- **Notificações (`notificacoesMock.ts`):** a coleção do sininho + os mesmos 6 eventos do servidor (quem recebe, texto e url iguais), chamados dos handlers de solicitação/OS e de `sincronizarPreventivasVencidas`. `semearNotificacoes()` (chamado por `rotas/notificacoes.ts`, nunca no topo do módulo — há um ciclo de import inofensivo com `regrasMock`) gera as do seed, pra cada perfil de demonstração já abrir com o sininho preenchido.
 - **Upload nos dois modos:** os handlers mock de `maquinas`/`solicitacoes` detectam `FormData`, leem a parte `dados` (JSON) e viram a `foto`/`video` recebidos em `URL.createObjectURL(...)` — visualizável durante a sessão, sem upload real.
 
 ## Tech Stack
@@ -216,6 +217,116 @@ final é `nginx:alpine` servindo `dist/` — **94.6MB**, testado local (`docker 
 - **`npm run build`, não só `tsc --noEmit`**: pega os dois de uma vez — erro de tipo
   **e** erro que só aparece no build de produção (import quebrado, asset faltando), que
   o `vite dev` é mais tolerante e deixaria passar batido.
+
+## PWA (app instalável)
+
+O mesmo app vira "app" no celular/desktop: ícone na tela inicial, abre sem a barra do
+navegador. Sem loja, sem build separado — e sem `vite-plugin-pwa`, de propósito (abaixo).
+
+- **`public/manifest.webmanifest`** (nome, cores, `display: standalone`, `start_url: "/"` —
+  o `/` já manda cada perfil pro próprio painel) + tags no `index.html` (manifest,
+  `apple-touch-icon`, `apple-mobile-web-app-*`). Cada subdomínio de tenant é uma origem, então
+  cada tenant vira um app instalado separado — é o que se quer.
+- **Ícones (`public/icones/`) saem de `npm run icones:pwa`** (`scripts/gerar-icones-pwa.mjs`):
+  a chave inglesa do cabeçalho em branco sobre `marca-600`, rasterizada pelo Chrome do
+  puppeteer. PNGs versionados; rode de novo só se mudar cor/desenho. `maskable` tem o desenho
+  menor (zona segura de 80% — o Android recorta em círculo); `apple-touch-icon` não tem
+  transparência (o iOS pinta de preto). O `favicon.svg` da aba continua o antigo.
+- **`public/sw.js` — service worker nosso, JS puro, fora do bundle.** Sem precache: o app não
+  funciona sem a API, e precache é o jeito clássico de prender o usuário numa versão velha.
+  Só intercepta navegação (rede primeiro; sem rede, uma página "Sem conexão" em vez do erro do
+  navegador). É onde o Web Push vai entrar.
+- **Atualização (`utilitarios/registrarServiceWorker.ts` + `componentes/AvisoNovaVersao.tsx`):**
+  o plugin `versaoServiceWorker` (`vite.config.ts`) carimba o `sw.js` com um id por build →
+  cada deploy é um service worker novo → ele instala e **espera** → o app mostra o toast "Nova
+  versão disponível" → só no clique em "Atualizar" ele assume (`PULAR_ESPERA`) e a página
+  recarrega. Nunca troca sozinho: recarregar no meio de um encerramento de OS perderia o que
+  foi digitado. Checa ao voltar pro app (aba visível) e a cada hora. ⚠️ O `controllerchange`
+  só recarrega se o usuário pediu — sem essa trava, a **primeira** instalação recarregaria a
+  tela de quem acabou de abrir o app.
+- **nginx (`nginx.conf.template`):** `sw.js`, `manifest.webmanifest` e `index.html` com
+  `Cache-Control: no-cache` (sempre revalidam — senão o app instalado abriria o HTML velho);
+  `/assets/` com hash no nome, `immutable` por 1 ano.
+- **Exige HTTPS** (ou `localhost`/`*.localhost` em dev). No iPhone só instala por Compartilhar →
+  Adicionar à Tela de Início, e só lá o push funciona (iOS 16.4+).
+- **Verificado (13/10/2026)** com a imagem de produção (`docker build` + nginx): cabeçalhos e
+  MIME acima, SW ativo controlando a página, manifest e ícones 200, aviso de versão nova
+  aparecendo após trocar o `sw.js` e "Atualizar" recarregando com o SW novo, e a página "Sem
+  conexão" com o servidor fora do ar. **Não verificado:** instalação num Android/iPhone de
+  verdade (precisa do HTTPS de produção ou homologação).
+
+## Notificações (sininho) — central do PWA
+
+O WhatsApp saiu (13/10/2026); o aviso agora mora no próprio sistema. Regra de quem recebe o
+quê está no back (`../sistema-OSm--Back-end/docs/fluxo-de-negocio.md`, "Notificações").
+
+- **`componentes/SinoNotificacoes.tsx`** (botão + selo + mutações) e **`PainelNotificacoes.tsx`**
+  (popover com a lista, "carregar mais", "marcar todas como lidas"), nos dois cabeçalhos com
+  sino (`CabecalhoTopo`/`CabecalhoPagina`). No celular o popover ocupa a largura toda abaixo
+  do cabeçalho; do `sm` pra cima ancora no botão. Fecha com clique fora ou Esc.
+- **Contrato (`servicoNotificacoes.ts`, `tipos/notificacao.ts`):** `GET /notificacoes?pagina=`
+  (`RespostaPaginada`, 20 por página), `GET /notificacoes/nao-lidas`, `POST /notificacoes/:id/lida`,
+  `POST /notificacoes/lidas`. As três últimas devolvem `{ total }` — a contagem **depois** da
+  ação, gravada direto no cache (`setQueryData`) em vez de buscar de novo.
+- **Contagem (`useContagemNaoLidas`):** `staleTime: 0`, `refetchInterval` de 60s (pausa com a
+  aba em segundo plano) e `refetchOnWindowFocus: true` — a única query do app que refaz no
+  foco: voltar pro app depois de ver o push tem que mostrar o número novo na hora.
+- **Clique numa notificação:** marca como lida e `navegar(notificacao.url)`. A url é um caminho
+  relativo gravado pelo servidor (`/painel-gestor?solicitacao=N`, `/painel-gestor?os=N`,
+  `/painel-tecnico?os=N`, `/minhas-solicitacoes?solicitacao=N`) e o **painel de destino** abre o
+  modal certo via `hooks/useIdDaUrl.ts`, que também tira o parâmetro da URL (F5/voltar não
+  reabrem). Detalhe de cada tela na spec dela (itens 4, 6, 9).
+- ⚠️ **Cores do ícone por tipo só usam pares que o tema escuro inverte** (`index.css`):
+  `sky`/`violet` e `text-marca-700` não estão lá e sairiam escuro sobre escuro.
+
+## Web Push (aviso com o app fechado)
+
+O servidor manda um push por notificação gravada; o `public/sw.js` mostra e cuida do toque.
+Contrato: `GET /push/chave-publica` (`{ chavePublica }`, **null = servidor sem VAPID**, o front
+não oferece nada), `POST /push/inscricoes` (o `subscription.toJSON()` direto, 204),
+`POST /push/inscricoes/remover` (`{ endpoint }`, 204). Payload do push:
+`{ id, tipo, titulo, corpo, url, naoLidas }`.
+
+- **Ativar (`hooks/usePush.ts` + `componentes/AtivacaoPush.tsx`, no topo do painel do sininho):**
+  a permissão **só é pedida no clique em "Ativar"** — nunca sozinha ao abrir o app (fora de
+  gesto o navegador ignora, e pedir sem contexto é o que faz o usuário negar). Estados:
+  `desativado` (botão), `ativado` (linha "Avisos ativos neste aparelho · Desativar" no pé do
+  painel), `bloqueado` (permissão negada — só se desfaz nas configurações, o texto explica onde),
+  `instalar` (iPhone fora do app instalado: passo a passo Compartilhar → Adicionar à Tela de
+  Início — no Safari comum o `PushManager` nem existe) e `indisponivel` (navegador sem push ou
+  servidor sem chave — não mostra nada).
+- **Navegador (`utilitarios/pushNavegador.ts`):** permissão, `subscribe`, número no ícone
+  (`setAppBadge`), limpar a bandeja. Inscrição feita com **outra chave VAPID** (o servidor trocou
+  o par) é desfeita e refeita — senão o serviço de push recusaria tudo o que o servidor assina.
+  Pra ler usa `getRegistration()` (imediato); só o `subscribe` espera o `ready`, com prazo de 5s.
+- **`sw.js`:** `push` → `showNotification` (ícone, `badge-96.png` monocromático pra barra do
+  Android, `tag` por id pra reentrega não duplicar) + `setAppBadge(naoLidas)` + avisa as abas
+  (`PUSH_RECEBIDO` → o sininho busca na hora). `notificationclick` → com o app aberto, foca a aba
+  e manda `ABRIR_NOTIFICACAO` (o React marca como lida e navega **sem recarregar**); fechado,
+  `openWindow(url + &notificacao=<id>)`. Só abre caminho da própria origem.
+- **`hooks/useIntegracaoPush.ts` (montado no `PortaoSessao`):** número no ícone = não lidas do
+  sininho; tudo lido → limpa a bandeja; trata as mensagens do sw.js; ao entrar (e em
+  `pushsubscriptionchange`) **reenvia a inscrição** que o navegador já tem — o servidor pode ter
+  perdido a linha, e o upsert troca o dono se outra pessoa usava o aparelho.
+- ⚠️ **`?notificacao=` é lido e tirado da URL ANTES do router montar** (`main.tsx` →
+  `utilitarios/notificacaoDoPush.ts`). Se o React Router visse o parâmetro, o primeiro
+  `setSearchParams` de uma tela (o painel consumindo `?os=`) o regravaria; um `replaceState`
+  feito depois, por fora, deixaria o router com a URL velha.
+- **Logout (`useSair`) desliga o push ANTES do `/autenticacao/logout`** (o `remover` precisa da
+  sessão): sai do navegador, zera o número do ícone e limpa a bandeja — num celular
+  compartilhado, o próximo não recebe nem vê os avisos de quem saiu. Quem entra depois ativa de
+  novo no sininho. Sessão que **expira** (sem clicar em Sair) mantém a inscrição; no próximo
+  login ela é reenviada e passa a ser de quem entrou.
+- **Mock (`mocks/rotas/push.ts`):** chave pública P-256 real (só a pública — o `subscribe` valida
+  o formato), inscrições num `Map`. Dá pra ver ativar/desativar/sair; nada chega por push.
+- **Verificado (13/10/2026) no Chrome desktop contra a API real** (`demo.localhost:8090` — `*.localhost`
+  é contexto seguro): ativar grava `dispositivo_push`; gestor abre OS → push real via FCM chega
+  em ~1s com título/corpo/url certos e o sininho atualiza sozinho; clique na notificação com o
+  app aberto marca como lida e abre o detalhe; `?notificacao=` (caminho do app fechado) idem;
+  logout remove no navegador e no banco; novo login mostra "Ativar" de novo; painel em 619px sem
+  rolagem lateral. **Não verificado:** Android/iPhone reais (precisa de HTTPS — Parte 8),
+  telas `bloqueado`/`instalar` (texto estático), e o `openWindow` em si (o clique com o app
+  fechado foi simulado abrindo a URL que ele monta).
 
 ## Helpers de Domínio (evite reimplementar)
 - **`alvoOS.ts`** — Solicitação e OS apontam ou para uma máquina cadastrada (Maquinário) ou para um item digitado na hora (Pequeno Reparo). Use `obterNomeAlvo`, `obterCodigoAlvo` e `combinaBuscaAlvo` em vez de repetir o encadeamento `maquinaNome ?? itemDescricao ?? '—'`.

@@ -23,6 +23,11 @@ import (
 // expõe WithTx.
 type OrdemServicoService struct {
 	Pool *pgxpool.Pool
+	// Notificador é opcional, mesmo desenho de SolicitacaoService.Notificador
+	// (campo público setado no router.go; nil = não notifica). Só o Encerrar
+	// avisa alguém: pausar/retomar/acionar terceiro não notificam, de propósito
+	// -- aviso a cada passo da execução vira ruído e ninguém lê mais nenhum.
+	Notificador NotificadorInterface
 }
 
 func NewRepoOrdemServico(pool *pgxpool.Pool) *OrdemServicoService {
@@ -545,7 +550,25 @@ func (s *OrdemServicoService) Encerrar(ctx context.Context, tenantId, atorId, or
 		return model.OrdemServico{}, fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
+	s.notificarConclusao(tenantId, ordem)
+
 	return ordem, nil
+}
+
+// notificarConclusao avisa os gestores do setor que a OS foi encerrada --
+// qualquer origem (pedido, direta, preventiva): quem acompanha o setor quer
+// saber que a máquina voltou.
+func (s *OrdemServicoService) notificarConclusao(tenantId int64, ordem model.OrdemServico) {
+
+	if s.Notificador == nil {
+		return
+	}
+
+	dados := dadosDaOS(ordem)
+
+	emSegundoPlano("notificar conclusão de OS", func(ctx context.Context) error {
+		return s.Notificador.NotificarOSConcluida(ctx, tenantId, ordem.SetorId, dados)
+	}, "os", ordem.Id, "tenant", tenantId)
 }
 
 // CorrigirCusto é POST /ordens-servico/:id/custo -- a correção prometida no

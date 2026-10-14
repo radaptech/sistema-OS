@@ -135,7 +135,29 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   | `POST /ordens-servico/:id/custo` | **administrador** (correção pós-encerramento, sem dono pra checar) |
   | `GET /indicadores/maquinas/:id` | gestor, administrador (escopo no `WHERE`, 404 fora dele) |
   | `GET /indicadores/lojas/:id` | gestor, administrador (loja fora dos escopos é 404; o `WHERE` recorta os setores) |
+  | `GET /notificacoes`, `/notificacoes/nao-lidas`, `POST /notificacoes/lidas`, `/notificacoes/:id/lida` | **qualquer perfil autenticado** (sempre só as do próprio usuário) |
+  | `GET /push/chave-publica`, `POST /push/inscricoes`, `/push/inscricoes/remover` | **qualquer perfil autenticado** (o aparelho fica do usuário do token) |
 
+- **`/notificacoes` é a central do sininho** (`NotificacaoController`). O dono é o
+  usuário do token (`atorDaRota`), nunca um id da URL — nem o administrador vê as de
+  outro. `GET /notificacoes?pagina=` é `RespostaPaginada<Notificacao>` (20 por página,
+  mais novas primeiro); `Notificacao` = `{ id, tipo, titulo, corpo, url, lida, lidaEm,
+  criadoEm }`, com `url` um caminho relativo (`/painel-gestor?solicitacao=12`,
+  `/painel-tecnico?os=7`). `GET /nao-lidas` e as duas rotas de marcar respondem
+  `{ total }` — a contagem de não lidas **depois** da ação, pro front atualizar o sininho
+  sem outro request. Marcar uma alheia ou inexistente é **404**; marcar de novo é 200
+  (idempotente, não reescreve `lidaEm`).
+- **`/push` é a inscrição do aparelho no Web Push** (`PushController`, service é o
+  `NotificacaoService`). `GET /push/chave-publica` → `{ chavePublica }` (a VAPID pública
+  que o navegador usa no `pushManager.subscribe`; **`null` = push desligado** neste
+  servidor, sem VAPID no ambiente). `POST /push/inscricoes` recebe a `PushSubscription`
+  do navegador **como ela vem** (`subscription.toJSON()`: `{ endpoint, keys: { p256dh,
+  auth } }`, `expirationTime` ignorado) e responde **204**; re-inscrever o mesmo
+  aparelho, inclusive com outro usuário logado, troca o dono (upsert pelo endpoint).
+  **400** para endpoint fora dos serviços de push conhecidos ou chave malformada (ver
+  "SSRF" em `docs/fluxo-de-negocio.md`). `POST /push/inscricoes/remover` `{ endpoint }`
+  → **204 sempre** (idempotente; só apaga se o aparelho é do próprio usuário) — POST e
+  não DELETE porque o endpoint é uma URL longa e o `api.delete` do front não manda corpo.
 - **`GET /maquinas` e `GET /preventivas` são abertas mas não são amplas**: o RBAC libera
   qualquer perfil e o **escopo é aplicado no `WHERE`** (ver "Escopo no `WHERE`" em "Queries
   e repository"). O Solicitante escolhe máquina do próprio setor em Nova Solicitação e o

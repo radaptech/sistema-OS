@@ -396,6 +396,52 @@ func (ns NullTipoDefeito) Value() (driver.Value, error) {
 	return string(ns.TipoDefeito), nil
 }
 
+type TipoNotificacao string
+
+const (
+	TipoNotificacaoSolicitacaoNova      TipoNotificacao = "solicitacao_nova"
+	TipoNotificacaoSolicitacaoAceita    TipoNotificacao = "solicitacao_aceita"
+	TipoNotificacaoSolicitacaoRejeitada TipoNotificacao = "solicitacao_rejeitada"
+	TipoNotificacaoOsAberta             TipoNotificacao = "os_aberta"
+	TipoNotificacaoOsPreventiva         TipoNotificacao = "os_preventiva"
+	TipoNotificacaoOsConcluida          TipoNotificacao = "os_concluida"
+)
+
+func (e *TipoNotificacao) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TipoNotificacao(s)
+	case string:
+		*e = TipoNotificacao(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TipoNotificacao: %T", src)
+	}
+	return nil
+}
+
+type NullTipoNotificacao struct {
+	TipoNotificacao TipoNotificacao
+	Valid           bool // Valid is true if TipoNotificacao is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTipoNotificacao) Scan(value interface{}) error {
+	if value == nil {
+		ns.TipoNotificacao, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TipoNotificacao.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTipoNotificacao) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TipoNotificacao), nil
+}
+
 type TipoOs string
 
 const (
@@ -487,6 +533,18 @@ type AreaTecnico struct {
 	Nome     string
 }
 
+type DispositivoPush struct {
+	ID           int64
+	TenantID     int64
+	UsuarioID    int64
+	Endpoint     string
+	P256dh       string
+	Auth         string
+	UserAgent    *string
+	CriadoEm     pgtype.Timestamptz
+	AtualizadoEm pgtype.Timestamptz
+}
+
 type Empresa struct {
 	ID         int64
 	Subdominio string
@@ -527,6 +585,18 @@ type Maquina struct {
 	Ativa            bool
 	CriadoEm         pgtype.Timestamptz
 	Criticidade      NivelCriticidade
+}
+
+type Notificacao struct {
+	ID        int64
+	TenantID  int64
+	UsuarioID int64
+	Tipo      TipoNotificacao
+	Titulo    string
+	Corpo     string
+	Url       string
+	LidaEm    pgtype.Timestamptz
+	CriadoEm  pgtype.Timestamptz
 }
 
 type OrdemServico struct {

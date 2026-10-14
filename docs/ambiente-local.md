@@ -10,7 +10,7 @@ Leia quando algo não subir, a porta não conectar ou o teste de integração pu
 - `.env` na raiz (modelo em `.env-example`): `DB_SERVER`, `DB_USER`, `DB_PORT`, `DATABASE`,
   `DB_PASSWORD` (`DB_SSLMODE` opcional, default `disable`) e `JWT_SECRET` — os únicos
   obrigatórios. Opcionais, e sem eles só o recurso correspondente falha: `R2_*` (upload e
-  foto), `EVOLUTION_*` (WhatsApp), `RESEND_API_KEY` + `URL_FRONTEND_FORMATO` (e-mail de
+  foto), `VAPID_*` (Web Push — `make chaves-vapid` imprime um par), `RESEND_API_KEY` + `URL_FRONTEND_FORMATO` (e-mail de
   recuperação de senha; sem a chave o pedido responde 200 e o envio falha no log). `TRUSTED_PROXIES` **não**
   fica no `.env`: vem do `environment` do compose em dev (é endereço de infra, muda com
   a topologia) e do ambiente do Railway em produção.

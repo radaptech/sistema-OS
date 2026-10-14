@@ -1,39 +1,55 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/radaptech/sistema-OSm--Back-end/database/repository"
+	"github.com/radaptech/sistema-OSm--Back-end/internal/helper"
+	"github.com/radaptech/sistema-OSm--Back-end/internal/model"
 )
 
-// NotificadorInterface é o que SolicitacaoService (e o job de preventiva
-// vencida) dependem pra avisar o Gestor de uma solicitação nova -- nunca a
-// struct concreta, pra poder trocar por um fake nos testes sem bater na
-// Evolution API de verdade (mesmo motivo de todo XxxServiceInterface em
-// controller/, só que um nível mais fundo: aqui é service dependendo de
-// service).
+// TamanhoPaginaNotificacoes é o tamanho de página de GET /notificacoes --
+// mesmo padrão de TamanhoPaginaSolicitacoes.
+const TamanhoPaginaNotificacoes = 20
+
+// NotificadorInterface é o que SolicitacaoService, OrdemServicoService e o job
+// de preventiva vencida dependem pra avisar alguém -- nunca a struct concreta, pra poder trocar por um fake nos testes (mesmo motivo de
+// todo XxxServiceInterface em controller/, só que um nível mais fundo: aqui é
+// service dependendo de service).
+//
+// A implementação é NotificacaoService, logo abaixo: grava na central de
+// notificações (o sininho). O WhatsApp (Evolution API) saiu em 13/10/2026.
+//
+// Um método por evento. O que recebe setorId avisa "os gestores daquele setor"
+// (o destinatário é descoberto aqui); o que recebe um usuário por id avisa só
+// ele (quem chama já sabe quem é: o técnico da OS, o solicitante do pedido).
 type NotificadorInterface interface {
+	// Solicitante abriu um pedido -> gestores do setor.
 	NotificarNovaSolicitacao(ctx context.Context, tenantId, setorId int64, dados DadosNotificacao) error
-	// NotificarOSPreventiva avisa UM técnico, por id, e não um setor inteiro:
-	// a OS de preventiva já nasce atribuída a ele (migration 000008), então
-	// não há destinatário a descobrir. É o que separa os dois métodos -- não
-	// o texto da mensagem, que poderia ser um campo em DadosNotificacao.
+	// Gestor aceitou (abriu a OS) -> o Solicitante que pediu.
+	NotificarSolicitacaoAceita(ctx context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error
+	// Gestor rejeitou -> o Solicitante que pediu, com o motivo.
+	NotificarSolicitacaoRejeitada(ctx context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error
+	// Gestor abriu a OS (da fila ou direta) -> o Técnico designado.
+	NotificarOSAberta(ctx context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error
+	// O job abriu a OS da preventiva vencida -> o Técnico da preventiva
+	// (migration 000008: já nasce atribuída a ele, o Gestor não decide nada).
 	NotificarOSPreventiva(ctx context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error
+	// Técnico encerrou a OS -> gestores do setor.
+	NotificarOSConcluida(ctx context.Context, tenantId, setorId int64, dados DadosNotificacao) error
 }
 
-// DadosNotificacao é o que os dois templates (solicitação aberta pelo
-// Solicitante, preventiva vencida) precisam pra montar o texto -- reduzido
-// ao necessário pra mensagem, não é model.SolicitacaoOS inteiro: o job de
-// preventiva vencida não tem (nem devia fabricar) uma resposta de
-// solicitação completa só pra notificar.
+// DadosNotificacao é o que os templates precisam pra montar o texto --
+// reduzido ao necessário pra mensagem, não é model.SolicitacaoOS/OrdemServico
+// inteiro: o job de preventiva vencida não tem (nem devia fabricar) uma
+// resposta completa só pra notificar. Cada evento usa só os campos dele.
 //
 // SolicitanteNome nil é o que decide o template: preventiva vencida nasce
 // sem solicitante (ninguém por trás, ver ck_origem), mesmo critério que o
@@ -47,193 +63,490 @@ type DadosNotificacao struct {
 	LojaNome        string
 	SetorNome       string
 	SolicitanteNome *string
+	// TecnicoNome: quem vai executar (aceita) ou quem executou (concluída).
+	TecnicoNome *string
+	// Urgencia da OS aberta ("Alta"...), vazia quando não se aplica.
+	Urgencia       string
+	MotivoRejeicao string
+	// SolicitacaoId/OrdemServicoId montam a url do clique (o painel abre o
+	// modal daquele item). Zero é "não se aplica" -- eventos de solicitação
+	// usam a solicitação, eventos de OS usam a OS.
+	SolicitacaoId  int64
+	OrdemServicoId int64
 }
 
-// NotificacaoService é a implementação real: lê os gestores do setor
-// (ObterGestoresDoSetor, database/queries/usuario.sql) e manda a mensagem
-// pra cada um via Evolution API (ver CLAUDE.md, "Notificação de solicitação
-// por WhatsApp").
+// NotificacaoService é a implementação de NotificadorInterface e o service
+// das rotas /notificacoes. Notificar é gravar uma linha por destinatário em
+// `notificacao` (ver migration 000018) -- o sininho lê dali.
 type NotificacaoService struct {
-	Pool   *pgxpool.Pool
-	client *http.Client
-	url    string
-	apiKey string
-	// instancia é o nome da instância do WhatsApp na Evolution API
-	// (EVOLUTION_INSTANCE_NAME) -- entra na URL de todo envio.
-	instancia string
+	Pool *pgxpool.Pool
+	// Push é opcional -- campo público setado no router.go, mesmo desenho de
+	// SolicitacaoService.Notificador. nil (ambiente sem VAPID, e todo teste que
+	// não pede) é "grava no sininho e não manda push".
+	Push EnviadorPush
 }
 
-// NewRepoNotificacao recebe url/apiKey/instancia como parâmetros, não lê
-// os.Getenv aqui dentro -- mesmo padrão de NewMaquinaController recebendo
-// bucketFotos: quem resolve variável de ambiente é o wiring (router.go),
-// não o service. Mantém isto testável sem depender de env global.
-func NewRepoNotificacao(pool *pgxpool.Pool, url, apiKey, instancia string) *NotificacaoService {
+func NewRepoNotificacao(pool *pgxpool.Pool) *NotificacaoService {
 
 	return &NotificacaoService{
-		Pool:      pool,
-		client:    &http.Client{Timeout: 10 * time.Second},
-		url:       url,
-		apiKey:    apiKey,
-		instancia: instancia,
+		Pool: pool,
 	}
 }
 
-// NotificarNovaSolicitacao é o único método do notificador de verdade: busca
-// os gestores do setor e manda a mensagem pra cada um.
-//
-// Zero gestor com telefone não é erro -- ObterGestoresDoSetor já filtra
-// quieto quem não tem telefone/está desativado, e simplesmente não há pra
-// quem mandar.
-//
-// Falha em UM gestor não impede os outros -- errors.Join acumula, mesmo
-// espírito de AbrirSolicitacoesDePreventivasVencidas (erro não-nil aqui é
-// resultado parcial, não fracasso total). Quem chama loga; este método não
-// loga nada sozinho.
+// novaNotificacao é o que um evento produz, antes de saber pra quem vai.
+type novaNotificacao struct {
+	tipo   repository.TipoNotificacao
+	titulo string
+	corpo  string
+	url    string
+}
+
+// NotificarNovaSolicitacao avisa todo gestor cujo escopo alcança o setor
+// (ObterGestoresDoSetor). Nenhum gestor não é erro -- simplesmente não há pra
+// quem avisar, e a solicitação está na fila do mesmo jeito.
 func (n *NotificacaoService) NotificarNovaSolicitacao(ctx context.Context, tenantId, setorId int64, dados DadosNotificacao) error {
 
-	repo := repository.New(n.Pool)
+	ids, err := n.gestoresDoSetor(ctx, tenantId, setorId)
+	if err != nil {
+		return err
+	}
 
-	gestores, err := repo.ObterGestoresDoSetor(ctx, repository.ObterGestoresDoSetorParams{
+	return n.entregar(ctx, tenantId, ids, montarNovaSolicitacao(dados))
+}
+
+// NotificarOSConcluida avisa os mesmos gestores da solicitação nova: quem
+// acompanha o setor fica sabendo que o problema foi resolvido.
+func (n *NotificacaoService) NotificarOSConcluida(ctx context.Context, tenantId, setorId int64, dados DadosNotificacao) error {
+
+	ids, err := n.gestoresDoSetor(ctx, tenantId, setorId)
+	if err != nil {
+		return err
+	}
+
+	return n.entregar(ctx, tenantId, ids, montarOSConcluida(dados))
+}
+
+func (n *NotificacaoService) NotificarSolicitacaoAceita(ctx context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error {
+
+	return n.entregar(ctx, tenantId, []int64{solicitanteId}, montarSolicitacaoAceita(dados))
+}
+
+func (n *NotificacaoService) NotificarSolicitacaoRejeitada(ctx context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error {
+
+	return n.entregar(ctx, tenantId, []int64{solicitanteId}, montarSolicitacaoRejeitada(dados))
+}
+
+func (n *NotificacaoService) NotificarOSAberta(ctx context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error {
+
+	return n.entregar(ctx, tenantId, []int64{tecnicoId}, montarOSAberta(dados))
+}
+
+// NotificarOSPreventiva avisa o técnico designado. Quem chama (o job de
+// preventiva vencida) já conferiu que ele é um técnico ativo do tenant -- e,
+// se não fosse, a FK composta recusaria a linha.
+func (n *NotificacaoService) NotificarOSPreventiva(ctx context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error {
+
+	return n.entregar(ctx, tenantId, []int64{tecnicoId}, montarOSPreventiva(dados))
+}
+
+// gestoresDoSetor é todo gestor ativo cujo escopo alcança o setor
+// (ObterGestoresDoSetor). Nenhum não é erro -- entregar não grava nada.
+func (n *NotificacaoService) gestoresDoSetor(ctx context.Context, tenantId, setorId int64) ([]int64, error) {
+
+	gestores, err := repository.New(n.Pool).ObterGestoresDoSetor(ctx, repository.ObterGestoresDoSetorParams{
 		TenantID: tenantId,
 		SetorID:  setorId,
 	})
 	if err != nil {
-		return fmt.Errorf("buscar gestores do setor %d: %w", setorId, err)
+		return nil, fmt.Errorf("buscar gestores do setor %d: %w", setorId, err)
 	}
 
-	texto := montarTexto(dados)
+	ids := make([]int64, len(gestores))
+	for i, g := range gestores {
+		ids[i] = g.ID
+	}
+	return ids, nil
+}
+
+// entregar é o único ponto por onde uma notificação sai: grava uma linha por
+// destinatário, numa ida só ao banco, e DEPOIS manda o Web Push pros aparelhos
+// deles. O push é só o aviso; a notificação de verdade é a linha, que o
+// sininho mostra mesmo se o push nunca chegar -- por isso falha de push não
+// desfaz nada.
+func (n *NotificacaoService) entregar(ctx context.Context, tenantId int64, usuarioIds []int64, nova novaNotificacao) error {
+
+	if len(usuarioIds) == 0 {
+		return nil
+	}
+
+	criadas, err := repository.New(n.Pool).CriarNotificacoes(ctx, repository.CriarNotificacoesParams{
+		TenantID:   tenantId,
+		Tipo:       nova.tipo,
+		Titulo:     nova.titulo,
+		Corpo:      nova.corpo,
+		Url:        nova.url,
+		UsuarioIds: usuarioIds,
+	})
+	if err != nil {
+		return fmt.Errorf("gravar notificação %s: %w", nova.tipo, err)
+	}
+
+	if n.Push == nil {
+		return nil
+	}
+
+	return n.enviarPush(ctx, tenantId, criadas, nova)
+}
+
+// MensagemPush é o JSON que chega no service worker (evento `push`) -- o
+// suficiente pra mostrar a notificação, pôr o número no ícone (naoLidas) e,
+// no toque, marcar como lida (id) e abrir a tela certa (url). Pequeno de
+// propósito: o limite do payload de Web Push é ~4KB.
+type MensagemPush struct {
+	Id       int64  `json:"id"`
+	Tipo     string `json:"tipo"`
+	Titulo   string `json:"titulo"`
+	Corpo    string `json:"corpo"`
+	Url      string `json:"url"`
+	NaoLidas int64  `json:"naoLidas"`
+}
+
+// tiposUrgentes vão com Urgency: high -- é o que faz o Android entregar mesmo
+// em economia de bateria. São os que pedem ação de alguém: o gestor decidir, o
+// técnico ir. Aceita/rejeitada/concluída são informativos e vão "normal".
+var tiposUrgentes = map[repository.TipoNotificacao]bool{
+	repository.TipoNotificacaoSolicitacaoNova: true,
+	repository.TipoNotificacaoOsAberta:        true,
+	repository.TipoNotificacaoOsPreventiva:    true,
+}
+
+// enviarPush manda a notificação recém-gravada pra cada aparelho inscrito dos
+// destinatários, com a contagem de não lidas de cada um (já incluindo esta).
+// Inscrição que o serviço de push diz que morreu (404/410) é apagada; o resto
+// das falhas só vai pro log de quem chamou (errors.Join), sem parar os outros
+// aparelhos.
+func (n *NotificacaoService) enviarPush(ctx context.Context, tenantId int64, criadas []repository.CriarNotificacoesRow, nova novaNotificacao) error {
+
+	repo := repository.New(n.Pool)
+
+	idDaNotificacao := make(map[int64]int64, len(criadas))
+	usuarioIds := make([]int64, len(criadas))
+	for i, c := range criadas {
+		idDaNotificacao[c.UsuarioID] = c.ID
+		usuarioIds[i] = c.UsuarioID
+	}
+
+	dispositivos, err := repo.ListarDispositivosPushDosUsuarios(ctx, repository.ListarDispositivosPushDosUsuariosParams{
+		TenantID:   tenantId,
+		UsuarioIds: usuarioIds,
+	})
+	if err != nil {
+		return fmt.Errorf("listar aparelhos pra push: %w", err)
+	}
+	if len(dispositivos) == 0 {
+		return nil
+	}
+
+	contagens, err := repo.ContarNaoLidasDosUsuarios(ctx, repository.ContarNaoLidasDosUsuariosParams{
+		TenantID:   tenantId,
+		UsuarioIds: usuarioIds,
+	})
+	if err != nil {
+		return fmt.Errorf("contar não lidas pra push: %w", err)
+	}
+	naoLidas := make(map[int64]int64, len(contagens))
+	for _, c := range contagens {
+		naoLidas[c.UsuarioID] = c.Total
+	}
 
 	var falhas error
-	for _, gestor := range gestores {
-		if gestor.Telefone == nil {
-			// Defesa: a query já filtra IS NOT NULL. Nunca deveria disparar.
-			continue
+	for _, d := range dispositivos {
+		mensagem, err := json.Marshal(MensagemPush{
+			Id:       idDaNotificacao[d.UsuarioID],
+			Tipo:     string(nova.tipo),
+			Titulo:   nova.titulo,
+			Corpo:    nova.corpo,
+			Url:      nova.url,
+			NaoLidas: naoLidas[d.UsuarioID],
+		})
+		if err != nil {
+			return fmt.Errorf("montar mensagem de push: %w", err)
 		}
-		if err := n.enviarTexto(ctx, *gestor.Telefone, texto); err != nil {
-			falhas = errors.Join(falhas, fmt.Errorf("gestor %d (%s): %w", gestor.ID, gestor.Nome, err))
+
+		status, err := n.Push.Enviar(ctx, DestinoPush{Endpoint: d.Endpoint, P256dh: d.P256dh, Auth: d.Auth}, mensagem, tiposUrgentes[nova.tipo])
+		switch {
+		case err != nil:
+			falhas = errors.Join(falhas, fmt.Errorf("push pro aparelho %d: %w", d.ID, err))
+		case status == http.StatusNotFound || status == http.StatusGone:
+			if err := repo.RemoverDispositivoPush(ctx, d.ID); err != nil {
+				falhas = errors.Join(falhas, fmt.Errorf("apagar aparelho %d (inscrição morta): %w", d.ID, err))
+			}
+		case status >= 300:
+			falhas = errors.Join(falhas, fmt.Errorf("push pro aparelho %d: serviço de push respondeu %d", d.ID, status))
 		}
 	}
 
 	return falhas
 }
 
-// NotificarOSPreventiva manda a mensagem para o técnico designado na
-// preventiva, depois que o job já abriu a OS dele.
-//
-// Lê o usuário por id com ObterUsuarioPorID em vez de uma query própria: o
-// destinatário aqui é um só e já é conhecido pelo chamador, então não há
-// escopo a resolver -- é o oposto de ObterGestoresDoSetor, que existe
-// justamente porque "os gestores daquele setor" é uma pergunta com EXISTS
-// dentro.
-//
-// Técnico sem telefone não é erro, é o mesmo degrade silencioso de
-// ObterGestoresDoSetor: não há para onde mandar, e a OS foi criada do mesmo
-// jeito -- ele a encontra no painel. Falhar aqui faria o cron reportar
-// fracasso por uma mensagem que nunca teve destinatário.
-func (n *NotificacaoService) NotificarOSPreventiva(ctx context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error {
+// ChavePublicaPush é GET /push/chave-publica. nil = push desligado aqui.
+func (n *NotificacaoService) ChavePublicaPush() model.ConfiguracaoPush {
 
-	tecnico, err := repository.New(n.Pool).ObterUsuarioPorID(ctx, repository.ObterUsuarioPorIDParams{
-		ID:       tecnicoId,
-		TenantID: tenantId,
-	})
-	if err != nil {
-		return fmt.Errorf("buscar técnico %d: %w", tecnicoId, err)
+	if n.Push == nil {
+		return model.ConfiguracaoPush{}
 	}
-
-	if tecnico.Telefone == nil || strings.TrimSpace(*tecnico.Telefone) == "" {
-		return nil
-	}
-
-	return n.enviarTexto(ctx, *tecnico.Telefone, montarTextoOsPreventiva(dados))
+	chave := n.Push.ChavePublica()
+	return model.ConfiguracaoPush{ChavePublica: &chave}
 }
 
-// montarTextoOsPreventiva é o terceiro template, e o único que fala com quem
-// vai executar em vez de com quem decide -- por isso não termina em "acesse o
-// painel para avaliar": não há o que avaliar, a OS já está aberta no nome
-// dele.
-func montarTextoOsPreventiva(d DadosNotificacao) string {
+// SalvarInscricaoPush é POST /push/inscricoes: guarda o aparelho do usuário
+// logado. Endpoint fora da lista de serviços de push ou chave malformada é
+// ErrValidacao (400) -- ver validarEndpointPush, a trava contra SSRF.
+func (n *NotificacaoService) SalvarInscricaoPush(ctx context.Context, tenantId, usuarioId int64, payload model.InscricaoPushPayload, userAgent string) error {
 
-	return fmt.Sprintf(
-		"🛠️ Preventiva agendada — %s / %s\n%s\n\"%s\"\n\nA OS já está aberta no seu painel.",
-		d.LojaNome, d.SetorNome, d.Alvo, d.Descricao,
-	)
-}
-
-// montarTexto escolhe o template pelos dados que têm: com solicitante, é a
-// mensagem "alguém abriu um pedido"; sem, é "uma preventiva venceu sozinha".
-func montarTexto(d DadosNotificacao) string {
-
-	if d.SolicitanteNome != nil {
-		return fmt.Sprintf(
-			"🔧 Nova solicitação — %s / %s\n%s\nSolicitante: %s\n\"%s\"\n\nAcesse o painel para avaliar.",
-			d.LojaNome, d.SetorNome, d.Alvo, *d.SolicitanteNome, d.Descricao,
-		)
+	if err := validarEndpointPush(payload.Endpoint); err != nil {
+		return err
+	}
+	if err := validarChavesPush(payload.Keys.P256dh, payload.Keys.Auth); err != nil {
+		return err
 	}
 
-	return fmt.Sprintf(
-		"🛠️ Preventiva vencida — %s / %s\n%s\n\"%s\"\n\nAcesse o painel para avaliar.",
-		d.LojaNome, d.SetorNome, d.Alvo, d.Descricao,
-	)
-}
-
-// normalizarTelefone reduz o telefone cadastrado (livre, sem máscara --
-// usuario.telefone não tem validação de formato em lugar nenhum, ver
-// internal/model/usuarios.go) pro que a Evolution API espera: só dígitos,
-// com o 55 (DDI do Brasil) na frente. Sem isto "(11) 99999-0001" nunca
-// bateria com nenhum número de WhatsApp de verdade.
-//
-// Só cobre o Brasil de propósito -- é o escopo do projeto inteiro (fuso
-// horário fixo em America/Sao_Paulo, valores em R$, sem i18n em lugar
-// nenhum).
-func normalizarTelefone(bruto string) string {
-
-	var digitos strings.Builder
-	for _, r := range bruto {
-		if r >= '0' && r <= '9' {
-			digitos.WriteRune(r)
+	var agente *string
+	if userAgent != "" {
+		if len(userAgent) > 300 {
+			userAgent = userAgent[:300]
 		}
+		agente = &userAgent
 	}
 
-	numero := digitos.String()
-	if strings.HasPrefix(numero, "55") && len(numero) >= 12 {
-		return numero
-	}
-	return "55" + numero
-}
-
-// enviarTexto é a única função que fala HTTP com a Evolution API --
-// POST /message/sendText/{instancia}, testado contra a instância real
-// (endpoint e formato do corpo confirmados na prática, não só pela doc: a
-// doc pública descreve o path como /{instancia}/message/sendText, invertido
-// -- 404 contra a instância de verdade. É /message/sendText/{instancia},
-// mesmo padrão de /instance/connect/{instancia}).
-func (n *NotificacaoService) enviarTexto(ctx context.Context, telefoneBruto, texto string) error {
-
-	corpo, err := json.Marshal(map[string]string{
-		"number": normalizarTelefone(telefoneBruto),
-		"text":   texto,
-	})
-	if err != nil {
-		return fmt.Errorf("montar corpo da mensagem: %w", err)
-	}
-
-	endpoint := fmt.Sprintf("%s/message/sendText/%s", n.url, n.instancia)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(corpo))
-	if err != nil {
-		return fmt.Errorf("montar requisição: %w", err)
-	}
-	req.Header.Set("apiKey", n.apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := n.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("chamar evolution api: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("evolution api respondeu %d", resp.StatusCode)
+	if err := repository.New(n.Pool).SalvarDispositivoPush(ctx, repository.SalvarDispositivoPushParams{
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+		Endpoint:  payload.Endpoint,
+		P256dh:    payload.Keys.P256dh,
+		Auth:      payload.Keys.Auth,
+		UserAgent: agente,
+	}); err != nil {
+		return helper.TraduzErroPostgres(err)
 	}
 
 	return nil
+}
+
+// RemoverInscricaoPush é POST /push/inscricoes/remover. Idempotente: endpoint
+// que não existe (ou não é deste usuário) responde sucesso sem apagar nada.
+func (n *NotificacaoService) RemoverInscricaoPush(ctx context.Context, tenantId, usuarioId int64, endpoint string) error {
+
+	if err := repository.New(n.Pool).RemoverDispositivoPushDoUsuario(ctx, repository.RemoverDispositivoPushDoUsuarioParams{
+		Endpoint:  endpoint,
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+	}); err != nil {
+		return helper.TraduzErroPostgres(err)
+	}
+
+	return nil
+}
+
+// montarNovaSolicitacao é o texto pro Gestor: alguém pediu algo no setor
+// dele. Título curto e corpo de uma linha porque é também o que o push mostra
+// na tela de bloqueio, onde o sistema corta o que passar de ~2 linhas.
+//
+// O ramo sem solicitante é defensivo: desde a migration 000008 a preventiva
+// vencida avisa o técnico (NotificarOSPreventiva) e não passa mais por aqui.
+func montarNovaSolicitacao(d DadosNotificacao) novaNotificacao {
+
+	corpo := fmt.Sprintf("%s — \"%s\"", d.Alvo, d.Descricao)
+	if d.SolicitanteNome != nil {
+		corpo = fmt.Sprintf("%s — %s: \"%s\"", d.Alvo, *d.SolicitanteNome, d.Descricao)
+	}
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoSolicitacaoNova,
+		titulo: fmt.Sprintf("Nova solicitação · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  corpo,
+		url:    fmt.Sprintf("/painel-gestor?solicitacao=%d", d.SolicitacaoId),
+	}
+}
+
+// montarOSPreventiva fala com quem vai executar, não com quem decide: a OS já
+// está aberta no nome dele, não há o que avaliar.
+func montarOSPreventiva(d DadosNotificacao) novaNotificacao {
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoOsPreventiva,
+		titulo: fmt.Sprintf("Preventiva agendada · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  fmt.Sprintf("%s — \"%s\". A OS já está no seu painel.", d.Alvo, d.Descricao),
+		url:    fmt.Sprintf("/painel-tecnico?os=%d", d.OrdemServicoId),
+	}
+}
+
+// montarSolicitacaoAceita fala com o Solicitante: o pedido dele virou OS e
+// já tem alguém pra executar. A url é a lista dele, não o painel do gestor.
+func montarSolicitacaoAceita(d DadosNotificacao) novaNotificacao {
+
+	corpo := fmt.Sprintf("%s — virou OS.", d.Alvo)
+	if d.TecnicoNome != nil {
+		corpo = fmt.Sprintf("%s — virou OS com %s.", d.Alvo, *d.TecnicoNome)
+	}
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoSolicitacaoAceita,
+		titulo: fmt.Sprintf("Solicitação aceita · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  corpo,
+		url:    fmt.Sprintf("/minhas-solicitacoes?solicitacao=%d", d.SolicitacaoId),
+	}
+}
+
+// montarSolicitacaoRejeitada leva o motivo no corpo: é a única coisa que o
+// Solicitante precisa saber pra decidir se pede de novo.
+func montarSolicitacaoRejeitada(d DadosNotificacao) novaNotificacao {
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoSolicitacaoRejeitada,
+		titulo: fmt.Sprintf("Solicitação rejeitada · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  fmt.Sprintf("%s — motivo: \"%s\"", d.Alvo, d.MotivoRejeicao),
+		url:    fmt.Sprintf("/minhas-solicitacoes?solicitacao=%d", d.SolicitacaoId),
+	}
+}
+
+// montarOSAberta fala com o Técnico: tem OS nova no nome dele. A urgência vai
+// no corpo porque é o que decide se ele larga o que está fazendo.
+func montarOSAberta(d DadosNotificacao) novaNotificacao {
+
+	corpo := fmt.Sprintf("%s — \"%s\"", d.Alvo, d.Descricao)
+	if d.Urgencia != "" {
+		corpo = fmt.Sprintf("%s — \"%s\" · Urgência %s", d.Alvo, d.Descricao, d.Urgencia)
+	}
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoOsAberta,
+		titulo: fmt.Sprintf("Nova OS pra você · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  corpo,
+		url:    fmt.Sprintf("/painel-tecnico?os=%d", d.OrdemServicoId),
+	}
+}
+
+// montarOSConcluida fala com o Gestor: a OS do setor dele foi encerrada.
+func montarOSConcluida(d DadosNotificacao) novaNotificacao {
+
+	corpo := fmt.Sprintf("%s — encerrada.", d.Alvo)
+	if d.TecnicoNome != nil {
+		corpo = fmt.Sprintf("%s — encerrada por %s.", d.Alvo, *d.TecnicoNome)
+	}
+
+	return novaNotificacao{
+		tipo:   repository.TipoNotificacaoOsConcluida,
+		titulo: fmt.Sprintf("OS concluída · %s / %s", d.LojaNome, d.SetorNome),
+		corpo:  corpo,
+		url:    fmt.Sprintf("/painel-gestor?os=%d", d.OrdemServicoId),
+	}
+}
+
+// emSegundoPlano roda um aviso fora da request: depois do commit, em
+// goroutine própria e com context.Background() + timeout (nunca o ctx da
+// request, que morre quando a resposta é escrita). Falha só vai pro log --
+// notificação é best-effort e nunca derruba nem atrasa a ação que a gerou.
+func emSegundoPlano(rotulo string, aviso func(ctx context.Context) error, atributos ...any) {
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		if err := aviso(ctx); err != nil {
+			slog.ErrorContext(ctx, rotulo, append(atributos, "err", err)...)
+		}
+	}()
+}
+
+// ListarNotificacoes é GET /notificacoes -- só as do próprio usuário, mais
+// novas primeiro, paginada no servidor (a tabela só cresce).
+func (n *NotificacaoService) ListarNotificacoes(ctx context.Context, tenantId, usuarioId int64, pagina int32) (model.RespostaPaginada[model.Notificacao], error) {
+
+	var vazio model.RespostaPaginada[model.Notificacao]
+
+	if pagina < 1 {
+		pagina = 1
+	}
+
+	repo := repository.New(n.Pool)
+
+	total, err := repo.ContarNotificacoesDoUsuario(ctx, repository.ContarNotificacoesDoUsuarioParams{
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	linhas, err := repo.ListarNotificacoesDoUsuario(ctx, repository.ListarNotificacoesDoUsuarioParams{
+		TenantID:     tenantId,
+		UsuarioID:    usuarioId,
+		Limite:       TamanhoPaginaNotificacoes,
+		Deslocamento: (pagina - 1) * TamanhoPaginaNotificacoes,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	dados := make([]model.Notificacao, len(linhas))
+	for i, l := range linhas {
+		dados[i] = model.MontarNotificacao(l)
+	}
+
+	return model.RespostaPaginada[model.Notificacao]{
+		Dados:        dados,
+		Pagina:       pagina,
+		TotalPaginas: int32((total + TamanhoPaginaNotificacoes - 1) / TamanhoPaginaNotificacoes),
+		Total:        total,
+	}, nil
+}
+
+// ContarNaoLidas é GET /notificacoes/nao-lidas -- o número do sininho.
+func (n *NotificacaoService) ContarNaoLidas(ctx context.Context, tenantId, usuarioId int64) (model.ContagemNaoLidas, error) {
+
+	total, err := repository.New(n.Pool).ContarNotificacoesNaoLidas(ctx, repository.ContarNotificacoesNaoLidasParams{
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+	})
+	if err != nil {
+		return model.ContagemNaoLidas{}, helper.TraduzErroPostgres(err)
+	}
+
+	return model.ContagemNaoLidas{Total: total}, nil
+}
+
+// MarcarComoLida é POST /notificacoes/:id/lida. Notificação de outro usuário
+// é 404, igual a uma inexistente -- não confirma que o id existe. Devolve a
+// contagem nova pro front atualizar o sininho sem outro request.
+func (n *NotificacaoService) MarcarComoLida(ctx context.Context, tenantId, usuarioId, id int64) (model.ContagemNaoLidas, error) {
+
+	linhas, err := repository.New(n.Pool).MarcarNotificacaoComoLida(ctx, repository.MarcarNotificacaoComoLidaParams{
+		ID:        id,
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+	})
+	if err != nil {
+		return model.ContagemNaoLidas{}, helper.TraduzErroPostgres(err)
+	}
+	if linhas == 0 {
+		return model.ContagemNaoLidas{}, helper.ErrNaoEncontrado
+	}
+
+	return n.ContarNaoLidas(ctx, tenantId, usuarioId)
+}
+
+// MarcarTodasComoLidas é POST /notificacoes/lidas. Devolve a contagem nova
+// pelo mesmo motivo de MarcarComoLida -- e ela não é sempre zero: uma
+// notificação pode chegar entre o UPDATE e a contagem.
+func (n *NotificacaoService) MarcarTodasComoLidas(ctx context.Context, tenantId, usuarioId int64) (model.ContagemNaoLidas, error) {
+
+	if err := repository.New(n.Pool).MarcarTodasNotificacoesComoLidas(ctx, repository.MarcarTodasNotificacoesComoLidasParams{
+		TenantID:  tenantId,
+		UsuarioID: usuarioId,
+	}); err != nil {
+		return model.ContagemNaoLidas{}, helper.TraduzErroPostgres(err)
+	}
+
+	return n.ContarNaoLidas(ctx, tenantId, usuarioId)
 }

@@ -3,6 +3,7 @@ module github.com/radaptech/sistema-OSm--Back-end
 go 1.26.5
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.43.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.36
 	github.com/golang-jwt/jwt/v5 v5.3.1

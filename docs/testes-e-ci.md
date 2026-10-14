@@ -142,13 +142,28 @@ suspeitosamente rápido (provavelmente é `t.Skip` por falta de Postgres).
     desativada/inexistente, marcador de impacto desconhecido), escopo nas duas
     listagens e no obter-por-id, resumo, `AbrirOS` (feliz + técnico inválido + duplo) e
     `Rejeitar` (feliz + duplo + motivo vazio).
-  - `notificacaoService_test.go` — `montarTexto`/`normalizarTelefone` puros, e
-    `TestNotificarNovaSolicitacao` de integração contra Postgres **e a Evolution API
-    real** (`evolutionDeTeste`, mesmo critério de `bancoDeTeste`: sem ela alcançável,
-    `t.Skip`). `notificacaoWiringIntegracao_test.go` prova o outro lado com um fake
-    (`notificadorFake`, grava o que recebeu e sincroniza via channel com a goroutine):
+  - `notificacaoIntegracao_test.go` — quem recebe (gestor do setor marcado e da loja
+    inteira sim; de outro setor, outra loja ou desativado não), o texto e a `url`, a
+    paginação, e o "lida" (idempotente, alheia/outro tenant/inexistente → 404, "todas"
+    só mexe nas do próprio usuário); o banco recusando destinatário de outro tenant (FK)
+    e `url` pra fora (`ck_notificacao_url`).
+  - `TestMontarNotificacoes` (no mesmo arquivo, puro) trava texto e `url` dos seis tipos.
+  - `pushService_test.go` (puro): a lista anti-SSRF de `validarEndpointPush` (sufixo/prefixo
+    enganoso, porta, userinfo, IP), o formato das chaves, e `TestWebPushEnviar` passando pela
+    **lib de verdade** com um `RoundTripper` no lugar do Google — confere cifra
+    (`aes128gcm`, corpo ilegível), `Authorization: vapid`, `TTL`, `Urgency`, status 410
+    repassado, endpoint fora da lista nem saindo, e redirect **não** seguido.
+  - `pushIntegracao_test.go`: `entregar` mandando pra todos os aparelhos dos destinatários,
+    com o `naoLidas` e o `id` de cada um; 410 apaga a inscrição, 500 mantém e vira erro (sem
+    desfazer a notificação); `Push == nil` não manda nada. E o dono do aparelho (upsert troca,
+    remover só o próprio, idempotente, FK de tenant).
+  - `notificacaoWiringIntegracao_test.go` prova o wiring com um fake que grava **cada
+    chamada, em ordem** (`espera(t, "Metodo")`/`nenhuma(t)`); `TestFluxoNotificaCadaPasso`
+    segue um pedido inteiro (nova → aceita: técnico e depois solicitante → iniciar não
+    avisa → encerrar avisa o setor; e a rejeição). Além disso,
     `SolicitacaoService`/`PreventivaService` chamando o `Notificador` com tenant/setor
-    certos, `Alvo` formatado certo nos dois tipos, `SolicitanteNome` presente/ausente
+    certos, `Alvo` formatado certo nos dois tipos, `SolicitacaoId`/`OrdemServicoId` (a `url`
+    do clique), `SolicitanteNome` presente/ausente
     conforme a origem, e `Notificador == nil` não quebrando nada.
   - **Teste de escrita transacional confere o banco, não o retorno.** Em
     `maquinarioIntegracao_test.go` a máquina criada é localizada pela *listagem*, não pelo

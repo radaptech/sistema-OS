@@ -115,8 +115,7 @@ nasce da aprovação do Gestor, nunca de um `POST /ordens-servico`) e a **leitur
 mesmo de essas linhas existirem.
 
 Prontos e testados, fora da lista: os **indicadores de máquina**, o **job de preventiva
-vencida** (falta só o Cron Job no Railway), a **notificação por WhatsApp** (falta só o
-chip dedicado) — cada um com seção própria abaixo — e a **recuperação de senha por
+vencida** (falta só o Cron Job no Railway) — cada um com seção própria abaixo — e a **recuperação de senha por
 e-mail** (migration `000013`; falta só `RESEND_API_KEY`/`URL_FRONTEND_FORMATO` em produção
 e o domínio verificado no Resend — ver "Recuperação de senha" em `docs/api-e-rotas.md`).
 
@@ -332,74 +331,77 @@ card, zerado quando não tem OS). Os dois recortes usam o MESMO `resumir`
   `internal/service/indicadorIntegracao_test.go` (a query contra Postgres: OS aberta não
   entra, os dois relógios, o mês em BRT, escopo → 404, administrador sem escopo).
 
-## Notificação de solicitação por WhatsApp (feito — infra, código e wiring; falta o chip)
+## Notificações (central no app + Web Push)
 
-Gestor não fica com o app aberto o tempo todo — o sistema avisa por WhatsApp sempre que
-uma Solicitação humana nasce `Pendente` (as duas criações do Solicitante), pro Gestor
-saber sem precisar checar o painel. Desde a `000008` a preventiva vencida não passa mais
-pelo Gestor, e quem recebe o aviso é o **Técnico** designado (`NotificarOSPreventiva`, ver
-a seção do job). A OS aberta pelo Gestor (`AbrirOS`) ainda **não** avisa o Técnico.
+**O WhatsApp saiu em 13/10/2026.** A notificação existiu via Evolution API self-hosted
+(WhatsApp Web por baixo, número dedicado banível, nunca chegou a ter o chip pareado em
+produção). Saiu por não escalar: um número só pra todos os tenants, risco de ban
+derrubando todo mundo junto, mensagem sem ação (o destinatário ainda tinha que abrir o
+sistema e achar a OS) e nenhum registro do que foi visto. O substituto é o próprio app
+como **PWA**: central de notificações dentro do sistema + Web Push no celular/desktop.
 
-**Decisão: Evolution API self-hosted, não a Cloud API oficial da Meta.** Não é o caminho
-"correto" — é WhatsApp Web por baixo (lib Baileys, engenharia reversa), viola os termos
-do WhatsApp e o número pode ser banido. Mas pro volume daqui (poucas mensagens por dia,
-pra 2-3 destinatários fixos que reconhecem o remetente) o risco na prática é baixo — é o
-oposto do padrão que costuma levar a ban (rajada, destinatário que não reconhece,
-conteúdo de marketing). Ganho real: zero aprovação de template pela Meta (a oficial
-exige, e leva dias, pra toda mensagem business-initiated fora da janela de 24h), texto
-livre, e roda no mesmo Docker Compose que já existe — custo marginal zero, em vez de
-mensalidade de um provedor gerenciado (Z-API e primos, ~R$60-100/mês fixos) ou do
-por-mensagem da oficial (~R$0,035/mensagem, categoria *utility*).
+**Central de notificações (feita, migration `000018`).** Notificar é gravar **uma linha
+por destinatário** em `notificacao` — "lida" é de cada um, e é o que o sininho e o badge
+do ícone contam. `titulo`/`corpo` são o texto pronto do momento do evento (não remontados
+na leitura) e `url` é o destino do clique (o painel abre o modal daquele item). Rotas em
+`docs/api-e-rotas.md`.
 
-**Requer número dedicado, nunca o do Gestor.** Quem fica banível é o número que
-autentica no Evolution API via QR (como um WhatsApp Web comum) — um chip pré-pago
-qualquer, comprado só pra isso, com WhatsApp Business instalado. O número do Gestor é só
-destinatário, nunca entra em risco.
+| evento | onde dispara | quem recebe | `tipo` | `url` |
+|---|---|---|---|---|
+| solicitação nova (do Solicitante) | `CadastrarSolicitacaoMaquinario`/`Reparo` | gestores do setor¹ | `solicitacao_nova` | `/painel-gestor?solicitacao=N` |
+| gestor aceitou (abriu a OS da fila) | `AbrirOS` | o Solicitante | `solicitacao_aceita` | `/minhas-solicitacoes?solicitacao=N` |
+| gestor rejeitou | `Rejeitar` | o Solicitante (com o motivo) | `solicitacao_rejeitada` | `/minhas-solicitacoes?solicitacao=N` |
+| gestor abriu OS (da fila ou direta) | `AbrirOS`, `CadastrarSolicitacaoDireta` | o Técnico designado | `os_aberta` | `/painel-tecnico?os=N` |
+| preventiva vencida (job) | `abrirSolicitacaoDaPreventiva` | o Técnico da preventiva | `os_preventiva` | `/painel-tecnico?os=N` |
+| técnico encerrou a OS (qualquer origem) | `OrdemServicoService.Encerrar` | gestores do setor¹ | `os_concluida` | `/painel-gestor?os=N` |
 
-**Infra** (`../docker-compose.yml`, repo `sistema-os-infra`, PR #1): três serviços —
-`evolution-postgres` + `evolution-redis` (estado da sessão do WhatsApp, banco e cache
-PRÓPRIOS, separados do banco da aplicação) e `evolution-api`
-(`evoapicloud/evolution-api:v2.3.7`, porta `8092` no host). Testada de ponta a ponta:
-instância criada, QR de pareamento obtido (PNG em base64 real), estado `connecting`
-sobrevivendo a um restart do container (prova que é o Postgres persistindo, não
-memória).
+¹ todo gestor ativo cujo escopo alcança o setor (`ObterGestoresDoSetor`). Administrador
+não recebe — não tem escopo, e o painel dele não é de acompanhamento do dia a dia.
 
-**Código** (`radaptech/sistema-OSm--Back-end`, PRs #11/#14):
-- `ObterGestoresDoSetor` (`usuario.sql`) — dado um `setor_id`, todo gestor cujo escopo
-  alcança ele (mesmo `EXISTS` de `ListarSolicitacoes`), ativo, com telefone. Sem
-  telefone/desativado/administrador não aparece — não é erro, é degrade silencioso.
-- `NotificacaoService` (`notificacaoService.go`) — cliente HTTP da Evolution API
-  (`POST /message/sendText/{instancia}`, **path confirmado testando contra a instância
-  real** — a documentação pública erra, descreve o inverso). `NotificadorInterface` é o
-  que `SolicitacaoService`/`PreventivaService` dependem, nunca a struct concreta.
-  `normalizarTelefone` existe porque `usuario.telefone` é texto livre sem máscara em
-  lugar nenhum do sistema. Falha em um gestor não impede os outros (`errors.Join`, mesmo
-  espírito do job de preventiva vencida).
-- `SolicitacaoService`/`PreventivaService` ganharam um campo público
-  `Notificador NotificadorInterface` (não parâmetro de construtor — mudar a assinatura
-  quebraria todo teste que já chama `NewRepoX(pool)` direto). `nil` (o zero value, o que
-  todo teste existente continua recebendo) significa "não notifica". Plugado nos 3
-  pontos que criam uma solicitação (as duas humanas avisam o Gestor; a de preventiva, o
-  Técnico), sempre em goroutine com
-  `context.Background()` + timeout de 15s (nunca o `ctx` da request, que morre quando a
-  resposta é escrita): `CadastrarSolicitacaoMaquinario`, `CadastrarSolicitacaoReparo`
-  (`Alvo` sai de `alvoDaSolicitacao`) e `abrirSolicitacaoDaPreventiva` (relê a máquina
-  via `ObterMaquinaPorID` depois do commit, porque `ListarPreventivasVencidasRow` não
-  carrega os nomes).
-- `router.go` conecta o `NotificacaoService` real; lê `EVOLUTION_API_URL`/`_API_KEY`/
-  `_INSTANCE_NAME` do `.env` (ver `.env-example`).
+**Não notificam, de propósito:** iniciar, pausar, retomar e acionar terceiro (aviso a cada
+passo da execução vira ruído e ninguém lê mais nenhum); a direta não avisa gestor nem
+"aceita" (quem pediu é o próprio gestor); o `AbrirOS` avisa o Técnico **antes** do
+Solicitante, na mesma goroutine — o técnico é quem tem trabalho a fazer.
 
-**Testado em 3 camadas, a última contra a Evolution API real**: puros
-(`montarTexto`/`normalizarTelefone`), `NotificacaoService` de integração contra Postgres
-+ Evolution API real, e o wiring com um fake que grava o que recebeu
-(`notificacaoWiringIntegracao_test.go`) — mais um smoke real+real (rodado e removido,
-não ficou no repo) que confirmou `CadastrarSolicitacaoMaquinario` voltando em ~12ms
-(assíncrono de verdade) com o log da falha esperada (WhatsApp não pareado) aparecendo
-~3s depois.
+**Como está montado:**
+- `NotificadorInterface` (um método por evento) + `DadosNotificacao` é o que
+  `SolicitacaoService`/`PreventivaService`/`OrdemServicoService` conhecem; `NotificacaoService` (`notificacaoService.go`) é a
+  implementação e também o service das rotas. Todo envio passa por `entregar` — é ali
+  que o Web Push entra, **depois** da gravação: o push é só o aviso, a notificação de
+  verdade é a linha, que o sininho mostra mesmo se o push nunca chegar.
+- O campo público `Notificador` nos três services (não parâmetro de construtor — mudar
+  a assinatura quebraria todo teste que chama `NewRepoX(pool)` direto; `nil` = não
+  notifica), chamado sempre **depois** do commit via `emSegundoPlano` (goroutine com
+  `context.Background()` + timeout de 15s — nunca o `ctx` da request, que morre quando a
+  resposta é escrita; falha só vai pro log). `Alvo` sai de `alvoDaSolicitacao`/`alvoDaOS`;
+  nos eventos de OS, `dadosDaOS` monta tudo da própria resposta da rota, sem query a
+  mais (por isso `criarOrdemServico` passou a preencher `tecnicoNome` na resposta do
+  abrir-os — o técnico já era lido pra validar).
+- `ObterGestoresDoSetor` não filtra mais por telefone (era critério do WhatsApp).
 
-**O que falta**: só o chip — comprar, instalar WhatsApp Business, escanear o QR
-(`POST /instance/connect/sistema-os-notificacoes` contra a Evolution API). Nenhum código
-pendente.
+**Web Push (migration `000019`).** O aparelho se inscreve
+(`POST /push/inscricoes`, a `PushSubscription` do navegador) e vira uma linha em
+`dispositivo_push`. `entregar` grava as notificações e, **depois**, manda um push cifrado pra
+cada aparelho dos destinatários (`enviarPush`), com `MensagemPush` = `{ id, tipo, titulo,
+corpo, url, naoLidas }` — o `id` é da notificação daquele usuário (o service worker marca como
+lida no toque) e `naoLidas` já conta esta (vira o número no ícone). O lado do navegador
+(botão "Ativar" no sininho, `sw.js`, logout desinscrevendo) está em
+`../sistema-OSm--Front-end/CLAUDE.md`, "Web Push".
+- **Urgência**: `solicitacao_nova`, `os_aberta` e `os_preventiva` vão `Urgency: high` (pedem
+  ação; é o que faz o Android entregar em economia de bateria); aceita/rejeitada/concluída,
+  `normal`. **TTL de 24h**: aparelho desligado mais que isso perde o push, não a notificação.
+- **Inscrição morta** (serviço de push responde 404/410: desinstalou, revogou permissão,
+  limpou o navegador) é apagada na hora. Outras falhas vão pro log e não param os outros
+  aparelhos.
+- ⚠️ **SSRF**: o endpoint é uma URL que o cliente manda e o servidor chama. Só passa host dos
+  serviços de push dos navegadores (`hostsPush` em `pushService.go`: FCM, Mozilla, Apple,
+  Windows), sem porta, sem userinfo, `https`; checado ao salvar **e** ao enviar, e o client
+  HTTP **não segue redirect**. Navegador com outro serviço de push entra na lista.
+- **Chaves VAPID**: `VAPID_PUBLIC_KEY`/`_PRIVATE_KEY`/`_SUBJECT` (`make chaves-vapid`). Sem
+  elas `NewWebPush` devolve nil, o router loga "Web Push desligado" e o sininho segue
+  funcionando sozinho. Trocar o par invalida toda inscrição existente.
+- ⚠️ A tabela só cresce. Não há limpeza ainda; se pesar, um job apagando lidas com mais
+  de N dias resolve (a paginação e o índice parcial de não lidas já seguram a leitura).
 
 ## OS direta — Gestor/Administrador abre sem fila (`POST /solicitacoes/direta`, feito)
 
@@ -411,8 +413,9 @@ a solicitação com `origem = 'direta'` e status `Convertida`, `solicitante_id` 
 - **Origem própria (migration `000014`) por causa da foto.** `fn_check_solicitacao_tem_foto`
   cobra anexo de `origem = 'solicitante'`; a foto existe para o Gestor avaliar antes de
   aprovar, e aqui quem abre é quem aprovaria. Sem foto, corpo JSON (sem multipart).
-- **Sem WhatsApp**: a direta não chama `notificar` — avisar o gestor do que ele mesmo abriu
-  é ruído. Aviso ao Técnico continua não existindo (igual ao abrir-os da fila).
+- **Avisa só o Técnico**: a direta não chama `notificar` nem avisa "aceita" — avisar o
+  gestor do que ele mesmo abriu é ruído. O Técnico recebe `os_aberta`, igual ao abrir-os
+  da fila (ver "Notificações").
 - **Corpo**: `tipo` (`maquinario`/`reparo`), `maquinaId` (maquinário — o setor sai da
   máquina) ou `item` + `setorId` (reparo), `descricao`, `impactos` (só maquinário),
   `urgencia`, `tecnicoId`. Técnico é obrigatório. Resposta é a `OrdemServico`, igual ao
@@ -474,7 +477,7 @@ e `make preventivas-vencidas`. Falta **só** criar o Cron Job no Railway.
 
 Desde a fase de notificação (ver seção própria acima), `abrirSolicitacaoDaPreventiva`
 também chama `notificarPreventivaVencida` no fim — mesmo `Notificador` opcional de
-`SolicitacaoService`, mesmo motivo de rodar em goroutine (uma preventiva com WhatsApp
+`SolicitacaoService`, mesmo motivo de rodar em goroutine (uma preventiva com envio
 lento não pode atrasar as outras 200 no mesmo laço). ⚠️ **Quem recebe é o técnico
 designado, não os gestores do setor** (`NotificarOSPreventiva`): a OS já nasce atribuída,
 então o Gestor não tem ação pendente e a mensagem seria ruído diário — o caminho mais

@@ -94,6 +94,14 @@ type Querier interface {
 	// pedir a senha. `em_aberto` é o que bloqueia DesativarMaquina: solicitação
 	// ainda na fila do Gestor ou OS que não chegou a 'Concluída'.
 	ContarHistoricoDaMaquina(ctx context.Context, arg ContarHistoricoDaMaquinaParams) (ContarHistoricoDaMaquinaRow, error)
+	// O número do badge de cada destinatário de um push, numa ida só -- cada um
+	// tem a sua contagem. Usuário sem nenhuma não lida não volta linha (é zero).
+	ContarNaoLidasDosUsuarios(ctx context.Context, arg ContarNaoLidasDosUsuariosParams) ([]ContarNaoLidasDosUsuariosRow, error)
+	// Mesmo WHERE de ListarNotificacoesDoUsuario -- divergir dá total que não bate
+	// com a página.
+	ContarNotificacoesDoUsuario(ctx context.Context, arg ContarNotificacoesDoUsuarioParams) (int64, error)
+	// O número do sininho e do badge do ícone (idx_notificacao_nao_lida).
+	ContarNotificacoesNaoLidas(ctx context.Context, arg ContarNotificacoesNaoLidasParams) (int64, error)
 	// Loja não é desativada por baixo dos setores: o escopo de acesso aponta pro
 	// setor (usuario_escopo_setor), então setor ativo pendurado em loja inativa
 	// continua dando acesso a uma loja que sumiu das listagens. Quem chama decide
@@ -254,6 +262,14 @@ type Querier interface {
 	// tem_nota_fiscal. O service confere antes para a mensagem sair nomeando o
 	// campo, mesmo padrão dos CHECKs espelhados em Go.
 	CriarNotaFiscal(ctx context.Context, arg CriarNotaFiscalParams) error
+	// Uma linha por destinatário, numa ida só ao banco (unnest): "solicitação
+	// nova" vai pra todo gestor do setor, e N INSERTs seriam N idas. O texto é o
+	// mesmo pra todos -- quem difere é só o usuario_id. Usuário de outro tenant
+	// não entra: a FK composta (tenant_id, usuario_id) recusa a linha inteira.
+	//
+	// Devolve o id de cada uma: vai no push, pro service worker marcar como lida
+	// a notificação certa quando o usuário toca nela.
+	CriarNotificacoes(ctx context.Context, arg CriarNotificacoesParams) ([]CriarNotificacoesRow, error)
 	// Insere a OS da preventiva vencida, na mesma transação de
 	// CriarSolicitacaoPreventiva e AvancarProximaData. É o irmão automático de
 	// CriarOrdemServicoDeSolicitacao: o mesmo INSERT, sem os campos que só um
@@ -574,6 +590,8 @@ type Querier interface {
 	// DELETE as chaves somem e os objetos ficariam órfãos no R2 sem ninguém
 	// saber quais eram. Quem apaga do R2 é o controller, depois do commit.
 	ListarChavesAnexosDaMaquina(ctx context.Context, arg ListarChavesAnexosDaMaquinaParams) ([]string, error)
+	// Todos os aparelhos dos destinatários de um evento, numa ida só.
+	ListarDispositivosPushDosUsuarios(ctx context.Context, arg ListarDispositivosPushDosUsuariosParams) ([]ListarDispositivosPushDosUsuariosRow, error)
 	// Só as ativas: a lista alimenta o select do ModalAcionarTerceiro, e oferecer
 	// uma empresa desativada é oferecer o que o Administrador acabou de tirar do ar.
 	//
@@ -667,6 +685,10 @@ type Querier interface {
 	//
 	// Array simples, sem paginação: o front pagina no cliente.
 	ListarMaquinas(ctx context.Context, arg ListarMaquinasParams) ([]ListarMaquinasRow, error)
+	// GET /notificacoes -- sempre só as do próprio usuário (o id vem do token),
+	// mais novas primeiro, paginada por LIMIT/OFFSET pelo mesmo motivo de
+	// ListarSolicitacoesDoSolicitante: model.RespostaPaginada pede os dois números.
+	ListarNotificacoesDoUsuario(ctx context.Context, arg ListarNotificacoesDoUsuarioParams) ([]ListarNotificacoesDoUsuarioRow, error)
 	// GET /ordens-servico -- um endpoint para os três painéis, o que muda é o
 	// filtro (front-end/src/servicos/servicoOrdensServico.ts):
 	//   Gestor  (PainelGestor)                 -> sem filtro, recorta pelo escopo
@@ -863,12 +885,20 @@ type Querier interface {
 	// certo: ele não pertence a loja alguma. ContarUsuarios repete o mesmo WHERE
 	// de propósito; divergir entre as duas dá total que não bate com a página.
 	ListarUsuarios(ctx context.Context, arg ListarUsuariosParams) ([]Usuario, error)
+	// :execrows pelo mesmo motivo das queries de desativar: notificação de outro
+	// usuário (ou inexistente) conta 0 e vira 404, em vez de responder sucesso
+	// sem ter feito nada. COALESCE e não "WHERE lida_em IS NULL": marcar de novo
+	// casa a linha e conta 1 (idempotente, como o front espera) e não reescreve
+	// a hora da primeira leitura.
+	MarcarNotificacaoComoLida(ctx context.Context, arg MarcarNotificacaoComoLidaParams) (int64, error)
 	// `AND status = 'Pendente'` no WHERE, não só no id: sem isso, abrir OS duas
 	// vezes seguidas passaria a segunda também (uq_os_solicitacao pegaria no
 	// INSERT de ordem_servico, mas tarde -- é melhor a solicitação já recusar
 	// antes de gastar o INSERT). 0 linhas afetadas é como o service sabe que não
 	// era Pendente e devolve ErrConflitoIntegridade, sem tentar o INSERT da OS.
 	MarcarSolicitacaoConvertida(ctx context.Context, arg MarcarSolicitacaoConvertidaParams) (int64, error)
+	// "Marcar todas como lidas" -- zero linhas é sucesso (já estava tudo lido).
+	MarcarTodasNotificacoesComoLidas(ctx context.Context, arg MarcarTodasNotificacoesComoLidasParams) error
 	ObterAnexosDaSolicitacao(ctx context.Context, solicitacaoID int64) ([]SolicitacaoAnexo, error)
 	// Plural de propósito, mesmo motivo de ObterImpactosDasSolicitacoes: quem
 	// monta uma página de solicitações busca os anexos de todas numa ida só.
@@ -893,9 +923,9 @@ type Querier interface {
 	// ida só ao banco -- é o que ListarUsuarios usa para montar o escopo de uma
 	// página inteira sem N+1.
 	ObterEscoposSessaoPorUsuarios(ctx context.Context, usuarioIds []int64) ([]ObterEscoposSessaoPorUsuariosRow, error)
-	// Quem recebe a notificação de WhatsApp quando uma Solicitação nasce naquele
-	// setor (ver CLAUDE.md, "Notificação de solicitação por WhatsApp"): todo
-	// gestor cujo escopo alcança o setor, mesmo critério de "alcança" do EXISTS
+	// Quem recebe a notificação quando uma Solicitação nasce naquele setor (ver
+	// "Notificações" em docs/fluxo-de-negocio.md): todo gestor cujo escopo
+	// alcança o setor, mesmo critério de "alcança" do EXISTS
 	// em ListarSolicitacoes/ListarMaquinas -- a loja bate E, dentro dela, acesso
 	// total OU o setor específico marcado.
 	//
@@ -905,10 +935,9 @@ type Querier interface {
 	// notificação de solicitação é só pro Gestor por ora (ver CLAUDE.md);
 	// Técnico entra quando a fase 2 existir, com sua própria query.
 	//
-	// Sem telefone cadastrado, o gestor não aparece -- não é erro, é degrade
-	// silencioso: quem chama (NotificacaoService) não teria pra onde mandar de
-	// qualquer forma. Ativo também filtra: gestor desativado não deve saber de
-	// solicitação nova.
+	// Ativo filtra: gestor desativado não deve saber de solicitação nova.
+	// Telefone NÃO filtra mais -- era o critério do WhatsApp; a notificação agora
+	// mora no próprio sistema e todo gestor tem pra onde receber.
 	//
 	// EXISTS e não JOIN, mesmo motivo de ListarUsuarios/ListarTecnicos: com JOIN
 	// o gestor apareceria uma vez por linha de usuario_escopo_setor que casasse
@@ -1135,6 +1164,15 @@ type Querier interface {
 	// `status = 'Pendente'` de MarcarSolicitacaoConvertida e pelo mesmo motivo:
 	// não rejeitar (nem re-rejeitar) o que já saiu do estado inicial.
 	RejeitarSolicitacao(ctx context.Context, arg RejeitarSolicitacaoParams) (int64, error)
+	// O serviço de push respondeu 404/410: a inscrição morreu (app desinstalado,
+	// permissão revogada, navegador limpo). Por id, sem dono -- quem chama é o
+	// próprio servidor, com a linha que acabou de ler.
+	RemoverDispositivoPush(ctx context.Context, id int64) error
+	// POST /push/inscricoes/remover (o front chama no logout e ao desativar). Só
+	// apaga se o endpoint é do próprio usuário: ninguém desinscreve o aparelho de
+	// outro mandando o endpoint dele. :exec e não :execrows -- zero linhas é
+	// sucesso: o logout de um aparelho cuja inscrição já morreu (410) não é erro.
+	RemoverDispositivoPushDoUsuario(ctx context.Context, arg RemoverDispositivoPushDoUsuarioParams) error
 	// POST /ordens-servico/:id/retomar -- Pausada -> status_anterior da pausa
 	// que acabou de fechar ('Aberta' ou 'Em Andamento', nunca um valor fixo
 	// como em IniciarOrdemServico/PausarOrdemServico -- por isso `status` entra
@@ -1143,6 +1181,11 @@ type Querier interface {
 	// coluna (ver CriarPausa acima), um SET com sqlc.arg cru fica ambíguo pro
 	// sqlc -- mesma cautela de sqlc.narg(tipo)::tipo_os em ListarOrdensServico.
 	RetomarOrdemServico(ctx context.Context, arg RetomarOrdemServicoParams) (OrdemServico, error)
+	// POST /push/inscricoes. Upsert pelo endpoint: o mesmo navegador inscrevendo de
+	// novo (renovou a inscrição, ou OUTRO usuário logou no mesmo aparelho) atualiza
+	// a linha e troca o dono, em vez de duplicar ou recusar. Ver o cabeçalho da
+	// migration 000019.
+	SalvarDispositivoPush(ctx context.Context, arg SalvarDispositivoPushParams) error
 	// Validade calculada com o now() do banco, o mesmo relógio que RedefinirSenhaPorToken compara.
 	// Um pedido novo sobrescreve o anterior: só o último link enviado vale.
 	// Os 30 minutos estão escritos no texto do e-mail (EmailService.go): mudou aqui, muda lá.

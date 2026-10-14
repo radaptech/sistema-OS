@@ -30,6 +30,9 @@ import {
   type UsuarioInterno,
 } from './bancoMock'
 import { gerarId } from './utilidadesMock'
+// Ciclo com notificacoesMock (que usa construirEscoposGestor daqui): inofensivo, ninguém
+// chama nada no carregamento -- ver semearNotificacoes.
+import { notificarOSPreventiva } from './notificacoesMock'
 
 function arredondar(valor: number): number {
   return Math.round(valor * 100) / 100
@@ -163,7 +166,7 @@ export function sincronizarPreventivasVencidas(): void {
     }
     solicitacoes.push(solicitacao)
 
-    ordensServico.push({
+    const ordem: OrdemServico = {
       id: gerarId(ordensServico),
       solicitacaoId: solicitacao.id,
       tipo: 'maquinario',
@@ -191,7 +194,9 @@ export function sincronizarPreventivasVencidas(): void {
       dataSolicitacao: solicitacao.criadoEm,
       dataAbertura: agoraParaBackend(),
       pausas: [],
-    })
+    }
+    ordensServico.push(ordem)
+    notificarOSPreventiva(ordem)
   }
 }
 

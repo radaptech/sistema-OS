@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "icones:pwa": "node scripts/gerar-icones-pwa.mjs",
     "docs:der": "mmdc -i docs/der-banco-dados.mmd -o docs/der-banco-dados.svg -p docs/puppeteer-mermaid.json -b white && mmdc -i docs/der-banco-dados.mmd -o docs/der-banco-dados.png -p docs/puppeteer-mermaid.json -b white -w 2400"
   },
   "dependencies": {

@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Inbox, SearchX } from 'lucide-react'
 import { CabecalhoPagina } from '../../componentes/CabecalhoPagina'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useSolicitacoes } from '../../hooks/useSolicitacoes'
+import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
+import type { SolicitacaoOS } from '../../tipos/ordemServico'
+import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetalhesSolicitacao'
 import { Paginacao } from '../../componentes/Paginacao'
 import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
@@ -15,6 +19,24 @@ export function MinhasSolicitacoes() {
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('Todos')
   const [pagina, setPagina] = useState(1)
+  const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
+    useState<SolicitacaoOS | null>(null)
+
+  // Link de notificação (sininho/push): ?solicitacao=N -- o pedido que o Gestor aceitou
+  // ou rejeitou. Abre o detalhe, que mostra o status novo e, se rejeitado, o motivo.
+  const [solicitacaoDaUrl, consumirSolicitacaoDaUrl] = useIdDaUrl('solicitacao')
+
+  useEffect(() => {
+    if (solicitacaoDaUrl === null) {
+      return
+    }
+    consumirSolicitacaoDaUrl()
+    // Não encontrada: o api.ts já mostra o toast do 404.
+    servicoSolicitacoes
+      .obterPorId(solicitacaoDaUrl)
+      .then(setSolicitacaoParaVisualizar)
+      .catch(() => {})
+  }, [solicitacaoDaUrl, consumirSolicitacaoDaUrl])
 
   useEffect(() => {
     const temporizador = setTimeout(() => {
@@ -109,6 +131,14 @@ export function MinhasSolicitacoes() {
           Solicitação OS © {new Date().getFullYear()}
         </span>
       </footer>
+
+      {solicitacaoParaVisualizar && (
+        <ModalDetalhesSolicitacao
+          solicitacao={solicitacaoParaVisualizar}
+          contexto="Minhas Solicitações"
+          aoFechar={() => setSolicitacaoParaVisualizar(null)}
+        />
+      )}
     </div>
   )
 }

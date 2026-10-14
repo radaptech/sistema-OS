@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ClipboardCheck,
@@ -11,6 +11,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
 import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useOrdensServicoTecnico } from '../../hooks/useOrdensServicoTecnico'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
 import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
@@ -30,6 +31,16 @@ import type { DadosAcionarTerceiro } from './esquemaAcionarTerceiro'
 
 const CHAVE_ORDENS_SERVICO_TECNICO = 'ordens-servico-tecnico'
 const TAMANHO_PAGINA = 12
+
+// Em que aba a OS aparece -- mesmo critério de `ordensPorAba` abaixo. Concluída sem
+// custo lançado não aparece em aba nenhuma (ver o comentário de `concluidas`); fica na
+// primeira, e o modal abre do mesmo jeito.
+function abaDaOrdem(ordem: OrdemServico): AbaPainelTecnico {
+  if (ordem.finalizada) {
+    return 'concluidas'
+  }
+  return ordem.statusExecucao === 'Pausada' ? 'pendentes-pausadas' : 'em-aberto'
+}
 
 export function PainelTecnico() {
   const tecnicoId = useEstadoAutenticacao((estado) => estado.tecnicoId)
@@ -57,8 +68,37 @@ export function PainelTecnico() {
   const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
     useState<SolicitacaoOS | null>(null)
 
-  const { data: ordensServico = [], isLoading } =
-    useOrdensServicoTecnico(tecnicoId)
+  const {
+    data: ordensServico = [],
+    isLoading,
+    refetch: recarregarOrdensServico,
+  } = useOrdensServicoTecnico(tecnicoId)
+
+  // Link de notificação (sininho/push): ?os=N -- a OS nova no nome dele. Busca a lista de
+  // novo (a do cache pode ser de antes da OS nascer), vai pra aba onde a OS está e abre
+  // o detalhe da solicitação: é ali que estão a descrição e as fotos do problema.
+  const [osDaUrl] = useIdDaUrl('os')
+
+  useEffect(() => {
+    if (osDaUrl === null) {
+      return
+    }
+    recarregarOrdensServico().then(({ data }) => {
+      const ordem = data?.find((item) => item.id === osDaUrl)
+      // Trocar a aba já tira o ?os= da URL (setParametros substitui a query inteira).
+      setParametros(
+        { aba: ordem ? abaDaOrdem(ordem) : abaSelecionada },
+        { replace: true },
+      )
+      if (ordem) {
+        void aoVerSolicitacao(ordem)
+      } else {
+        toast.info(`A OS #${osDaUrl} não está mais no seu painel.`)
+      }
+    })
+    // Só reage ao id da URL: as funções acima mudam a cada render e reabririam o modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [osDaUrl])
 
   function invalidarOrdensServico() {
     return queryClient.invalidateQueries({

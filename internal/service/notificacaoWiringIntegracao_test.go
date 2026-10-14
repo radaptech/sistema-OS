@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,43 +10,80 @@ import (
 	"github.com/radaptech/sistema-OSm--Back-end/internal/model"
 )
 
-// notificadorFake grava o que recebeu em vez de bater na Evolution API de
-// verdade -- é o próprio motivo de NotificadorInterface existir (ver
-// SolicitacaoService.Notificador). `chamado` sincroniza o teste com a
-// goroutine: sem isso, o teste terminaria (e o assert rodaria) antes da
-// goroutine sequer começar.
+// notificadorFake grava cada chamada em vez de notificar de verdade -- é o
+// próprio motivo de NotificadorInterface existir (ver
+// SolicitacaoService.Notificador). O channel sincroniza o teste com a
+// goroutine (sem isso o assert rodaria antes dela começar) e guarda a ORDEM
+// das chamadas: abrir OS da fila avisa duas pessoas. Bufferizado pra que
+// teste que não lê as chamadas (maquinaExclusao) não trave a goroutine.
 type notificadorFake struct {
-	chamado           chan struct{}
-	tenantId, setorId int64
-	// tecnicoId é preenchido só por NotificarOSPreventiva, que avisa um
-	// técnico por id em vez do setor inteiro -- é o que distingue as duas
-	// chamadas quando o teste confere qual delas o service escolheu.
-	tecnicoId int64
-	dados     DadosNotificacao
+	chamadas chan chamadaNotificador
+}
+
+// chamadaNotificador é uma chamada recebida: o método diz o evento, e
+// destino é o setorId (eventos "gestores do setor") ou o id do usuário
+// (eventos de uma pessoa só) -- o mesmo segundo parâmetro da interface.
+type chamadaNotificador struct {
+	metodo            string
+	tenantId, destino int64
+	dados             DadosNotificacao
 }
 
 func novoNotificadorFake() *notificadorFake {
-	return &notificadorFake{chamado: make(chan struct{})}
+	return &notificadorFake{chamadas: make(chan chamadaNotificador, 64)}
+}
+
+func (n *notificadorFake) registrar(metodo string, tenantId, destino int64, dados DadosNotificacao) error {
+	n.chamadas <- chamadaNotificador{metodo: metodo, tenantId: tenantId, destino: destino, dados: dados}
+	return nil
 }
 
 func (n *notificadorFake) NotificarNovaSolicitacao(_ context.Context, tenantId, setorId int64, dados DadosNotificacao) error {
-	n.tenantId, n.setorId, n.dados = tenantId, setorId, dados
-	close(n.chamado)
-	return nil
+	return n.registrar("NovaSolicitacao", tenantId, setorId, dados)
+}
+
+func (n *notificadorFake) NotificarSolicitacaoAceita(_ context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error {
+	return n.registrar("SolicitacaoAceita", tenantId, solicitanteId, dados)
+}
+
+func (n *notificadorFake) NotificarSolicitacaoRejeitada(_ context.Context, tenantId, solicitanteId int64, dados DadosNotificacao) error {
+	return n.registrar("SolicitacaoRejeitada", tenantId, solicitanteId, dados)
+}
+
+func (n *notificadorFake) NotificarOSAberta(_ context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error {
+	return n.registrar("OSAberta", tenantId, tecnicoId, dados)
 }
 
 func (n *notificadorFake) NotificarOSPreventiva(_ context.Context, tenantId, tecnicoId int64, dados DadosNotificacao) error {
-	n.tenantId, n.tecnicoId, n.dados = tenantId, tecnicoId, dados
-	close(n.chamado)
-	return nil
+	return n.registrar("OSPreventiva", tenantId, tecnicoId, dados)
 }
 
-func (n *notificadorFake) espera(t *testing.T) {
+func (n *notificadorFake) NotificarOSConcluida(_ context.Context, tenantId, setorId int64, dados DadosNotificacao) error {
+	return n.registrar("OSConcluida", tenantId, setorId, dados)
+}
+
+// espera devolve a próxima chamada, conferindo o método.
+func (n *notificadorFake) espera(t *testing.T, metodo string) chamadaNotificador {
 	t.Helper()
 	select {
-	case <-n.chamado:
+	case c := <-n.chamadas:
+		if c.metodo != metodo {
+			t.Fatalf("notificador chamado com %s, esperado %s", c.metodo, metodo)
+		}
+		return c
 	case <-time.After(2 * time.Second):
-		t.Fatal("notificador não foi chamado a tempo -- a goroutine não disparou?")
+		t.Fatalf("notificador não foi chamado (%s) a tempo -- a goroutine não disparou?", metodo)
+		return chamadaNotificador{}
+	}
+}
+
+// nenhuma confere que nada mais foi chamado.
+func (n *notificadorFake) nenhuma(t *testing.T) {
+	t.Helper()
+	select {
+	case c := <-n.chamadas:
+		t.Errorf("notificador chamado com %s, esperado nenhuma chamada", c.metodo)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
@@ -99,7 +137,7 @@ func TestSolicitacaoNotificaAoCriar(t *testing.T) {
 		fake := novoNotificadorFake()
 		svc.Notificador = fake
 
-		_, err := svc.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+		sol, err := svc.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
 			MaquinaId: maquina.Id, Descricao: "Barulho estranho", Impactos: []string{"Afeta Produção"},
 			FotoChave: "tenant/x/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 111,
 		})
@@ -107,19 +145,23 @@ func TestSolicitacaoNotificaAoCriar(t *testing.T) {
 			t.Fatalf("erro ao cadastrar: %v", err)
 		}
 
-		fake.espera(t)
+		c := fake.espera(t, "NovaSolicitacao")
 
-		if fake.tenantId != tenantID || fake.setorId != setorID {
-			t.Errorf("tenantId/setorId = %d/%d, esperado %d/%d", fake.tenantId, fake.setorId, tenantID, setorID)
+		if c.tenantId != tenantID || c.destino != setorID {
+			t.Errorf("tenantId/setorId = %d/%d, esperado %d/%d", c.tenantId, c.destino, tenantID, setorID)
 		}
-		if fake.dados.Alvo != "Forno · PAT-77" {
-			t.Errorf("Alvo = %q, esperado %q", fake.dados.Alvo, "Forno · PAT-77")
+		if c.dados.Alvo != "Forno · PAT-77" {
+			t.Errorf("Alvo = %q, esperado %q", c.dados.Alvo, "Forno · PAT-77")
 		}
-		if fake.dados.SolicitanteNome == nil || *fake.dados.SolicitanteNome != "Bruno" {
-			t.Errorf("SolicitanteNome = %v, esperado Bruno", fake.dados.SolicitanteNome)
+		if c.dados.SolicitanteNome == nil || *c.dados.SolicitanteNome != "Bruno" {
+			t.Errorf("SolicitanteNome = %v, esperado Bruno", c.dados.SolicitanteNome)
 		}
-		if fake.dados.LojaNome != "Loja A" || fake.dados.SetorNome != "Padaria" {
-			t.Errorf("loja/setor = %q/%q", fake.dados.LojaNome, fake.dados.SetorNome)
+		if c.dados.LojaNome != "Loja A" || c.dados.SetorNome != "Padaria" {
+			t.Errorf("loja/setor = %q/%q", c.dados.LojaNome, c.dados.SetorNome)
+		}
+		// É o id que vira a url do clique (/painel-gestor?solicitacao=N).
+		if c.dados.SolicitacaoId != sol.Id {
+			t.Errorf("SolicitacaoId = %d, esperado %d", c.dados.SolicitacaoId, sol.Id)
 		}
 	})
 
@@ -135,13 +177,13 @@ func TestSolicitacaoNotificaAoCriar(t *testing.T) {
 			t.Fatalf("erro ao cadastrar: %v", err)
 		}
 
-		fake.espera(t)
+		c := fake.espera(t, "NovaSolicitacao")
 
-		if fake.dados.Alvo != "Lâmpada queimada" {
-			t.Errorf("Alvo = %q, esperado o item do reparo", fake.dados.Alvo)
+		if c.dados.Alvo != "Lâmpada queimada" {
+			t.Errorf("Alvo = %q, esperado o item do reparo", c.dados.Alvo)
 		}
-		if fake.dados.SolicitanteNome == nil || *fake.dados.SolicitanteNome != "Bruno" {
-			t.Errorf("SolicitanteNome = %v, esperado Bruno", fake.dados.SolicitanteNome)
+		if c.dados.SolicitanteNome == nil || *c.dados.SolicitanteNome != "Bruno" {
+			t.Errorf("SolicitanteNome = %v, esperado Bruno", c.dados.SolicitanteNome)
 		}
 	})
 
@@ -212,23 +254,137 @@ func TestPreventivaNotificaAoAbrirSolicitacao(t *testing.T) {
 		t.Fatalf("criadas = %d, esperado 1 (a preventiva de %q)", criadas, maquina.Nome)
 	}
 
-	fake.espera(t)
+	// OSPreventiva e não NovaSolicitacao: a preventiva não avisa mais o
+	// setor inteiro, avisa o técnico por id.
+	c := fake.espera(t, "OSPreventiva")
 
-	if fake.tenantId != tenantID || fake.tecnicoId != tecnicoPrev {
-		t.Errorf("tenantId/tecnicoId = %d/%d, esperado %d/%d", fake.tenantId, fake.tecnicoId, tenantID, tecnicoPrev)
+	if c.tenantId != tenantID || c.destino != tecnicoPrev {
+		t.Errorf("tenantId/tecnicoId = %d/%d, esperado %d/%d", c.tenantId, c.destino, tenantID, tecnicoPrev)
 	}
-	// setorId zerado prova que o caminho foi NotificarOSPreventiva e não
-	// NotificarNovaSolicitacao -- as duas escrevem campos diferentes no fake.
-	if fake.setorId != 0 {
-		t.Errorf("setorId = %d, esperado 0 -- a preventiva não avisa mais o setor inteiro", fake.setorId)
+	if c.dados.Alvo != "Câmara Fria · PAT-88" {
+		t.Errorf("Alvo = %q, esperado %q", c.dados.Alvo, "Câmara Fria · PAT-88")
 	}
-	if fake.dados.Alvo != "Câmara Fria · PAT-88" {
-		t.Errorf("Alvo = %q, esperado %q", fake.dados.Alvo, "Câmara Fria · PAT-88")
+	if c.dados.SolicitanteNome != nil {
+		t.Errorf("SolicitanteNome deveria ser nil (origem preventiva, ninguém por trás), veio %v", *c.dados.SolicitanteNome)
 	}
-	if fake.dados.SolicitanteNome != nil {
-		t.Errorf("SolicitanteNome deveria ser nil (origem preventiva, ninguém por trás), veio %v", *fake.dados.SolicitanteNome)
+	if c.dados.LojaNome != "Loja B" || c.dados.SetorNome != "Açougue" {
+		t.Errorf("loja/setor = %q/%q", c.dados.LojaNome, c.dados.SetorNome)
 	}
-	if fake.dados.LojaNome != "Loja B" || fake.dados.SetorNome != "Açougue" {
-		t.Errorf("loja/setor = %q/%q", fake.dados.LojaNome, fake.dados.SetorNome)
+
+	// A url do clique aponta pra OS (/painel-tecnico?os=N), não pra
+	// solicitação: é a OS que o técnico executa.
+	var osID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM ordem_servico WHERE tenant_id = $1`, tenantID).Scan(&osID); err != nil {
+		t.Fatalf("erro ao ler a OS da preventiva: %v", err)
 	}
+	if c.dados.OrdemServicoId != osID {
+		t.Errorf("OrdemServicoId = %d, esperado %d", c.dados.OrdemServicoId, osID)
+	}
+}
+
+// TestFluxoNotificaCadaPasso segue um pedido do começo ao fim e confere quem
+// é avisado em cada passo: o Gestor quando o pedido chega, o Técnico e o
+// Solicitante quando vira OS (nessa ordem), o Gestor de novo quando encerra.
+// Iniciar não avisa ninguém -- só o encerramento fala da execução.
+func TestFluxoNotificaCadaPasso(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcSol := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+	fake := novoNotificadorFake()
+	svcSol.Notificador = fake
+	svcOS.Notificador = fake
+
+	var tenantID, lojaID, setorID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('notif-fluxo', 'Empresa Notif Fluxo') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja C') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Frios') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+
+	area := "Elétrica"
+	cadastrar := func(nome, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, strings.ToLower(nome)+"@notif-fluxo.com", perfil, "senha-forte-123"
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	gestor := cadastrar("Gabi", "gestor", model.NovoUsuarioPayload{LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID}})
+	tecnico := cadastrar("Tito", "tecnico", model.NovoUsuarioPayload{LojasIds: []int64{lojaID}, Area: &area})
+	solicitante := cadastrar("Sara", "solicitante", model.NovoUsuarioPayload{LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID}})
+
+	pedir := func(item string) model.SolicitacaoOS {
+		t.Helper()
+		sol, err := svcSol.CadastrarSolicitacaoReparo(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoReparoPayload{
+			Item: item, Descricao: "Parou de funcionar",
+			FotoChave: "tenant/x/" + item + ".jpg", FotoMime: "image/jpeg", FotoTamanho: 10,
+		})
+		if err != nil {
+			t.Fatalf("erro ao pedir: %v", err)
+		}
+		fake.espera(t, "NovaSolicitacao")
+		return sol
+	}
+
+	t.Run("aceitar avisa o técnico e depois o solicitante", func(t *testing.T) {
+		sol := pedir("Balcão refrigerado")
+
+		os, err := svcSol.AbrirOS(ctx, tenantID, gestor.Id, "gestor", sol.Id, model.AberturaOrdemServicoPayload{Urgencia: "Média", TecnicoId: tecnico.Id})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+
+		paraTecnico := fake.espera(t, "OSAberta")
+		if paraTecnico.destino != tecnico.Id || paraTecnico.dados.OrdemServicoId != os.Id || paraTecnico.dados.Urgencia != "Média" {
+			t.Errorf("aviso ao técnico = %+v", paraTecnico)
+		}
+		paraSolicitante := fake.espera(t, "SolicitacaoAceita")
+		if paraSolicitante.destino != solicitante.Id || paraSolicitante.dados.SolicitacaoId != sol.Id ||
+			paraSolicitante.dados.TecnicoNome == nil || *paraSolicitante.dados.TecnicoNome != "Tito" {
+			t.Errorf("aviso ao solicitante = %+v", paraSolicitante)
+		}
+
+		t.Run("iniciar não avisa ninguém; encerrar avisa os gestores do setor", func(t *testing.T) {
+			if _, err := svcOS.Iniciar(ctx, tenantID, tecnico.Id, os.Id); err != nil {
+				t.Fatalf("erro ao iniciar: %v", err)
+			}
+			fake.nenhuma(t)
+
+			if _, err := svcOS.Encerrar(ctx, tenantID, tecnico.Id, os.Id, model.EncerramentoOrdemServicoPayload{
+				TipoDefeito: "Corretiva", DefeitoConstatado: "Compressor", CausaRaiz: "Desgaste", Solucao: "Troca",
+				Itens: []model.ItemCustoPayload{{Descricao: "Compressor", CustoManutencao: 300}},
+			}); err != nil {
+				t.Fatalf("erro ao encerrar: %v", err)
+			}
+
+			c := fake.espera(t, "OSConcluida")
+			if c.destino != setorID || c.dados.OrdemServicoId != os.Id || c.dados.Alvo != "Balcão refrigerado" ||
+				c.dados.TecnicoNome == nil || *c.dados.TecnicoNome != "Tito" {
+				t.Errorf("aviso de conclusão = %+v", c)
+			}
+		})
+	})
+
+	t.Run("rejeitar avisa o solicitante com o motivo", func(t *testing.T) {
+		sol := pedir("Porta da câmara")
+
+		if _, err := svcSol.Rejeitar(ctx, tenantID, gestor.Id, "gestor", sol.Id, "Já tem OS aberta pra isso"); err != nil {
+			t.Fatalf("erro ao rejeitar: %v", err)
+		}
+
+		c := fake.espera(t, "SolicitacaoRejeitada")
+		if c.destino != solicitante.Id || c.dados.SolicitacaoId != sol.Id || c.dados.MotivoRejeicao != "Já tem OS aberta pra isso" {
+			t.Errorf("aviso de rejeição = %+v", c)
+		}
+		fake.nenhuma(t)
+	})
 }

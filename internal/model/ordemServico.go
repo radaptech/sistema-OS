@@ -464,8 +464,9 @@ func textoOuVazio(s *string) string {
 // decidiu e o que o service computou de solicitacao_impacto, respectivamente.
 //
 // Devolve a mesma struct de MontarOrdemServico, só que com menos preenchido:
-// tecnicoNome/tecnicoArea/empresaTerceirizada* ficam de fora porque a query da
-// abertura não faz esses JOINs, e encerramento/custo/horas/pausas porque uma
+// tecnicoArea/empresaTerceirizada* ficam de fora porque a query da abertura não
+// faz esses JOINs (tecnicoNome quem preenche é criarOrdemServico, que já leu o
+// técnico pra validar), e encerramento/custo/horas/pausas porque uma
 // OS que acabou de nascer não tem nada disso. Os oito são opcionais no
 // contrato do front. Finalizada nasce sempre `false`.
 func MontarOrdemServicoDaAbertura(os repository.CriarOrdemServicoDeSolicitacaoRow, s repository.ObterSolicitacaoPorIDRow, urgencia string, tecnicoId int64, afetaProducao bool) OrdemServico {

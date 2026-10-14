@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -25,6 +26,8 @@ type Container struct {
 	Solicit *controller.SolicitacaoController
 	OrdemOS *controller.OrdemServicoController
 	Recuper *controller.RecuperacaoSenhaController
+	Notific *controller.NotificacaoController
+	Push    *controller.PushController
 }
 
 func NewContainer(db *pgxpool.Pool) *Container {
@@ -37,24 +40,32 @@ func NewContainer(db *pgxpool.Pool) *Container {
 	serviceTerceirizada := service.NewRepoEmpresaTerceirizada(db)
 	serviceSolicitacao := service.NewRepoSolicitacao(db)
 	serviceOrdemServico := service.NewRepoOrdemServico(db)
-	// Sem RESEND_API_KEY o pedido responde 200 e só o envio falha, no log -- igual o notificador sem Evolution API.
+	// Sem RESEND_API_KEY o pedido responde 200 e só o envio falha, no log.
 	serviceRecuperacao := service.NewRepoRecuperacaoSenha(db, service.NewEmailService(
 		os.Getenv("RESEND_API_KEY"),
 		os.Getenv("URL_FRONTEND_FORMATO"),
 	))
 
-	// Notificador é opcional (campo público, não parâmetro de construtor -- ver
-	// o comentário em SolicitacaoService/PreventivaService): URL vazia faz
-	// NotificacaoService tentar chamar "" e falhar por request, exatamente como
-	// bucketMaquinas vazio só quebra o upload sem derrubar o resto. Ver
-	// CLAUDE.md, "Notificação de solicitação por WhatsApp".
-	notificador := service.NewRepoNotificacao(db,
-		os.Getenv("EVOLUTION_API_URL"),
-		os.Getenv("EVOLUTION_API_KEY"),
-		os.Getenv("EVOLUTION_INSTANCE_NAME"),
-	)
-	serviceSolicitacao.Notificador = notificador
-	servicePreventiva.Notificador = notificador
+	// Notificador é campo público, não parâmetro de construtor (ver o
+	// comentário em SolicitacaoService/PreventivaService). O mesmo
+	// NotificacaoService grava as notificações e serve as rotas do sininho.
+	serviceNotificacao := service.NewRepoNotificacao(db)
+	// Web Push. Sem as chaves (gere com `make chaves-vapid`) o push fica
+	// desligado e a notificação só aparece no sininho -- mesmo degrade do Resend
+	// sem RESEND_API_KEY. O `if` não é enfeite: atribuir um *WebPush nil à
+	// interface a deixaria não-nil, e entregar() tentaria mandar.
+	if enviador := service.NewWebPush(
+		os.Getenv("VAPID_PUBLIC_KEY"),
+		os.Getenv("VAPID_PRIVATE_KEY"),
+		os.Getenv("VAPID_SUBJECT"),
+	); enviador != nil {
+		serviceNotificacao.Push = enviador
+	} else {
+		slog.Warn("Web Push desligado: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY ausentes")
+	}
+	serviceSolicitacao.Notificador = serviceNotificacao
+	servicePreventiva.Notificador = serviceNotificacao
+	serviceOrdemServico.Notificador = serviceNotificacao
 
 	// O bucket do R2 é escolhido aqui, no wiring, e não guardado por linha: cada
 	// tipo de anexo tem o seu (ver .env-example) e não existe coluna `bucket`.
@@ -76,6 +87,8 @@ func NewContainer(db *pgxpool.Pool) *Container {
 		Solicit: controller.NewSolicitacaoController(serviceSolicitacao, bucketOsServico, bucketPequenosReparos, bucketMaquinas),
 		OrdemOS: controller.NewOrdemServicoController(serviceOrdemServico),
 		Recuper: controller.NewRecuperacaoSenhaController(serviceRecuperacao),
+		Notific: controller.NewNotificacaoController(serviceNotificacao),
+		Push:    controller.NewPushController(serviceNotificacao),
 		queries: repository.New(db),
 	}
 }
@@ -264,4 +277,18 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// setores e máquinas da loja numa ida só. Mesmo RBAC e mesmo recorte da rota
 	// de máquina; aqui o EXISTS de escopo recorta os setores da loja.
 	api.GET("/indicadores/lojas/:id", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador"), c.OrdemOS.IndicadoresLoja())
+
+	// Central de notificações (o sininho): qualquer perfil logado, sempre só
+	// as do próprio usuário -- o id vem do token, nunca da URL.
+	notificacoes := api.Group("/notificacoes", middleware.AutenticacaoJwt())
+	notificacoes.GET("", c.Notific.Listar())
+	notificacoes.GET("/nao-lidas", c.Notific.NaoLidas())
+	notificacoes.POST("/lidas", c.Notific.MarcarTodasLidas())
+	notificacoes.POST("/:id/lida", c.Notific.MarcarLida())
+
+	// Web Push: inscrição do aparelho do próprio usuário (o do token).
+	push := api.Group("/push", middleware.AutenticacaoJwt())
+	push.GET("/chave-publica", c.Push.ChavePublica())
+	push.POST("/inscricoes", c.Push.Inscrever())
+	push.POST("/inscricoes/remover", c.Push.Remover())
 }

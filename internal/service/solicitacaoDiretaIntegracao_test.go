@@ -13,7 +13,7 @@ import (
 
 // TestSolicitacaoDireta cobre POST /solicitacoes/direta (origem 'direta',
 // migration 000014): Gestor/Administrador abrindo solicitação e OS juntas,
-// sem foto, sem fila e sem WhatsApp -- e a regra que veio junto, valendo
+// sem foto, sem fila e avisando só o técnico -- e a regra que veio junto, valendo
 // também para o abrir-os da fila: o técnico tem que atender a loja.
 func TestSolicitacaoDireta(t *testing.T) {
 
@@ -127,12 +127,14 @@ func TestSolicitacaoDireta(t *testing.T) {
 		}
 	})
 
-	t.Run("não notifica ninguém", func(t *testing.T) {
-		select {
-		case <-notificador.chamado:
-			t.Error("OS direta não deveria disparar WhatsApp")
-		case <-time.After(200 * time.Millisecond):
+	// Só o técnico: o "solicitante" da direta é o próprio gestor, e avisá-lo
+	// do que ele mesmo abriu (aceita, ou solicitação nova) é ruído.
+	t.Run("avisa só o técnico", func(t *testing.T) {
+		c := notificador.espera(t, "OSAberta")
+		if c.destino != tecnicoA.Id || c.dados.Urgencia != "Alta" || c.dados.OrdemServicoId == 0 {
+			t.Errorf("chamada = %+v, esperado o técnico %d com urgência e id da OS", c, tecnicoA.Id)
 		}
+		notificador.nenhuma(t)
 	})
 
 	t.Run("gestor abre reparo escolhendo o setor", func(t *testing.T) {

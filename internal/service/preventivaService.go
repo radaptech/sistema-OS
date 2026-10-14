@@ -462,11 +462,12 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 
 	// Tipo, urgência, aberta_por_id e afeta_producao são literais na query --
 	// ver CriarOrdemServicoDePreventiva para o porquê de cada um.
-	if _, err := repo.CriarOrdemServicoDePreventiva(ctx, repository.CriarOrdemServicoDePreventivaParams{
+	ordem, err := repo.CriarOrdemServicoDePreventiva(ctx, repository.CriarOrdemServicoDePreventivaParams{
 		TenantID:      prev.TenantID,
 		SolicitacaoID: solicitacaoId,
 		TecnicoID:     *prev.TecnicoID,
-	}); err != nil {
+	})
+	if err != nil {
 		return helper.TraduzErroPostgres(err)
 	}
 
@@ -483,12 +484,12 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 		return fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
-	s.notificarPreventivaVencida(prev, tecnico.ID)
+	s.notificarPreventivaVencida(prev, tecnico.ID, ordem.ID)
 
 	return nil
 }
 
-// notificarPreventivaVencida avisa o técnico designado por WhatsApp depois
+// notificarPreventivaVencida avisa o técnico designado depois
 // que a OS já commitou -- fora da transação e em goroutine própria, mesmo
 // motivo de SolicitacaoService.notificar: falha de rede não pode atrasar nem
 // derrubar o job (que ainda tem outras N preventivas pra processar no mesmo
@@ -505,7 +506,7 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 // query já explica: "aqui ninguém monta resposta de contrato") -- por isso
 // relê a máquina via ObterMaquinaPorID, fora da transação já fechada, só pra
 // montar o texto da mensagem.
-func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPreventivaVencidaParaAberturaRow, tecnicoId int64) {
+func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPreventivaVencidaParaAberturaRow, tecnicoId, ordemServicoId int64) {
 
 	if s.Notificador == nil {
 		return
@@ -524,10 +525,11 @@ func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPrevent
 		}
 
 		dados := DadosNotificacao{
-			Alvo:      maquina.Nome + " · " + maquina.NumeroPatrimonio,
-			Descricao: p.Descricao,
-			LojaNome:  maquina.LojaNome,
-			SetorNome: maquina.SetorNome,
+			Alvo:           maquina.Nome + " · " + maquina.NumeroPatrimonio,
+			Descricao:      p.Descricao,
+			LojaNome:       maquina.LojaNome,
+			SetorNome:      maquina.SetorNome,
+			OrdemServicoId: ordemServicoId,
 			// SolicitanteNome fica nil de propósito: preventiva não tem
 			// solicitante (ck_origem proíbe), e é o que o template usa pra
 			// diferenciar as origens.

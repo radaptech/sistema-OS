@@ -64,6 +64,7 @@ var subcomandos = map[string]func([]string){
 	"provisionar-admin":    executarProvisionarAdmin,
 	"backup-banco":         executarBackupBanco,
 	"preventivas-vencidas": executarPreventivasVencidas,
+	"chaves-vapid":         executarChavesVapid,
 }
 
 // despacharSubcomando roda o subcomando pedido em args[0], se for um dos

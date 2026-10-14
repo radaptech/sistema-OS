@@ -1,0 +1,218 @@
+PLANO — PWA + NOTIFICAÇÕES (sai o WhatsApp)
+==========================================
+(montado em 13/10/2026, depois de revisar back, front e infra)
+
+Objetivo: o mesmo app React vira instalável no celular/desktop (PWA) e as
+notificações passam a ser 100% do próprio sistema: central dentro do app
+(sininho) + push no telefone + número no ícone. A Evolution API sai.
+
+Ordem pensada pra cada parte já entregar algo funcionando sozinha.
+
+
+O QUE A REVISÃO ACHOU
+---------------------
+  Back (sistema-OSm--Back-end)
+    - internal/service/notificacaoService.go: cliente da Evolution API. É a única
+      coisa que fala com WhatsApp. Atrás de NotificadorInterface -- quem notifica
+      (solicitacaoOs.go:43, preventivaService.go:508) não sabe o canal. Bom: dá
+      pra trocar a implementação sem mexer nas regras.
+    - Hoje só 2 eventos avisam alguém:
+        * solicitação nova (maquinário/reparo)  -> gestores do setor
+        * preventiva vencida (job)               -> técnico designado
+      ⚠️ Gestor abrir OS pra um técnico (POST /solicitacoes/:id/abrir-os e
+      /solicitacoes/direta) NÃO avisa o técnico. É o aviso mais útil e não existe.
+    - database/queries/usuario.sql ObterGestoresDoSetor filtra
+      "telefone IS NOT NULL" -- critério do WhatsApp; pro push tem que sair.
+    - router.go:46-57 faz o wiring com EVOLUTION_API_URL/_KEY/_INSTANCE_NAME.
+    - Testes: notificacaoService_test.go (Evolution real) sai;
+      notificacaoWiringIntegracao_test.go (fake) fica -- testa a interface.
+    - Docs: fluxo-de-negocio.md (seção inteira do WhatsApp), arquitetura.md,
+      testes-e-ci.md, ambiente-local.md, deploy-e-operacao.md, README, .env-example.
+    - Multi-tenant é por coluna tenant_id (não schema) -- tabela nova segue igual.
+    - Auth por cookie SameSite=Lax na mesma origem: PWA não muda nada aqui.
+
+  Front (sistema-OSm--Front-end)
+    - Sininho JÁ EXISTE em CabecalhoTopo.tsx e CabecalhoPagina.tsx, mas é
+      placeholder: toast "Nenhuma notificação" e uma bolinha verde fixa (mente
+      que tem notificação). É onde a central entra.
+    - Sem manifest, sem service worker, sem plugin PWA no vite.config.ts.
+    - Não existe rota por OS/solicitação (detalhe é modal dentro dos painéis).
+      Pro toque na notificação abrir a OS certa precisa de deep link
+      (ex: /painel-tecnico?os=123 abrindo o ModalDetalhesOS).
+    - Tenant vem de window.location.hostname (api.ts:54) -- cada subdomínio vira
+      um app instalado separado. Ok pro caso de uso.
+    - Modo mocks (VITE_USE_MOCKS): rotas novas precisam de mock também.
+    - nginx.conf.template: sw.js não pode ficar em cache (senão atualização do
+      app nunca chega).
+
+  Infra
+    - Nada da Evolution está no docker-compose daqui; nada a remover.
+    - Testar push no CELULAR exige HTTPS. localhost serve no PC, mas no celular
+      precisa de domínio de verdade -- e túnel tipo ngrok/cloudflared quebra o
+      tenant (o 1º pedaço do hostname vira o tenant). Caminho: um subdomínio de
+      homologação em *.radaptech.com.br, ou testar direto no deploy.
+
+
+ONDE PAREI (13/10/2026)
+-----------------------
+  Partes 1 a 7 feitas e testadas. PARTE 8 fica pra hora do deploy (decidido 13/10):
+  nada mais a fazer em código antes disso.
+  COMMITADO E COM PR PARA dev (13/10/2026):
+       - back:  branch feature/notificacoes-web-push      -> PR #55 (2 commits: código, docs)
+       - front: branch feature/notificacoes-pwa-web-push  -> PR #41 (4 commits: sininho, PWA,
+                                                              Web Push, docs)
+       - infra: não commitado (este plano + docker-compose.yml/makefile de antes).
+  ⚠️ .env do back ganhou um par VAPID de DEV (backup do anterior no scratchpad da
+     sessão de 13/10). Produção precisa de um par próprio no Railway.
+
+TAREFAS
+-------
+
+[x] PARTE 1 — Tirar o WhatsApp (back)
+    - apagar NotificacaoService (Evolution) e notificacaoService_test.go
+    - manter NotificadorInterface + DadosNotificacao + os pontos que chamam
+      (Notificador nil = não notifica; fica assim até a Parte 2)
+    - router.go: sai o wiring EVOLUTION_*
+    - .env-example, README e docs: tirar Evolution/WhatsApp
+    - (você) apagar EVOLUTION_* do .env local e das variáveis do Railway
+
+[x] PARTE 2 — Central de notificações (back)  (feita 13/10 -- ver resumo no fim)
+    - migration 000018: tabela notificacao
+        id, tenant_id, usuario_id, tipo, titulo, corpo, url,
+        lida_em (null = não lida), criado_em
+        índice (tenant_id, usuario_id, lida_em) pra contagem de não lidas
+    - queries sqlc: criar, listar paginado do usuário, contar não lidas,
+      marcar uma como lida, marcar todas como lidas
+    - ObterGestoresDoSetor sem o filtro de telefone
+    - NotificacaoService novo implementando NotificadorInterface: descobre
+      destinatários e GRAVA uma linha por usuário (o texto dos templates
+      montarTexto/montarTextoOsPreventiva vira titulo + corpo)
+    - rotas (qualquer perfil logado, sempre só as do próprio usuário):
+        GET  /api/notificacoes?pagina=          (RespostaPaginada)
+        GET  /api/notificacoes/nao-lidas        ({ total })
+        POST /api/notificacoes/:id/lida
+        POST /api/notificacoes/lidas            (todas)
+    - testes de integração (mesmo padrão de bancoDeTeste)
+
+[x] PARTE 3 — Eventos novos  (feita 13/10 -- decidido: aceita/rejeitada -> solicitante,
+                             OS aberta -> técnico, OS concluída -> gestores; pausa/terceiro não)
+    - OS aberta pelo gestor (abrir-os e direta)  -> técnico designado   (recomendo)
+    - solicitação rejeitada                      -> solicitante         (recomendo)
+    - OS concluída                               -> solicitante         (opcional)
+    - OS pausada / terceiro acionado             -> gestor              (opcional, pode virar ruído)
+
+[x] PARTE 4 — Central de notificações (front)  (feita 13/10)
+    - servicoNotificacoes.ts + hook useNotificacoes (React Query)
+    - contagem de não lidas: refetch ao focar a janela + intervalo (~60s)
+    - sininho com número real (some a bolinha fixa) nos dois cabeçalhos
+    - painel/lista ao clicar: título, corpo, "há 5 min", marcar todas como lidas
+    - clicar numa notificação: marca lida e navega pra url dela
+    - deep link: painéis abrem o modal da OS/solicitação vindo de ?os= / ?solicitacao=
+    - mocks das rotas novas
+
+[x] PARTE 5 — PWA instalável (front)  (feita 13/10 -- SEM vite-plugin-pwa, ver resumo)
+    - vite-plugin-pwa (estratégia injectManifest: service worker nosso,
+      porque o push precisa de código próprio)
+    - manifest: nome, short_name, cores da marca, display standalone,
+      start_url "/", ícones 192/512 + maskable + apple-touch-icon
+    - index.html: theme-color, apple-mobile-web-app-*
+    - nginx.conf.template: sw.js e manifest sem cache
+    - aviso de "nova versão disponível, recarregar"
+    - testar instalação no Android, iPhone e desktop
+
+[x] PARTE 6 — Web Push (back)  (feita 13/10)
+    - gerar chaves VAPID; .env: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+    - migration 000019: tabela dispositivo_push
+        id, tenant_id, usuario_id, endpoint (unique), p256dh, auth,
+        user_agent, criado_em
+    - rotas:
+        GET    /api/push/chave-publica
+        POST   /api/push/inscricoes      (salva/atualiza pelo endpoint)
+        DELETE /api/push/inscricoes      (pelo endpoint -- usado no logout)
+    - NotificacaoService: depois de gravar a notificação, manda push pra todos
+      os dispositivos do usuário (lib github.com/SherClockHolmes/webpush-go)
+      payload: { titulo, corpo, url, naoLidas }
+    - resposta 404/410 do serviço de push -> apaga o dispositivo
+    - sem VAPID configurado: grava a notificação e só não manda push (mesmo
+      degrade do Resend sem chave)
+
+[x] PARTE 7 — Web Push (front)  (feita 13/10 -- testada com push real via FCM, ver resumo)
+    - botão "Ativar notificações" (permissão só pode ser pedida num clique)
+    - estado: ativado / negado (explicar como reativar) / não suportado
+    - iPhone fora do modo instalado: mostrar guia "Compartilhar > Adicionar à
+      Tela de Início" em vez do botão
+    - service worker: evento push -> showNotification + setAppBadge(naoLidas)
+    - notificationclick: foca a aba aberta (ou abre) e navega pra url
+    - logout: remover a inscrição antes de sair (celular compartilhado não pode
+      continuar recebendo aviso do usuário anterior)
+    - ler notificações no app -> atualizar/zerar o badge
+
+[ ] PARTE 8 — Deploy e docs  (adiada: fazer junto com o deploy)
+    - VAPID_* no Railway
+    - ambiente HTTPS pra testar no celular (ver nota de tenant acima)
+    - docs do back (fluxo-de-negocio, arquitetura, api-e-rotas, banco-de-dados,
+      testes-e-ci) e CLAUDE.md do front
+    - (opcional) tela do gestor/admin mostrando quem tem push ativo
+
+
+FEITO
+-----
+  Parte 1 (13/10): Evolution API fora; interface mantida.
+  Parte 2 (13/10):
+    - migration 000018_notificacao (tipo_notificacao ENUM: solicitacao_nova,
+      os_preventiva). url só aceita caminho relativo (ck_notificacao_url).
+    - NotificacaoService grava 1 linha por destinatário; `entregar` é o ponto
+      onde o Web Push (Parte 6) entra.
+    - rotas: GET /api/notificacoes?pagina= | GET /api/notificacoes/nao-lidas |
+      POST /api/notificacoes/:id/lida | POST /api/notificacoes/lidas
+      (as 3 últimas respondem { total } = não lidas depois da ação)
+    - urls gravadas: /painel-gestor?solicitacao=N e /painel-tecnico?os=N
+      -> a Parte 4 precisa fazer os painéis abrirem o modal a partir disso.
+  Parte 3 (13/10):
+    - tipos novos entraram na própria 000018 (ainda não tinha saído do dev):
+      solicitacao_aceita, solicitacao_rejeitada, os_aberta, os_concluida
+    - urls novas: /minhas-solicitacoes?solicitacao=N (solicitante) e
+      /painel-gestor?os=N (gestor, OS concluída) -> Parte 4 trata também.
+    - resposta do POST /solicitacoes/:id/abrir-os passou a trazer tecnicoNome.
+  Parte 4 (13/10):
+    - SinoNotificacoes + PainelNotificacoes nos cabeçalhos; contagem a cada 60s + no foco.
+    - links diretos: PainelGestor (?solicitacao / ?os), PainelTecnico (?os),
+      MinhasSolicitacoes (?solicitacao) -- hooks/useIdDaUrl.ts.
+    - mock: notificacoesMock.ts + rotas/notificacoes.ts, mesmos 6 eventos.
+    - verificado no navegador (modo mock): gestor abre OS -> técnico recebe e o link abre
+      a solicitação; solicitante recebe "aceita" e o link abre o detalhe; ?os= do gestor
+      abre o detalhe da OS; layout de celular (390px) sem rolagem lateral.
+  Parte 5 (13/10):
+    - manual em vez de vite-plugin-pwa: manifest estático, public/sw.js nosso (sem
+      precache; só fallback "Sem conexão" na navegação), carimbo de versão no build
+      (vite.config.ts) + toast "Nova versão disponível" que só troca no clique.
+    - ícones gerados por scripts/gerar-icones-pwa.mjs (npm run icones:pwa).
+    - nginx: sw.js/manifest/index.html no-cache; /assets/ immutable.
+    - verificado com a imagem de produção; FALTA testar instalação em celular real
+      (precisa de HTTPS -- ver nota de tenant/túnel lá em cima).
+  Parte 6 (13/10):
+    - migration 000019_dispositivo_push; webpush-go v1.4.0; pushService.go.
+    - rotas: GET /api/push/chave-publica ({chavePublica|null}), POST /api/push/inscricoes
+      (o subscription.toJSON() direto, 204), POST /api/push/inscricoes/remover ({endpoint}, 204).
+    - payload do push: { id, tipo, titulo, corpo, url, naoLidas } -> é o que o sw.js lê.
+    - anti-SSRF: só hosts de serviço de push (FCM/Mozilla/Apple/Windows), sem redirect.
+    - `make chaves-vapid`; par de DEV já no .env local (backup do .env antigo no scratchpad).
+    - FALTA: VAPID de produção no Railway (gerar um par próprio, não reusar o de dev).
+  Parte 7 (13/10):
+    - botão "Ativar" no topo do painel do sininho (AtivacaoPush.tsx + hooks/usePush.ts);
+      estados desativado / ativado (rodapé "Avisos ativos · Desativar") / bloqueado /
+      instalar (passo a passo do iPhone) / indisponível (servidor sem VAPID: some).
+    - sw.js: push -> showNotification + setAppBadge + avisa as abas; notificationclick ->
+      foca a aba e navega sem recarregar (ou openWindow com &notificacao=<id>);
+      pushsubscriptionchange -> abas reenviam.
+    - hooks/useIntegracaoPush.ts (no PortaoSessao): número no ícone, limpa a bandeja quando
+      tudo foi lido, marca como lida no toque, reenvia a inscrição ao entrar.
+    - logout: tira a inscrição (navegador + servidor), zera o ícone e limpa a bandeja ANTES
+      do /autenticacao/logout.
+    - ícone novo public/icones/badge-96.png (monocromático, barra do Android) -- gerado
+      pelo mesmo scripts/gerar-icones-pwa.mjs.
+    - mock: mocks/rotas/push.ts.
+    - verificado no Chrome desktop contra a API real (demo.localhost:8090): ativar grava
+      dispositivo_push; gestor abre OS -> push chega via FCM em ~1s; clique na notificação
+      marca lida e abre o detalhe; logout apaga a linha; build de produção ok.
+    - FALTA (vai pra Parte 8): testar em Android/iPhone reais (HTTPS).

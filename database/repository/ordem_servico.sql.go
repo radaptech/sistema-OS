@@ -146,6 +146,89 @@ func (q *Queries) AtualizarCusto(ctx context.Context, arg AtualizarCustoParams) 
 	return i, err
 }
 
+const contarOrdensServico = `-- name: ContarOrdensServico :one
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+LEFT JOIN maquina m    ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN os_custo c   ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND (
+    $2::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = $2
+  )
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao ` + "`" + `custo?.revisadoEm == null` + "`" + ` do front.
+  AND (
+    $3::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = $3
+  )
+  AND ($4::text[] IS NULL OR os.status = ANY($4::text[]::status_os[]))
+  AND ($5::tipo_os IS NULL OR os.tipo = $5)
+  AND ($6::bigint IS NULL OR sc.loja_id = $6)
+  -- setor_id sai da SOLICITAÇÃO (s.setor_id), não de ordem_servico -- a OS não
+  -- tem setor próprio, e nem deveria (ver a nota do escopo lá embaixo). Mesma
+  -- coluna que o EXISTS de escopo compara, então filtro e escopo falam da
+  -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
+  -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
+  AND ($7::bigint IS NULL OR s.setor_id = $7)
+  AND ($8::bigint IS NULL OR os.tecnico_id = $8)
+  AND (
+    $9::text IS NULL
+    OR s.descricao ILIKE '%' || $9 || '%'
+    OR m.nome ILIKE '%' || $9 || '%'
+    OR s.item_descricao ILIKE '%' || $9 || '%'
+  )
+  AND (
+    $10::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $10
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+`
+
+type ContarOrdensServicoParams struct {
+	TenantID        int64
+	Finalizada      *bool
+	Revisado        *bool
+	Status          []string
+	Tipo            *TipoOs
+	LojaID          *int64
+	SetorID         *int64
+	TecnicoID       *int64
+	Busca           *string
+	EscopoUsuarioID *int64
+}
+
+// O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+// tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+// aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+// solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+func (q *Queries) ContarOrdensServico(ctx context.Context, arg ContarOrdensServicoParams) (int64, error) {
+	row := q.db.QueryRow(ctx, contarOrdensServico,
+		arg.TenantID,
+		arg.Finalizada,
+		arg.Revisado,
+		arg.Status,
+		arg.Tipo,
+		arg.LojaID,
+		arg.SetorID,
+		arg.TecnicoID,
+		arg.Busca,
+		arg.EscopoUsuarioID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const criarCusto = `-- name: CriarCusto :one
 INSERT INTO os_custo (
     tenant_id, ordem_servico_id, tipo,
@@ -803,40 +886,49 @@ WHERE os.tenant_id = $1
     $3::boolean IS NULL
     OR (os.status = 'Concluída' AND c.id IS NOT NULL) = $3
   )
-  AND ($4::text[] IS NULL OR os.status = ANY($4::text[]::status_os[]))
-  AND ($5::tipo_os IS NULL OR os.tipo = $5)
-  AND ($6::bigint IS NULL OR sc.loja_id = $6)
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao ` + "`" + `custo?.revisadoEm == null` + "`" + ` do front.
+  AND (
+    $4::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = $4
+  )
+  AND ($5::text[] IS NULL OR os.status = ANY($5::text[]::status_os[]))
+  AND ($6::tipo_os IS NULL OR os.tipo = $6)
+  AND ($7::bigint IS NULL OR sc.loja_id = $7)
   -- setor_id sai da SOLICITAÇÃO (s.setor_id), não de ordem_servico -- a OS não
   -- tem setor próprio, e nem deveria (ver a nota do escopo lá embaixo). Mesma
   -- coluna que o EXISTS de escopo compara, então filtro e escopo falam da
   -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
   -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
-  AND ($7::bigint IS NULL OR s.setor_id = $7)
-  AND ($8::bigint IS NULL OR os.tecnico_id = $8)
+  AND ($8::bigint IS NULL OR s.setor_id = $8)
+  AND ($9::bigint IS NULL OR os.tecnico_id = $9)
   AND (
-    $9::text IS NULL
-    OR s.descricao ILIKE '%' || $9 || '%'
-    OR m.nome ILIKE '%' || $9 || '%'
-    OR s.item_descricao ILIKE '%' || $9 || '%'
+    $10::text IS NULL
+    OR s.descricao ILIKE '%' || $10 || '%'
+    OR m.nome ILIKE '%' || $10 || '%'
+    OR s.item_descricao ILIKE '%' || $10 || '%'
   )
   AND (
-    $10::bigint IS NULL
+    $11::bigint IS NULL
     OR EXISTS (
       SELECT 1
       FROM usuario_escopo ue
       LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
-      WHERE ue.usuario_id = $10
+      WHERE ue.usuario_id = $11
         AND ue.loja_id = sc.loja_id
         AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
     )
   )
-ORDER BY os.aberta_em DESC
+ORDER BY os.aberta_em DESC, os.id DESC
+LIMIT $13 OFFSET $12
 `
 
 type ListarOrdensServicoParams struct {
 	TenantID        int64
 	ID              *int64
 	Finalizada      *bool
+	Revisado        *bool
 	Status          []string
 	Tipo            *TipoOs
 	LojaID          *int64
@@ -844,6 +936,8 @@ type ListarOrdensServicoParams struct {
 	TecnicoID       *int64
 	Busca           *string
 	EscopoUsuarioID *int64
+	Deslocamento    *int32
+	Limite          *int32
 }
 
 type ListarOrdensServicoRow struct {
@@ -961,11 +1055,19 @@ type ListarOrdensServicoRow struct {
 // administrador (não filtra), os demais perfis só enxergam OS cujo setor eles
 // alcançam. O setor é o da solicitação de origem -- ordem_servico não tem
 // setor_id próprio, e nem deveria: a OS é da solicitação, não de um lugar.
+// os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+// poderiam trocar de página entre uma requisição e outra.
+//
+// Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+// deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+// antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+// Loja -> Setor a partir da lista inteira.
 func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServicoParams) ([]ListarOrdensServicoRow, error) {
 	rows, err := q.db.Query(ctx, listarOrdensServico,
 		arg.TenantID,
 		arg.ID,
 		arg.Finalizada,
+		arg.Revisado,
 		arg.Status,
 		arg.Tipo,
 		arg.LojaID,
@@ -973,6 +1075,8 @@ func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServi
 		arg.TecnicoID,
 		arg.Busca,
 		arg.EscopoUsuarioID,
+		arg.Deslocamento,
+		arg.Limite,
 	)
 	if err != nil {
 		return nil, err

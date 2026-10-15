@@ -42,6 +42,20 @@ type ordemServicoFake struct {
 	encerramento *model.EncerramentoOrdemServicoPayload
 	// payload recebido por CorrigirCusto.
 	custo *model.LancamentoCustoManutencaoPayload
+	// pagina recebida pela listagem paginada; fica 0 quando a chamada foi a
+	// listagem sem página -- é o que distingue os dois caminhos no teste.
+	pagina *int32
+}
+
+func (o ordemServicoFake) ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, f service.FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error) {
+	if o.pagina != nil {
+		*o.pagina = pagina
+	}
+	lista, err := o.ListarOrdensServico(ctx, tenantId, usuarioId, perfil, f)
+	if err != nil {
+		return model.RespostaPaginada[model.OrdemServico]{}, err
+	}
+	return model.RespostaPaginada[model.OrdemServico]{Dados: lista, Pagina: pagina, TotalPaginas: 1, Total: int64(len(lista))}, nil
 }
 
 func (o ordemServicoFake) ListarOrdensServico(_ context.Context, _, usuarioId int64, perfil string, f service.FiltrosOrdemServico) ([]model.OrdemServico, error) {
@@ -902,5 +916,50 @@ func TestOrdemServicoCustoAtorIdEPayload(t *testing.T) {
 	}
 	if recebido.Itens[0].CustoManutencao != 120.5 {
 		t.Errorf("custoManutencao da tarefa = %v, esperado 120.5", recebido.Itens[0].CustoManutencao)
+	}
+}
+
+// ?pagina= troca o formato da resposta (RespostaPaginada em vez de array) e
+// leva os mesmos filtros; sem ela, a listagem continua array -- é o que o
+// Gestor e o Técnico consomem.
+func TestOrdemServicoPaginacaoOpcional(t *testing.T) {
+
+	var pagina int32
+	var filtros service.FiltrosOrdemServico
+	ctx, rec := contextoOS(url.Values{"pagina": {"3"}, "finalizada": {"true"}, "revisado": {"false"}})
+	NewOrdemServicoController(ordemServicoFake{pagina: &pagina, filtros: &filtros}, "").Listar()(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
+	}
+	if pagina != 3 {
+		t.Errorf("pagina = %d, esperado 3", pagina)
+	}
+	if filtros.Finalizada == nil || !*filtros.Finalizada || filtros.Revisado == nil || *filtros.Revisado {
+		t.Errorf("filtros não chegaram na paginada: %+v", filtros)
+	}
+	if !strings.Contains(rec.Body.String(), `"totalPaginas"`) {
+		t.Errorf("com ?pagina= a resposta devia ser RespostaPaginada: %s", rec.Body.String())
+	}
+
+	var semPagina int32
+	ctx2, rec2 := contextoOS(url.Values{})
+	NewOrdemServicoController(ordemServicoFake{pagina: &semPagina}, "").Listar()(ctx2)
+	if semPagina != 0 || !strings.HasPrefix(strings.TrimSpace(rec2.Body.String()), "[") {
+		t.Errorf("sem ?pagina= devia ser array pela listagem inteira (pagina=%d, corpo=%s)", semPagina, rec2.Body.String())
+	}
+
+	for _, ruim := range []string{"0", "-1", "abc"} {
+		ctx3, rec3 := contextoOS(url.Values{"pagina": {ruim}})
+		NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx3)
+		if rec3.Code != http.StatusBadRequest {
+			t.Errorf("pagina=%s: status = %d, esperado 400", ruim, rec3.Code)
+		}
+	}
+
+	ctx4, rec4 := contextoOS(url.Values{"revisado": {"talvez"}})
+	NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx4)
+	if rec4.Code != http.StatusBadRequest {
+		t.Errorf("revisado=talvez: status = %d, esperado 400", rec4.Code)
 	}
 }

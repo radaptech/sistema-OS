@@ -17,6 +17,7 @@ import (
 
 type OrdemServicoServiceInterface interface {
 	ListarOrdensServico(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros service.FiltrosOrdemServico) ([]model.OrdemServico, error)
+	ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros service.FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error)
 	ObterIndicadoresDaMaquina(ctx context.Context, tenantId, maquinaId, usuarioId int64, perfil string) (model.IndicadoresMaquina, error)
 	ObterIndicadoresDaLoja(ctx context.Context, tenantId, lojaId, usuarioId int64, perfil string) (model.IndicadoresLoja, error)
 	// Ciclo de vida da OS (fase 2) -- todo método aqui recebe atorId como o
@@ -102,10 +103,11 @@ func statusDeQuery(ctx *gin.Context) ([]string, bool) {
 //	Técnico (PainelTecnico)                 -> ?tecnicoId=
 //	Admin   (CustosPendentes/OSFinalizadas) -> ?status=Concluída / ?finalizada=true
 //
-// Array simples, sem paginação -- o front pagina no cliente, mesmo padrão de
-// /solicitacoes, /maquinas e /preventivas. `?pagina=` é aceito e ignorado: o
-// front o inclui no objeto de parâmetros de algumas telas, e recusar seria
-// quebrar por um campo que não muda nada.
+// Sem `?pagina=` a resposta é array simples com tudo -- os painéis do Gestor e
+// do Técnico montam a navegação Loja -> Setor a partir da lista inteira. Com
+// `?pagina=N` vira RespostaPaginada (12 por página, ListarOrdensServicoPaginada):
+// é o que as telas de histórico do Administrador pedem, porque OS finalizada só
+// acumula. `?revisado=` separa as abas de Custos Pendentes.
 //
 // Só lê -- o único erro possível é do banco, e ele vai 500 com o erro cru no
 // log (nome de constraint/coluna não pode ir no corpo da resposta).
@@ -143,14 +145,9 @@ func (o *OrdemServicoController) Listar() gin.HandlerFunc {
 		// quem os define é o ParseBool: qualquer outra coisa é erro de
 		// cliente, não "não filtrar" -- ?finalizada=sim silenciosamente
 		// ignorado devolveria a lista inteira para a tela de OS Finalizadas.
-		var finalizada *bool
-		if bruto := ctx.Query("finalizada"); bruto != "" {
-			v, err := strconv.ParseBool(bruto)
-			if err != nil {
-				ctx.JSON(http.StatusBadRequest, gin.H{"error": "finalizada inválido"})
-				return
-			}
-			finalizada = &v
+		finalizada, ok := boolDeQuery(ctx, "finalizada")
+		if !ok {
+			return
 		}
 
 		lojaId, ok := idDeQuery(ctx, "lojaId")
@@ -173,15 +170,45 @@ func (o *OrdemServicoController) Listar() gin.HandlerFunc {
 			busca = &bruto
 		}
 
-		ordens, err := o.service.ListarOrdensServico(ctx.Request.Context(), tenantId, usuarioId, perfil, service.FiltrosOrdemServico{
+		revisado, ok := boolDeQuery(ctx, "revisado")
+		if !ok {
+			return
+		}
+
+		filtros := service.FiltrosOrdemServico{
 			Status:     status,
 			Tipo:       tipo,
 			Finalizada: finalizada,
+			Revisado:   revisado,
 			LojaId:     lojaId,
 			SetorId:    setorId,
 			TecnicoId:  tecnicoId,
 			Busca:      busca,
-		})
+		}
+
+		if bruto := ctx.Query("pagina"); bruto != "" {
+			pagina, err := strconv.Atoi(bruto)
+			if err != nil || pagina < 1 {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "pagina inválida"})
+				return
+			}
+
+			resposta, err := o.service.ListarOrdensServicoPaginada(ctx.Request.Context(), tenantId, usuarioId, perfil, filtros, int32(pagina))
+			if err != nil {
+				slog.ErrorContext(ctx.Request.Context(), "listar ordens de serviço (paginada)", "tenant", tenantId, "err", err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao listar ordens de serviço"})
+				return
+			}
+
+			for i := range resposta.Dados {
+				o.resolverFoto(ctx.Request.Context(), &resposta.Dados[i])
+			}
+
+			ctx.JSON(http.StatusOK, resposta)
+			return
+		}
+
+		ordens, err := o.service.ListarOrdensServico(ctx.Request.Context(), tenantId, usuarioId, perfil, filtros)
 		if err != nil {
 			slog.ErrorContext(ctx.Request.Context(), "listar ordens de serviço", "tenant", tenantId, "err", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao listar ordens de serviço"})
@@ -566,4 +593,24 @@ func (o *OrdemServicoController) Custo() gin.HandlerFunc {
 
 		ctx.JSON(http.StatusOK, os)
 	}
+}
+
+// boolDeQuery lê um filtro booleano opcional (?finalizada=, ?revisado=). Só o
+// ParseBool decide o que vale: qualquer outra coisa é 400, nunca "não filtrar"
+// -- ?finalizada=sim silenciosamente ignorado devolveria a lista inteira para
+// a tela de OS Finalizadas.
+func boolDeQuery(ctx *gin.Context, nome string) (*bool, bool) {
+
+	bruto := ctx.Query(nome)
+	if bruto == "" {
+		return nil, true
+	}
+
+	v, err := strconv.ParseBool(bruto)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": nome + " inválido"})
+		return nil, false
+	}
+
+	return &v, true
 }

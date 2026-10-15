@@ -111,6 +111,11 @@ type Querier interface {
 	ContarNotificacoesDoUsuario(ctx context.Context, arg ContarNotificacoesDoUsuarioParams) (int64, error)
 	// O número do sininho e do badge do ícone (idx_notificacao_nao_lida).
 	ContarNotificacoesNaoLidas(ctx context.Context, arg ContarNotificacoesNaoLidasParams) (int64, error)
+	// O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+	// tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+	// aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+	// solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+	ContarOrdensServico(ctx context.Context, arg ContarOrdensServicoParams) (int64, error)
 	// Loja não é desativada por baixo dos setores: o escopo de acesso aponta pro
 	// setor (usuario_escopo_setor), então setor ativo pendurado em loja inativa
 	// continua dando acesso a uma loja que sumiu das listagens. Quem chama decide
@@ -773,6 +778,13 @@ type Querier interface {
 	// administrador (não filtra), os demais perfis só enxergam OS cujo setor eles
 	// alcançam. O setor é o da solicitação de origem -- ordem_servico não tem
 	// setor_id próprio, e nem deveria: a OS é da solicitação, não de um lugar.
+	// os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+	// poderiam trocar de página entre uma requisição e outra.
+	//
+	// Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+	// deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+	// antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+	// Loja -> Setor a partir da lista inteira.
 	ListarOrdensServico(ctx context.Context, arg ListarOrdensServicoParams) ([]ListarOrdensServicoRow, error)
 	// maquina_id é opcional (NULL não filtra): a aba "Manutenção Prev." do painel
 	// do gestor lista tudo, e a tela de edição de máquina pede só as dela

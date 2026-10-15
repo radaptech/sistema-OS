@@ -1,9 +1,10 @@
 import { createPortal } from 'react-dom'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Truck, XCircle } from 'lucide-react'
+import { Building2, Truck, XCircle } from 'lucide-react'
 import { Botao } from '../../../componentes/Botao'
 import { CampoSelecao } from '../../../componentes/CampoSelecao'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { useEmpresasTerceirizadas } from '../../../hooks/useEmpresasTerceirizadas'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import type { OrdemServico } from '../../../tipos/ordemServico'
@@ -31,6 +32,7 @@ export function ModalAcionarTerceiro({
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<DadosAcionarTerceiro>({
     resolver: zodResolver(esquemaAcionarTerceiro),
@@ -38,6 +40,11 @@ export function ModalAcionarTerceiro({
       empresaTerceirizadaId: ordemServico.empresaTerceirizadaId,
     },
   })
+
+  // Prévia da escolhida (foto, especialidade, telefone): o select só cabe o nome, e é
+  // pela foto/logo que o Técnico confere que pegou a empresa certa.
+  const empresaEscolhidaId = useWatch({ control, name: 'empresaTerceirizadaId' })
+  const empresaEscolhida = empresas.find((empresa) => empresa.id === empresaEscolhidaId)
 
   function aoSalvarFormulario(dados: DadosAcionarTerceiro) {
     aoSalvar(dados)
@@ -106,6 +113,27 @@ export function ModalAcionarTerceiro({
               </option>
             ))}
           </CampoSelecao>
+
+          {empresaEscolhida && (
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+              <MiniaturaFoto
+                fotoUrl={empresaEscolhida.fotoUrl}
+                alt={empresaEscolhida.nome}
+                Icone={Building2}
+                className="h-14 w-14 rounded-lg"
+                tamanhoIcone={20}
+              />
+              <div className="min-w-0 text-sm">
+                <p className="truncate font-semibold text-slate-800">{empresaEscolhida.nome}</p>
+                {empresaEscolhida.especialidade && (
+                  <p className="truncate text-xs text-slate-500">{empresaEscolhida.especialidade}</p>
+                )}
+                {empresaEscolhida.telefone && (
+                  <p className="font-mono text-xs text-slate-500">{empresaEscolhida.telefone}</p>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="mt-1 flex gap-3">
             <div className="flex-1">

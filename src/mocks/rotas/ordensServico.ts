@@ -225,6 +225,7 @@ export const rotasOrdensServico: Rota[] = [
       ordem.tipo = 'terceiros'
       ordem.empresaTerceirizadaId = empresa.id
       ordem.empresaTerceirizadaNome = empresa.nome
+      ordem.empresaTerceirizadaFotoUrl = empresa.fotoUrl
 
       return responderJson(ordem)
     },

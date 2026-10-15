@@ -1,12 +1,13 @@
 import { createPortal } from 'react-dom'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, XCircle } from 'lucide-react'
+import { Building2, CheckCircle2, XCircle } from 'lucide-react'
 import { Alternador } from '../../../componentes/Alternador'
 import { Botao } from '../../../componentes/Botao'
 import { CampoItensCusto } from '../../../componentes/CampoItensCusto'
 import { CampoNotasFiscais } from '../../../componentes/CampoNotasFiscais'
 import { CampoTextoArea } from '../../../componentes/CampoTextoArea'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../../utilitarios/formatarData'
 import { formatarHoras } from '../../../utilitarios/formatarHoras'
@@ -140,14 +141,23 @@ export function ModalLancarCustoManutencao({
 
           {/* O serviço saiu de uma empresa externa: o valor a conferir é o da nota dela. */}
           {ordemServico.empresaTerceirizadaNome && (
-            <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-              Serviço executado por{' '}
-              <span className="font-semibold">
-                {ordemServico.empresaTerceirizadaNome}
-              </span>{' '}
-              — confira o Valor Peças e o Valor Mão de Obra contra a nota fiscal da
-              empresa.
-            </p>
+            <div className="flex items-center gap-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              <MiniaturaFoto
+                fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+                alt={ordemServico.empresaTerceirizadaNome}
+                Icone={Building2}
+                className="h-9 w-9 rounded-md"
+                tamanhoIcone={14}
+              />
+              <p>
+                Serviço executado por{' '}
+                <span className="font-semibold">
+                  {ordemServico.empresaTerceirizadaNome}
+                </span>{' '}
+                — confira o Valor Peças e o Valor Mão de Obra contra a nota fiscal da
+                empresa.
+              </p>
+            </div>
           )}
 
           <Controller

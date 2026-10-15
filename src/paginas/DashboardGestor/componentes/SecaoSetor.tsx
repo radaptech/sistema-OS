@@ -9,6 +9,7 @@ import { BadgeCriticidade } from './BadgeCriticidade'
 
 interface SecaoSetorProps {
   setorNome: string
+  fotoUrl?: string
   maquinas: Maquina[]
   // undefined enquanto os indicadores da loja carregam: a seção já aparece com as
   // máquinas, e só os números entram em esqueleto.
@@ -26,6 +27,7 @@ interface SecaoSetorProps {
 // com o próprio resumo. Clicar na máquina abre a etapa individual.
 export function SecaoSetor({
   setorNome,
+  fotoUrl,
   maquinas,
   resumoSetor,
   resumoPorMaquina,
@@ -47,7 +49,7 @@ export function SecaoSetor({
             title="Ver só este setor"
             className="group flex min-w-0 items-center gap-2 text-left"
           >
-            <TituloSetor setorNome={setorNome} />
+            <TituloSetor setorNome={setorNome} fotoUrl={fotoUrl} />
             <ChevronRight
               size={16}
               className="group-hover:text-marca-600 shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5"
@@ -55,7 +57,7 @@ export function SecaoSetor({
           </button>
         ) : (
           <div className="flex min-w-0 items-center gap-2">
-            <TituloSetor setorNome={setorNome} />
+            <TituloSetor setorNome={setorNome} fotoUrl={fotoUrl} />
           </div>
         )}
         <p className="font-mono text-[11px] text-slate-400">
@@ -108,12 +110,20 @@ export function SecaoSetor({
   )
 }
 
-function TituloSetor({ setorNome }: { setorNome: string }) {
+function TituloSetor({ setorNome, fotoUrl }: { setorNome: string; fotoUrl?: string }) {
   return (
     <>
-      <span className="bg-marca-100 text-marca-600 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
-        <Tag size={14} />
-      </span>
+      {fotoUrl ? (
+        <ImagemProgressiva
+          src={fotoUrl}
+          alt={setorNome}
+          className="h-7 w-7 shrink-0 rounded-lg object-cover"
+        />
+      ) : (
+        <span className="bg-marca-100 text-marca-600 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg">
+          <Tag size={14} />
+        </span>
+      )}
       <h2 className="font-display truncate text-base font-bold text-slate-900">
         {setorNome}
       </h2>

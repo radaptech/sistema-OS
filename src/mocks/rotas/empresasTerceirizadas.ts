@@ -1,6 +1,6 @@
 import type { NovaEmpresaTerceirizadaPayload } from '../../tipos/empresaTerceirizada'
 import { empresasTerceirizadas } from '../bancoMock'
-import { atraso, gerarId, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import { atraso, gerarId, responderErro, responderJson, type Rota, extrairCorpo, marcadorFoto, urlArquivoEnviado } from '../utilidadesMock'
 
 export const rotasEmpresasTerceirizadas: Rota[] = [
   {
@@ -25,8 +25,13 @@ export const rotasEmpresasTerceirizadas: Rota[] = [
     padrao: /^\/empresas-terceirizadas$/,
     async tratar({ corpo }) {
       await atraso()
-      const dados = corpo as NovaEmpresaTerceirizadaPayload
-      const nova = { id: gerarId(empresasTerceirizadas), ...dados }
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovaEmpresaTerceirizadaPayload
+      const nova = {
+        id: gerarId(empresasTerceirizadas),
+        ...dados,
+        fotoUrl: urlArquivoEnviado(arquivos, 'foto') ?? marcadorFoto(dados.nome, '#cbd5e1'),
+      }
       empresasTerceirizadas.push(nova)
       return responderJson(nova, 201)
     },
@@ -42,8 +47,10 @@ export const rotasEmpresasTerceirizadas: Rota[] = [
         return responderErro('Empresa terceirizada não encontrada.', 404)
       }
 
-      const dados = corpo as NovaEmpresaTerceirizadaPayload
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovaEmpresaTerceirizadaPayload
       Object.assign(empresa, dados)
+      empresa.fotoUrl = urlArquivoEnviado(arquivos, 'foto') ?? empresa.fotoUrl
       return responderJson(empresa)
     },
   },

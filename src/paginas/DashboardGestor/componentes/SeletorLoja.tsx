@@ -5,6 +5,7 @@ import {
   TriangleAlert,
   Wrench,
 } from 'lucide-react'
+import { ImagemProgressiva } from '../../../componentes/ImagemProgressiva'
 import type { Loja } from '../../../tipos/loja'
 
 export interface ResumoLoja {
@@ -33,9 +34,17 @@ export function SeletorLoja({ lojas, aoSelecionar }: SeletorLojaProps) {
           className="group shadow-card hover:shadow-card-hover animate-surgir flex min-w-0 flex-col gap-4 rounded-2xl bg-white p-4 text-left transition-shadow sm:p-5"
         >
           <div className="flex min-w-0 items-center gap-3">
-            <span className="bg-marca-100 text-marca-600 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
-              <Store size={20} />
-            </span>
+            {resumo.loja.fotoUrl ? (
+              <ImagemProgressiva
+                src={resumo.loja.fotoUrl}
+                alt={resumo.loja.nome}
+                className="h-11 w-11 shrink-0 rounded-xl object-cover"
+              />
+            ) : (
+              <span className="bg-marca-100 text-marca-600 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl">
+                <Store size={20} />
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               <h2 className="font-display truncate text-base font-bold text-slate-900">
                 {resumo.loja.nome}

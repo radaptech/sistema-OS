@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
 import { CampoBusca } from '../../componentes/CampoBusca'
 import { ModalConfirmarExclusao } from '../../componentes/ModalConfirmarExclusao'
+import { MiniaturaFoto } from '../../componentes/MiniaturaFoto'
 import { Paginacao } from '../../componentes/Paginacao'
 import { EsqueletoLista, EsqueletoLinhaCadastro } from '../../componentes/Esqueleto'
 import { useEmpresasTerceirizadas } from '../../hooks/useEmpresasTerceirizadas'
@@ -112,9 +113,7 @@ export function AdministradorEmpresasTerceirizadas() {
               className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-marca-600 text-white">
-                  <Building2 size={16} />
-                </span>
+                <MiniaturaFoto fotoUrl={empresa.fotoUrl} alt={empresa.nome} Icone={Building2} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-800">{empresa.nome}</p>
                   <p className="truncate text-xs text-slate-400">

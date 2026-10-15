@@ -4,6 +4,8 @@ import { EsqueletoLista, EsqueletoCardOS } from './Esqueleto'
 import { Paginacao } from './Paginacao'
 import { atrasoEntrada } from '../utilitarios/atrasoEntrada'
 import { useNavegacaoNiveis } from '../hooks/useNavegacaoNiveis'
+import { useLojas } from '../hooks/useLojas'
+import { useSetores } from '../hooks/useSetores'
 import { acharNivel, montarItensNavegacao } from '../utilitarios/navegacaoNiveis'
 import { ListaNavegacao, TrilhaNavegacao, type PassoTrilha } from './NavegacaoNiveis'
 
@@ -52,12 +54,20 @@ export function NavegacaoLojaSetor<T extends ItemComLojaSetor>({
   renderItem,
 }: NavegacaoLojaSetorProps<T>) {
   const { parametros, navegar } = useNavegacaoNiveis()
+  // A foto de loja/setor não vem nos itens (solicitação/OS trazem só o nome): sai dos
+  // cadastros, que ficam no cache por 10 min e são liberados para qualquer perfil.
+  const { data: lojasCadastradas = [] } = useLojas()
+  const { data: setoresCadastrados = [] } = useSetores()
 
   const itensLoja = montarItensNavegacao(
     itens,
     (item) => item.lojaId,
     (item) => item.lojaNome,
-    { obterIdFilho: (item) => item.setorId, ehDestaque },
+    {
+      obterIdFilho: (item) => item.setorId,
+      ehDestaque,
+      obterFoto: (item) => lojasCadastradas.find((loja) => loja.id === item.lojaId)?.fotoUrl,
+    },
   )
   const loja = acharNivel(itensLoja, parametros.get('loja'))
 
@@ -66,7 +76,11 @@ export function NavegacaoLojaSetor<T extends ItemComLojaSetor>({
         itens.filter((item) => item.lojaId === loja.id),
         (item) => item.setorId,
         (item) => item.setorNome,
-        { ehDestaque },
+        {
+          ehDestaque,
+          obterFoto: (item) =>
+            setoresCadastrados.find((setor) => setor.id === item.setorId)?.fotoUrl,
+        },
       )
     : []
   const setor = acharNivel(itensSetor, parametros.get('setor'))

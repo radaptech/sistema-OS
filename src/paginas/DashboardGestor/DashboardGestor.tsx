@@ -45,6 +45,7 @@ export function DashboardGestor() {
               .map((setor) => ({
                 setorId: setor.id,
                 setorNome: setor.nome,
+                fotoUrl: setor.fotoUrl,
                 maquinas: subgrupo.itens.filter(
                   (maquina) => maquina.setorId === setor.id,
                 ),
@@ -53,6 +54,7 @@ export function DashboardGestor() {
               {
                 setorId: subgrupo.setorId,
                 setorNome: subgrupo.setorNome ?? `Setor ${subgrupo.setorId}`,
+                fotoUrl: setores.find((setor) => setor.id === subgrupo.setorId)?.fotoUrl,
                 maquinas: subgrupo.itens,
               },
             ],

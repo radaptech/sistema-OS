@@ -247,6 +247,8 @@ export interface OrdemServico {
   tecnicoArea?: string
   empresaTerceirizadaId?: number
   empresaTerceirizadaNome?: string
+  // Foto de cadastro da terceirizada, denormalizada como o nome (URL assinada).
+  empresaTerceirizadaFotoUrl?: string
   statusExecucao: StatusExecucaoOS
   // Uma OS só é "finalizada" quando o Técnico encerrou E o custo foi lançado. O servidor
   // resolve essa regra e devolve pronta, em vez de cada tela recalcular.

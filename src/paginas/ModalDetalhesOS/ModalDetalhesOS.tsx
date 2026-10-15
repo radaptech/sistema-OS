@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Printer, XCircle } from 'lucide-react'
+import { Building2, Printer, XCircle } from 'lucide-react'
 import { Botao } from '../../componentes/Botao'
 import { BadgeStatusExecucao } from '../../componentes/BadgeStatusExecucao'
 import { BadgeTipoOS } from '../../componentes/BadgeTipoOS'
 import { BadgeUrgencia } from '../../componentes/BadgeUrgencia'
+import { MiniaturaFoto } from '../../componentes/MiniaturaFoto'
 import { obterNomeAlvo, obterCodigoAlvo } from '../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import { formatarHoras } from '../../utilitarios/formatarHoras'
@@ -145,7 +146,14 @@ export function ModalDetalhesOS({
                 <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
                   Empresa Terceirizada
                 </p>
-                <p className="text-slate-700">
+                <p className="mt-0.5 flex items-center gap-2 text-slate-700">
+                  <MiniaturaFoto
+                    fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+                    alt={ordemServico.empresaTerceirizadaNome}
+                    Icone={Building2}
+                    className="h-8 w-8 rounded-md"
+                    tamanhoIcone={14}
+                  />
                   {ordemServico.empresaTerceirizadaNome}
                 </p>
               </div>

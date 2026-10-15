@@ -18,8 +18,8 @@ export interface ItemNavegacao {
   // Quantos itens distintos o próximo nível vai listar ao entrar (setores de uma loja,
   // máquinas de um setor). Ausente no último nível.
   filhos?: number
-  // Linha extra abaixo do nome e foto no lugar do ícone — só o nível de máquina usa, para
-  // diferenciar máquinas iguais (mesmo nome) pelo patrimônio.
+  // Linha extra abaixo do nome (o patrimônio, no nível de máquina — máquinas iguais têm o
+  // mesmo nome) e foto no lugar do ícone (loja, setor e máquina).
   detalhe?: string
   fotoUrl?: string
 }

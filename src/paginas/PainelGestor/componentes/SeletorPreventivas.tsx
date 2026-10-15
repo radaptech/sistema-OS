@@ -6,6 +6,7 @@ import type { Loja } from '../../../tipos/loja'
 import type { PreventivaListada } from '../../../tipos/maquina'
 import { ListaNavegacao, TrilhaNavegacao, type PassoTrilha } from '../../../componentes/NavegacaoNiveis'
 import { useNavegacaoNiveis } from '../../../hooks/useNavegacaoNiveis'
+import { useSetores } from '../../../hooks/useSetores'
 import { acharNivel, montarItensNavegacao } from '../../../utilitarios/navegacaoNiveis'
 import { CardPreventiva } from './CardPreventiva'
 import { HistoricoPreventiva } from './HistoricoPreventiva'
@@ -35,6 +36,8 @@ interface SeletorPreventivasProps {
 // que o servidor já devolve restritas ao escopo do Gestor.
 export function SeletorPreventivas({ preventivas, lojas, carregando }: SeletorPreventivasProps) {
   const { parametros, navegar } = useNavegacaoNiveis()
+  // Foto de loja/setor vem dos cadastros (a preventiva traz só os nomes).
+  const { data: setoresCadastrados = [] } = useSetores()
   const ehVencida = (preventiva: PreventivaListada) => Boolean(preventiva.vencida)
 
   const itensLoja = montarItensNavegacao(
@@ -44,7 +47,11 @@ export function SeletorPreventivas({ preventivas, lojas, carregando }: SeletorPr
       preventiva.lojaNome ??
       lojas.find((loja) => loja.id === preventiva.lojaId)?.nome ??
       `Loja ${preventiva.lojaId}`,
-    { obterIdFilho: (preventiva) => preventiva.setorId, ehDestaque: ehVencida },
+    {
+      obterIdFilho: (preventiva) => preventiva.setorId,
+      ehDestaque: ehVencida,
+      obterFoto: (preventiva) => lojas.find((loja) => loja.id === preventiva.lojaId)?.fotoUrl,
+    },
   )
   const loja = acharNivel(itensLoja, parametros.get('loja'))
 
@@ -53,7 +60,12 @@ export function SeletorPreventivas({ preventivas, lojas, carregando }: SeletorPr
         preventivas.filter((preventiva) => preventiva.lojaId === loja.id),
         (preventiva) => preventiva.setorId,
         (preventiva) => preventiva.setorNome,
-        { obterIdFilho: (preventiva) => preventiva.maquinaId, ehDestaque: ehVencida },
+        {
+          obterIdFilho: (preventiva) => preventiva.maquinaId,
+          ehDestaque: ehVencida,
+          obterFoto: (preventiva) =>
+            setoresCadastrados.find((setor) => setor.id === preventiva.setorId)?.fotoUrl,
+        },
       )
     : []
   const setor = acharNivel(itensSetor, parametros.get('setor'))

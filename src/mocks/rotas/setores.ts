@@ -1,6 +1,6 @@
 import type { NovoSetorPayload } from '../../tipos/setor'
 import { setores } from '../bancoMock'
-import { atraso, gerarId, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import { atraso, gerarId, responderErro, responderJson, type Rota, extrairCorpo, marcadorFoto, urlArquivoEnviado } from '../utilidadesMock'
 
 export const rotasSetores: Rota[] = [
   {
@@ -27,7 +27,8 @@ export const rotasSetores: Rota[] = [
     padrao: /^\/setores$/,
     async tratar({ corpo }) {
       await atraso()
-      const dados = corpo as NovoSetorPayload
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovoSetorPayload
       const jaExiste = setores.some(
         (setor) =>
           setor.lojaId === dados.lojaId && setor.nome.toLowerCase() === dados.nome.toLowerCase(),
@@ -37,7 +38,13 @@ export const rotasSetores: Rota[] = [
         return responderErro('Já existe um setor com esse nome nessa loja.', 409)
       }
 
-      const novo = { id: gerarId(setores), nome: dados.nome, lojaId: dados.lojaId, ativo: true }
+      const novo = {
+        id: gerarId(setores),
+        nome: dados.nome,
+        lojaId: dados.lojaId,
+        ativo: true,
+        fotoUrl: urlArquivoEnviado(arquivos, 'foto') ?? marcadorFoto(dados.nome, '#cbd5e1'),
+      }
       setores.push(novo)
       return responderJson(novo, 201)
     },
@@ -53,9 +60,11 @@ export const rotasSetores: Rota[] = [
         return responderErro('Setor não encontrado.', 404)
       }
 
-      const dados = corpo as NovoSetorPayload
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovoSetorPayload
       setor.nome = dados.nome
       setor.lojaId = dados.lojaId
+      setor.fotoUrl = urlArquivoEnviado(arquivos, 'foto') ?? setor.fotoUrl
       return responderJson(setor)
     },
   },

@@ -152,7 +152,9 @@ func TestWebPushEnviar(t *testing.T) {
 		if !strings.HasPrefix(h.Get("Authorization"), "vapid t=") || !strings.Contains(h.Get("Authorization"), "k="+publica) {
 			t.Errorf("Authorization sem VAPID: %q", h.Get("Authorization"))
 		}
-		if strings.Contains(string(gravador.corpo), "oi") {
+		// O texto original inteiro, não só "oi": duas letras aparecem por acaso no
+		// cifrado (falhava em ~6% das execuções).
+		if strings.Contains(string(gravador.corpo), `"titulo":"oi"`) {
 			t.Error("corpo saiu em texto puro -- devia estar cifrado")
 		}
 	})

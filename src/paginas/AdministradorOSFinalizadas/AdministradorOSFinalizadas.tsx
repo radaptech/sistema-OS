@@ -9,15 +9,13 @@ import { Paginacao } from '../../componentes/Paginacao'
 import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { useLojas } from '../../hooks/useLojas'
 import { useSetores } from '../../hooks/useSetores'
-import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
+import { useOrdensServicoPaginadas } from '../../hooks/useOrdensServicoPaginadas'
 import { obterNomeAlvo } from '../../utilitarios/alvoOS'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import { formatarMoeda } from '../../utilitarios/formatarMoeda'
 import type { OrdemServico, TipoOS } from '../../tipos/ordemServico'
 import { ModalDetalhesOS } from '../ModalDetalhesOS/ModalDetalhesOS'
-
-const TAMANHO_PAGINA = 10
 
 interface SelecaoOS {
   ordem: OrdemServico
@@ -32,8 +30,11 @@ export function AdministradorOSFinalizadas() {
   const [selecao, setSelecao] = useState<SelecaoOS | null>(null)
   const [pagina, setPagina] = useState(1)
 
-  // "Finalizada" = Técnico encerrou E o custo foi lançado. O servidor resolve essa regra.
-  const { data: ordensServico = [], isLoading } = useOrdensServicoTodas({
+  // "Finalizada" = Técnico encerrou E o custo foi lançado. O servidor resolve essa regra
+  // e também pagina (12 por página): é histórico, só cresce — trazer tudo para paginar no
+  // cliente era o primeiro ponto a pesar com o tempo.
+  const { data, isLoading, isFetching } = useOrdensServicoPaginadas({
+    pagina,
     finalizada: true,
     busca: busca.trim() || undefined,
     lojaId: filtroLoja ? Number(filtroLoja) : undefined,
@@ -53,8 +54,6 @@ export function AdministradorOSFinalizadas() {
     setFiltroSetor('')
   }
 
-  const ordensFinalizadas = ordensServico
-
   const chaveFiltros = `${busca}|${filtroLoja}|${filtroSetor}|${filtroTipo}`
   const [chaveFiltrosAnterior, setChaveFiltrosAnterior] = useState(chaveFiltros)
   if (chaveFiltros !== chaveFiltrosAnterior) {
@@ -62,12 +61,13 @@ export function AdministradorOSFinalizadas() {
     setPagina(1)
   }
 
-  const totalPaginas = Math.max(1, Math.ceil(ordensFinalizadas.length / TAMANHO_PAGINA))
-  const paginaAtual = Math.min(pagina, totalPaginas)
-  const ordensPaginadas = ordensFinalizadas.slice(
-    (paginaAtual - 1) * TAMANHO_PAGINA,
-    paginaAtual * TAMANHO_PAGINA,
-  )
+  const ordensPaginadas = data?.dados ?? []
+  const totalPaginas = Math.max(1, data?.totalPaginas ?? 1)
+  // O servidor não segura a página no total: se a lista encolheu (filtro, OS que saiu),
+  // uma página além da última voltaria vazia. Volta para a última que existe.
+  if (data && pagina > totalPaginas) {
+    setPagina(totalPaginas)
+  }
 
   return (
     <div className="flex min-h-svh flex-col bg-slate-50">
@@ -125,7 +125,15 @@ export function AdministradorOSFinalizadas() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 lg:grid lg:grid-cols-2 2xl:grid-cols-3 lg:content-start lg:gap-4">
+        {!isLoading && data && (
+          <p className="text-sm text-slate-500">{data.total} OS finalizada(s)</p>
+        )}
+
+        <div
+          className={`flex flex-1 flex-col gap-3 transition-opacity lg:grid lg:grid-cols-2 2xl:grid-cols-3 lg:content-start lg:gap-4 ${
+            isFetching && !isLoading ? 'opacity-60' : 'opacity-100'
+          }`}
+        >
           {isLoading && (
             <EsqueletoLista quantidade={4}>
               <EsqueletoCardOS />
@@ -198,7 +206,7 @@ export function AdministradorOSFinalizadas() {
         </div>
 
         {totalPaginas > 1 && (
-          <Paginacao pagina={paginaAtual} totalPaginas={totalPaginas} aoMudarPagina={setPagina} />
+          <Paginacao pagina={pagina} totalPaginas={totalPaginas} aoMudarPagina={setPagina} />
         )}
       </main>
 

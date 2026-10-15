@@ -20,7 +20,15 @@ import {
   sincronizarPreventivasVencidas,
   somarItensDeCusto,
 } from '../regrasMock'
-import { atraso, gerarId, responderBlob, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import {
+  atraso,
+  gerarId,
+  paginarLista,
+  responderBlob,
+  responderErro,
+  responderJson,
+  type Rota,
+} from '../utilidadesMock'
 import { notificarConclusao } from '../notificacoesMock'
 
 function gerarIdPausa(): number {
@@ -68,6 +76,13 @@ export const rotasOrdensServico: Rota[] = [
         lista = lista.filter((ordem) => ordem.finalizada === (finalizada === 'true'))
       }
 
+      const revisado = query.get('revisado')
+      if (revisado) {
+        lista = lista.filter(
+          (ordem) => (ordem.custo?.revisadoEm != null) === (revisado === 'true'),
+        )
+      }
+
       const tipo = query.get('tipo')
       if (tipo) {
         lista = lista.filter((ordem) => ordem.tipo === tipo)
@@ -99,6 +114,12 @@ export const rotasOrdensServico: Rota[] = [
             (ordem.solicitanteNome ?? '').toLowerCase().includes(termo)
           )
         })
+      }
+
+      // Mesmo contrato do back: com ?pagina= vira RespostaPaginada de 12; sem, o array.
+      const pagina = query.get('pagina')
+      if (pagina) {
+        return responderJson(paginarLista(ordenarPorAberturaDesc(lista), Number(pagina), 12))
       }
 
       return responderJson(ordenarPorAberturaDesc(lista))

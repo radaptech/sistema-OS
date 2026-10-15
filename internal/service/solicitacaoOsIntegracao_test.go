@@ -216,7 +216,7 @@ func TestSolicitacaoCrud(t *testing.T) {
 	})
 
 	t.Run("minhas solicitações são só do próprio solicitante", func(t *testing.T) {
-		pagina, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitante.Id, 1, nil, nil)
+		pagina, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitante.Id, 1, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("erro ao listar: %v", err)
 		}
@@ -224,12 +224,50 @@ func TestSolicitacaoCrud(t *testing.T) {
 			t.Errorf("total = %d, esperado 2 (maquinário + reparo)", pagina.Total)
 		}
 
-		vazia, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitanteOutroSetor.Id, 1, nil, nil)
+		vazia, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitanteOutroSetor.Id, 1, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("erro ao listar: %v", err)
 		}
 		if vazia.Total != 0 {
 			t.Errorf("solicitante de outro setor não devia ter solicitação nenhuma, total = %d", vazia.Total)
+		}
+	})
+
+	t.Run("máquinas das minhas solicitações: só as que eu pedi, sem o reparo", func(t *testing.T) {
+		maquinas, err := svc.MaquinasDasMinhasSolicitacoes(ctx, tenantID, solicitante.Id)
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		if len(maquinas) != 1 || maquinas[0].Id != maquinaAtiva.Id {
+			t.Errorf("máquinas = %+v, esperado só a máquina %d", maquinas, maquinaAtiva.Id)
+		}
+
+		nenhuma, err := svc.MaquinasDasMinhasSolicitacoes(ctx, tenantID, solicitanteOutroSetor.Id)
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		if nenhuma == nil || len(nenhuma) != 0 {
+			t.Errorf("sem solicitação devia vir lista vazia (não nil), veio %#v", nenhuma)
+		}
+	})
+
+	t.Run("minhas solicitações filtradas por máquina", func(t *testing.T) {
+		// Das duas (maquinário + reparo), só a de maquinário aponta pra máquina;
+		// o reparo (maquina_id NULL) não pode casar com o filtro.
+		daMaquina, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitante.Id, 1, nil, nil, &maquinaAtiva.Id)
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		if daMaquina.Total != 1 || len(daMaquina.Dados) != 1 || daMaquina.Dados[0].MaquinaId == nil || *daMaquina.Dados[0].MaquinaId != maquinaAtiva.Id {
+			t.Errorf("filtro por máquina: total=%d dados=%+v", daMaquina.Total, daMaquina.Dados)
+		}
+
+		outra, err := svc.ListarMinhasSolicitacoes(ctx, tenantID, solicitante.Id, 1, nil, nil, &maquinaOutroSetor.Id)
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		if outra.Total != 0 {
+			t.Errorf("máquina sem solicitação minha devia voltar vazio, total = %d", outra.Total)
 		}
 	})
 

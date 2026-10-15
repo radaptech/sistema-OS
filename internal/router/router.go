@@ -216,6 +216,7 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// só o usuario.id do token (mesmo motivo de GET /lojas e /setores ficarem
 	// sem Permitir: o recorte já está no que a query pede, não no RBAC).
 	solicitacoes.GET("/minhas", c.Solicit.Minhas())
+	solicitacoes.GET("/minhas/maquinas", c.Solicit.MinhasMaquinas())
 	solicitacoes.GET("/resumo", c.Solicit.Resumo())
 	// A fila é do Gestor (e Administrador) -- Técnico não participa da
 	// aprovação, só recebe a OS depois que ela existe.

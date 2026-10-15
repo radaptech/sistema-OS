@@ -283,6 +283,9 @@ LEFT JOIN usuario rej ON rej.tenant_id = s.tenant_id AND rej.id = s.rejeitado_po
 WHERE s.tenant_id = sqlc.arg(tenant_id)
   AND s.solicitante_id = sqlc.arg(solicitante_id)
   AND (sqlc.narg(status)::status_solicitacao IS NULL OR s.status = sqlc.narg(status))
+  -- Filtro "de qual máquina" de Minhas Solicitações. NULL não filtra; com valor,
+  -- pequeno reparo (maquina_id NULL) nunca casa -- é o esperado.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
   AND (
     sqlc.narg(busca)::text IS NULL
     OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
@@ -299,6 +302,9 @@ LEFT JOIN maquina m ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
 WHERE s.tenant_id = sqlc.arg(tenant_id)
   AND s.solicitante_id = sqlc.arg(solicitante_id)
   AND (sqlc.narg(status)::status_solicitacao IS NULL OR s.status = sqlc.narg(status))
+  -- Filtro "de qual máquina" de Minhas Solicitações. NULL não filtra; com valor,
+  -- pequeno reparo (maquina_id NULL) nunca casa -- é o esperado.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
   AND (
     sqlc.narg(busca)::text IS NULL
     OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
@@ -464,3 +470,16 @@ VALUES (
     false
 )
 RETURNING id, aberta_em;
+
+-- name: ListarMaquinasDasMinhasSolicitacoes :many
+-- As opções do filtro "de qual máquina" de Minhas Solicitações: as máquinas
+-- que aparecem nas solicitações do PRÓPRIO solicitante, e não as do setor dele
+-- -- a máquina desativada, ou a do setor antigo de quem mudou de setor, continua
+-- no histórico e precisa continuar filtrável. Pequeno reparo não tem máquina e
+-- some no JOIN. Sem filtro de m.ativa, pelo mesmo motivo.
+SELECT DISTINCT m.id, m.nome, m.numero_patrimonio, m.foto_chave
+FROM solicitacao_os s
+JOIN maquina m ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+WHERE s.tenant_id = sqlc.arg(tenant_id)
+  AND s.solicitante_id = sqlc.arg(solicitante_id)
+ORDER BY m.nome, m.numero_patrimonio;

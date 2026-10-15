@@ -196,3 +196,15 @@ type ResumoSolicitacoes struct {
 	EmAndamento int64 `json:"emAndamento"`
 	Concluidas  int64 `json:"concluidas"`
 }
+
+// MaquinaDasMinhasSolicitacoes é um item de GET /solicitacoes/minhas/maquinas
+// -- as opções do filtro "de qual máquina" de Minhas Solicitações. Subconjunto
+// de Maquinario (o front tipa como Pick<Maquina, ...>): só o que o chip mostra.
+// FotoUrl nasce com a foto_chave crua e o controller assina, como em
+// Maquinario.FotoUrl.
+type MaquinaDasMinhasSolicitacoes struct {
+	Id               int64   `json:"id"`
+	Nome             string  `json:"nome"`
+	NumeroPatrimonio string  `json:"numeroPatrimonio"`
+	FotoUrl          *string `json:"fotoUrl,omitempty"`
+}

@@ -64,7 +64,7 @@ func (s solicitacaoFake) CadastrarSolicitacaoReparo(_ context.Context, _, _ int6
 	return s.resposta(), nil
 }
 
-func (s solicitacaoFake) ListarMinhasSolicitacoes(_ context.Context, _, usuarioId int64, pagina int32, _, _ *string) (model.RespostaPaginada[model.SolicitacaoOS], error) {
+func (s solicitacaoFake) ListarMinhasSolicitacoes(_ context.Context, _, usuarioId int64, pagina int32, _, _ *string, _ *int64) (model.RespostaPaginada[model.SolicitacaoOS], error) {
 	if s.ator != nil {
 		*s.ator = fmt.Sprintf("%d", usuarioId)
 	}
@@ -75,6 +75,16 @@ func (s solicitacaoFake) ListarMinhasSolicitacoes(_ context.Context, _, usuarioI
 		return model.RespostaPaginada[model.SolicitacaoOS]{}, s.err
 	}
 	return model.RespostaPaginada[model.SolicitacaoOS]{Dados: []model.SolicitacaoOS{s.resposta()}, Pagina: pagina, TotalPaginas: 1, Total: 1}, nil
+}
+
+func (s solicitacaoFake) MaquinasDasMinhasSolicitacoes(_ context.Context, _, usuarioId int64) ([]model.MaquinaDasMinhasSolicitacoes, error) {
+	if s.ator != nil {
+		*s.ator = fmt.Sprintf("%d", usuarioId)
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	return []model.MaquinaDasMinhasSolicitacoes{{Id: 2, Nome: "Forno", NumeroPatrimonio: "PAT-2"}}, nil
 }
 
 func (s solicitacaoFake) ListarSolicitacoes(_ context.Context, _, usuarioId int64, perfil string, _, _, _ *string, lojaId *int64) ([]model.SolicitacaoOS, error) {

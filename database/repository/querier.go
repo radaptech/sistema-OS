@@ -698,6 +698,12 @@ type Querier interface {
 	//
 	// Array simples, sem paginação: o front pagina no cliente.
 	ListarMaquinas(ctx context.Context, arg ListarMaquinasParams) ([]ListarMaquinasRow, error)
+	// As opções do filtro "de qual máquina" de Minhas Solicitações: as máquinas
+	// que aparecem nas solicitações do PRÓPRIO solicitante, e não as do setor dele
+	// -- a máquina desativada, ou a do setor antigo de quem mudou de setor, continua
+	// no histórico e precisa continuar filtrável. Pequeno reparo não tem máquina e
+	// some no JOIN. Sem filtro de m.ativa, pelo mesmo motivo.
+	ListarMaquinasDasMinhasSolicitacoes(ctx context.Context, arg ListarMaquinasDasMinhasSolicitacoesParams) ([]ListarMaquinasDasMinhasSolicitacoesRow, error)
 	// GET /notificacoes -- sempre só as do próprio usuário (o id vem do token),
 	// mais novas primeiro, paginada por LIMIT/OFFSET pelo mesmo motivo de
 	// ListarSolicitacoesDoSolicitante: model.RespostaPaginada pede os dois números.

@@ -67,7 +67,11 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
 
 ## Estrutura atual
 - `main.go` — entrypoint. Roda migrations automaticamente no boot
-  (`RunMigrationPostgress`), aplica `middleware.CorsConfig()` global, monta o
+  (`RunMigrationPostgress`), aplica `middleware.CorsConfig()` global e a
+  compressão gzip das respostas (`gin-contrib/gzip` v1.2.5, entre o CORS e o
+  `Timeout` — a lista inteira de OS cai de ~380 KB para ~45 KB; erro ≥ 400 sai sem
+  compressão; v1.2.5 e não a mais nova porque a 1.2.8 arrastava uma atualização em
+  massa de dependências indiretas), monta o
   `router.Container` e registra as rotas (`router.ConfigurarRotas`), e sobe o Gin na
   porta 8081. Também despacha subcomandos de CLI antes de subir o servidor:
   `subcomandos` (mapa nome → função) + `despacharSubcomando(args) bool`, que roda o

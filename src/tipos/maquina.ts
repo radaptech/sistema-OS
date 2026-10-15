@@ -23,6 +23,10 @@ export interface Maquina {
   ativa?: boolean
 }
 
+// GET /solicitacoes/minhas/maquinas: as máquinas que aparecem nas solicitações do próprio
+// Solicitante (opções do filtro de Minhas Solicitações) — só o que o chip mostra.
+export type MaquinaDasMinhasSolicitacoes = Pick<Maquina, 'id' | 'nome' | 'numeroPatrimonio' | 'fotoUrl'>
+
 // GET /maquinas/:id/historico — o que a exclusão definitiva leva junto. emAberto é
 // solicitação pendente ou OS não concluída: é o que impede a desativação.
 export interface HistoricoMaquina {

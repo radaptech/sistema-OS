@@ -256,8 +256,40 @@ export const rotasSolicitacoes: Rota[] = [
         lista = lista.filter((item) => combinaBusca(item, termo))
       }
 
+      const maquinaId = query.get('maquinaId')
+      if (maquinaId) {
+        lista = lista.filter((item) => item.maquinaId === Number(maquinaId))
+      }
+
       const pagina = Number(query.get('pagina') ?? '1')
       return responderJson(paginarLista(ordenarPorCriadoEmDesc(lista), pagina, 10))
+    },
+  },
+  {
+    // Espelha ListarMaquinasDasMinhasSolicitacoes do back: as máquinas que aparecem
+    // nas solicitações do próprio solicitante, sem o pequeno reparo.
+    metodo: 'GET',
+    padrao: /^\/solicitacoes\/minhas\/maquinas$/,
+    async tratar() {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+
+      const porId = new Map<number, { id: number; nome: string; numeroPatrimonio?: string; fotoUrl?: string }>()
+      for (const item of solicitacoes) {
+        if (item.solicitanteId === usuario.id && item.maquinaId && !porId.has(item.maquinaId)) {
+          porId.set(item.maquinaId, {
+            id: item.maquinaId,
+            nome: item.maquinaNome ?? `Máquina ${item.maquinaId}`,
+            numeroPatrimonio: item.maquinaCodigo ?? undefined,
+            fotoUrl: item.maquinaFotoUrl,
+          })
+        }
+      }
+      const lista = [...porId.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      return responderJson(lista)
     },
   },
   {

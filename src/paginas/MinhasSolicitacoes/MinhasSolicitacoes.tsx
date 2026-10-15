@@ -11,6 +11,7 @@ import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
 import { BarraFiltros, type FiltroStatus } from './componentes/BarraFiltros'
 import { CardSolicitacao } from './componentes/CardSolicitacao'
+import { FiltroMaquinas } from './componentes/FiltroMaquinas'
 
 const ATRASO_DEBOUNCE_BUSCA_MS = 400
 
@@ -18,6 +19,7 @@ export function MinhasSolicitacoes() {
   const [buscaInput, setBuscaInput] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('Todos')
+  const [maquinaId, setMaquinaId] = useState<number>()
   const [pagina, setPagina] = useState(1)
   const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
     useState<SolicitacaoOS | null>(null)
@@ -52,10 +54,16 @@ export function MinhasSolicitacoes() {
     setPagina(1)
   }
 
+  function aoSelecionarMaquina(novaMaquinaId: number | undefined) {
+    setMaquinaId(novaMaquinaId)
+    setPagina(1)
+  }
+
   const { data, isLoading, isError, isFetching } = useSolicitacoes({
     pagina,
     busca: busca || undefined,
     status: filtro === 'Todos' ? undefined : filtro,
+    maquinaId,
   })
 
   const solicitacoes = data?.dados ?? []
@@ -71,6 +79,8 @@ export function MinhasSolicitacoes() {
           filtroSelecionado={filtro}
           aoSelecionarFiltro={aoSelecionarFiltro}
         />
+
+        <FiltroMaquinas maquinaSelecionada={maquinaId} aoSelecionar={aoSelecionarMaquina} />
 
         {!isLoading && !isError && (
           <p className="text-sm text-slate-500">
@@ -97,7 +107,7 @@ export function MinhasSolicitacoes() {
 
           {!isLoading && !isError && solicitacoes.length === 0 && (
             <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
-              {busca || filtro !== 'Todos' ? (
+              {busca || filtro !== 'Todos' || maquinaId !== undefined ? (
                 <SearchX size={28} />
               ) : (
                 <Inbox size={28} />

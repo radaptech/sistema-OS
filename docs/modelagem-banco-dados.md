@@ -548,7 +548,8 @@ três telefones que envelhecem em ritmos diferentes.
 
 ### 3.10 Anexo aponta para chave, não para URL
 
-`solicitacao_anexo.chave` (e `maquina.foto_chave`, mesmo motivo) guarda a chave do objeto no R2, não
+`solicitacao_anexo.chave` (e `maquina.foto_chave`, mesmo motivo — assim como `loja`, `setor` e
+`empresa_terceirizada.foto_chave`, migration `000020`) guarda a chave do objeto no R2, não
 um endereço assinado. A URL de acesso é gerada na leitura (`bucketR2.URLLeitura`), porque link
 assinado expira — persistido, o banco acumula endereços que param de funcionar sem nada indicar que
 quebraram. Sem coluna `bucket`: cada tipo de anexo já sobe pra um bucket fixo, escolhido no código

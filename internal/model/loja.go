@@ -18,6 +18,9 @@ type Loja struct {
 	Nome      string `json:"nome"`
 	EmpresaId int64  `json:"empresaId"`
 	Ativa     bool   `json:"ativa"`
+	// FotoUrl nasce com a foto_chave crua e o controller troca pela URL
+	// assinada antes de responder -- mesmo padrão de Maquinario.FotoUrl.
+	FotoUrl *string `json:"fotoUrl,omitempty"`
 }
 
 // Empresa é o corpo de GET /empresas -- espelha Empresa no front
@@ -35,4 +38,8 @@ type Empresa struct {
 // forma de errar. Campo extra no JSON é ignorado pelo binding.
 type NovaLojaPayload struct {
 	Nome string `json:"nome" binding:"required"`
+	// FotoChave não vem do JSON (json:"-"): é a key do upload da parte `foto`
+	// do multipart, preenchida pelo controller. nil = sem foto nova, e o UPDATE
+	// mantém a atual (COALESCE).
+	FotoChave *string `json:"-"`
 }

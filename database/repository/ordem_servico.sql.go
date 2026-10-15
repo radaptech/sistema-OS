@@ -758,6 +758,8 @@ SELECT
     tec.nome AS tecnico_nome,
     a.nome AS tecnico_area,
     et.nome AS empresa_terceirizada_nome,
+    -- KEY no R2 da foto da terceirizada; o controller assina antes de responder.
+    et.foto_chave AS empresa_terceirizada_foto_chave,
     (os.status = 'Concluída' AND c.id IS NOT NULL)::boolean AS finalizada,
     e.tipo_defeito,
     e.data_fim,
@@ -845,50 +847,51 @@ type ListarOrdensServicoParams struct {
 }
 
 type ListarOrdensServicoRow struct {
-	ID                       int64
-	TenantID                 int64
-	SolicitacaoID            int64
-	Tipo                     TipoOs
-	TecnicoID                int64
-	EmpresaTerceirizadaID    *int64
-	TerceiroAcionadoEm       pgtype.Timestamptz
-	AbertaPorID              *int64
-	AfetaProducao            bool
-	Status                   StatusOs
-	AbertaEm                 pgtype.Timestamptz
-	IniciadaEm               pgtype.Timestamptz
-	CriadoEm                 pgtype.Timestamptz
-	Urgencia                 NivelUrgencia
-	Descricao                string
-	DataSolicitacao          pgtype.Timestamptz
-	MaquinaID                *int64
-	ItemDescricao            *string
-	SetorID                  int64
-	MaquinaNome              *string
-	MaquinaCodigo            *string
-	SetorNome                string
-	LojaID                   int64
-	LojaNome                 string
-	SolicitanteNome          *string
-	TecnicoNome              string
-	TecnicoArea              *string
-	EmpresaTerceirizadaNome  *string
-	Finalizada               bool
-	TipoDefeito              *TipoDefeito
-	DataFim                  pgtype.Timestamptz
-	DefeitoConstatado        *string
-	CausaRaiz                *string
-	Solucao                  *string
-	EncerradoPorNome         *string
-	HorasTrabalhadas         pgtype.Float8
-	HorasParada              pgtype.Float8
-	CustoHoraTecnico         pgtype.Float8
-	CustoManutencao          pgtype.Float8
-	DescricaoServicoTerceiro *string
-	TemNotaFiscal            *bool
-	LancadoEm                pgtype.Timestamptz
-	CustoRevisadoEm          pgtype.Timestamptz
-	LancadoPorNome           *string
+	ID                           int64
+	TenantID                     int64
+	SolicitacaoID                int64
+	Tipo                         TipoOs
+	TecnicoID                    int64
+	EmpresaTerceirizadaID        *int64
+	TerceiroAcionadoEm           pgtype.Timestamptz
+	AbertaPorID                  *int64
+	AfetaProducao                bool
+	Status                       StatusOs
+	AbertaEm                     pgtype.Timestamptz
+	IniciadaEm                   pgtype.Timestamptz
+	CriadoEm                     pgtype.Timestamptz
+	Urgencia                     NivelUrgencia
+	Descricao                    string
+	DataSolicitacao              pgtype.Timestamptz
+	MaquinaID                    *int64
+	ItemDescricao                *string
+	SetorID                      int64
+	MaquinaNome                  *string
+	MaquinaCodigo                *string
+	SetorNome                    string
+	LojaID                       int64
+	LojaNome                     string
+	SolicitanteNome              *string
+	TecnicoNome                  string
+	TecnicoArea                  *string
+	EmpresaTerceirizadaNome      *string
+	EmpresaTerceirizadaFotoChave *string
+	Finalizada                   bool
+	TipoDefeito                  *TipoDefeito
+	DataFim                      pgtype.Timestamptz
+	DefeitoConstatado            *string
+	CausaRaiz                    *string
+	Solucao                      *string
+	EncerradoPorNome             *string
+	HorasTrabalhadas             pgtype.Float8
+	HorasParada                  pgtype.Float8
+	CustoHoraTecnico             pgtype.Float8
+	CustoManutencao              pgtype.Float8
+	DescricaoServicoTerceiro     *string
+	TemNotaFiscal                *bool
+	LancadoEm                    pgtype.Timestamptz
+	CustoRevisadoEm              pgtype.Timestamptz
+	LancadoPorNome               *string
 }
 
 // GET /ordens-servico -- um endpoint para os três painéis, o que muda é o
@@ -1007,6 +1010,7 @@ func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServi
 			&i.TecnicoNome,
 			&i.TecnicoArea,
 			&i.EmpresaTerceirizadaNome,
+			&i.EmpresaTerceirizadaFotoChave,
 			&i.Finalizada,
 			&i.TipoDefeito,
 			&i.DataFim,

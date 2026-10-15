@@ -33,6 +33,7 @@ func montarEmpresaTerceirizada(e repository.EmpresaTerceirizada) model.EmpresaTe
 		Especialidade: e.Especialidade,
 		Telefone:      e.Telefone,
 		Ativa:         e.Ativa,
+		FotoUrl:       e.FotoChave,
 	}
 }
 
@@ -58,6 +59,7 @@ func (e *EmpresaTerceirizadaService) CadastrarEmpresaTerceirizada(ctx context.Co
 		// campo), então desreferenciar aqui é panic.
 		Especialidade: textoOuNil(payload.Especialidade),
 		Telefone:      textoOuNil(payload.Telefone),
+		FotoChave:     payload.FotoChave,
 	})
 	if err != nil {
 		// Nome duplicado no tenant é 23505 -> ErrDadoDuplicado -> 409. Sem a
@@ -135,6 +137,7 @@ func (e *EmpresaTerceirizadaService) AtualizarEmpresaTerceirizada(ctx context.Co
 		Nome:          nome,
 		Especialidade: textoOuNil(payload.Especialidade),
 		Telefone:      textoOuNil(payload.Telefone),
+		FotoChave:     payload.FotoChave,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

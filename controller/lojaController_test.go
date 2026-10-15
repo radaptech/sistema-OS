@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,7 +129,7 @@ func TestLojaMapeiaErroParaStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 
-			ctrl := NewLojaController(lojaFake{err: c.err})
+			ctrl := NewLojaController(lojaFake{err: c.err}, "")
 
 			var w *httptest.ResponseRecorder
 			var ctx *gin.Context
@@ -163,7 +165,7 @@ func TestLojaMapeiaErroParaStatus(t *testing.T) {
 	// no front, então não pode ser trocada por texto genérico.
 	t.Run("422 de setor ativo preserva a contagem na mensagem", func(t *testing.T) {
 		w, ctx := requisicaoLoja(http.MethodDelete, "3", "")
-		NewLojaController(lojaFake{err: semSetores}).Desativar()(ctx)
+		NewLojaController(lojaFake{err: semSetores}, "").Desativar()(ctx)
 		if !strings.Contains(w.Body.String(), "3 setor") {
 			t.Errorf("mensagem perdeu a contagem: %s", w.Body)
 		}
@@ -171,7 +173,7 @@ func TestLojaMapeiaErroParaStatus(t *testing.T) {
 
 	t.Run("corpo sem nome não chega no service", func(t *testing.T) {
 		w, ctx := requisicaoLoja(http.MethodPost, "", `{}`)
-		NewLojaController(lojaFake{}).Cadastrar()(ctx)
+		NewLojaController(lojaFake{}, "").Cadastrar()(ctx)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, esperado 400 (corpo: %s)", w.Code, w.Body)
 		}
@@ -186,7 +188,7 @@ func TestLojaMapeiaErroParaStatus(t *testing.T) {
 		w, ctx := requisicaoLoja(http.MethodPut, "42", `{"nome":"Loja Sul"}`)
 		// Header de outro tenant não pode influenciar: rota autenticada.
 		ctx.Request.Header.Set("X-tenant-ID", "outro")
-		NewLojaController(lojaFake{recebido: &recebido}).Atualizar()(ctx)
+		NewLojaController(lojaFake{recebido: &recebido}, "").Atualizar()(ctx)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, esperado 200", w.Code)
@@ -196,12 +198,39 @@ func TestLojaMapeiaErroParaStatus(t *testing.T) {
 		}
 	})
 
+	t.Run("multipart sem foto chega no service com o nome da parte dados", func(t *testing.T) {
+		// É o formato do front desde que loja ganhou foto (montarMultipart.ts).
+		// Sem a parte `foto`, nada sobe pro R2 -- por isso o bucket vazio do
+		// teste não importa.
+		var corpo bytes.Buffer
+		form := multipart.NewWriter(&corpo)
+		form.WriteField("dados", `{"nome":"Loja Leste"}`)
+		form.Close()
+
+		var recebido struct {
+			tenantId int64
+			id       int64
+			nome     string
+		}
+		w, ctx := requisicaoLoja(http.MethodPut, "9", "")
+		ctx.Request = httptest.NewRequest(http.MethodPut, "/lojas/9", &corpo)
+		ctx.Request.Header.Set("Content-Type", form.FormDataContentType())
+		NewLojaController(lojaFake{recebido: &recebido}, "").Atualizar()(ctx)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, esperado 200 (corpo: %s)", w.Code, w.Body)
+		}
+		if recebido.tenantId != 7 || recebido.id != 9 || recebido.nome != "Loja Leste" {
+			t.Errorf("service recebeu %+v, esperado {7 9 Loja Leste}", recebido)
+		}
+	})
+
 	t.Run("sem tenant no contexto é 500", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(w)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/lojas", nil)
 
-		NewLojaController(lojaFake{}).Listar()(ctx)
+		NewLojaController(lojaFake{}, "").Listar()(ctx)
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, esperado 500", w.Code)

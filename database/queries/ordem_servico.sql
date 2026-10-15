@@ -317,6 +317,8 @@ SELECT
     tec.nome AS tecnico_nome,
     a.nome AS tecnico_area,
     et.nome AS empresa_terceirizada_nome,
+    -- KEY no R2 da foto da terceirizada; o controller assina antes de responder.
+    et.foto_chave AS empresa_terceirizada_foto_chave,
     (os.status = 'Concluída' AND c.id IS NOT NULL)::boolean AS finalizada,
     e.tipo_defeito,
     e.data_fim,

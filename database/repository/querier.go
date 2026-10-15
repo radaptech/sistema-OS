@@ -61,7 +61,13 @@ type Querier interface {
 	// Todos os campos editáveis de uma vez (o front manda o objeto inteiro no PUT).
 	// `ativa` fica de fora: reativar não existe pela API, e desativar tem rota
 	// própria -- ver DesativarEmpresaTerceirizada.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarEmpresaTerceirizada(ctx context.Context, arg AtualizarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarLoja(ctx context.Context, arg AtualizarLojaParams) (Loja, error)
 	// setor_id entra no SET (diferente de AtualizarSetor, que ignora loja_id):
 	// mover uma máquina de setor não arrasta setor/loja de ninguém, só o próprio
@@ -81,6 +87,9 @@ type Querier interface {
 	// Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 	// OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
 	// loja errada se resolve desativando e criando na certa.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarSetor(ctx context.Context, arg AtualizarSetorParams) (Setor, error)
 	// Sem senha_hash -- troca de senha tem query própria (AtualizarSenhaUsuario),
 	// porque na edição ela é opcional (ver CadastrarUsuario: senha omitida mantém
@@ -156,6 +165,7 @@ type Querier interface {
 	// Nome é único por tenant (uq_empresa_terceirizada_nome): duplicado volta 23505
 	// e vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
 	// especialidade e telefone são opcionais (NULL) -- o front tipa os dois como `?`.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_TERCERIZADOS), opcional.
 	CriarEmpresaTerceirizada(ctx context.Context, arg CriarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
 	// Grava o que o Técnico apurou (docs/modelagem, 1.4.3 -- universal pros
 	// três tipos, inclusive terceiros: quem recebe o serviço da empresa
@@ -211,6 +221,7 @@ type Querier interface {
 	// ⚠️ A coluna é `ativa` (feminino) na loja e `ativo` no setor/usuário.
 	// Nome é único por tenant (uq_loja_tenant_nome): duplicado volta 23505 e
 	// vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_LOJAS), opcional.
 	CriarLoja(ctx context.Context, arg CriarLojaParams) (Loja, error)
 	// Máquina pertence a um setor (maquina só referencia setor_id -- a loja vem
 	// por join, docs/modelagem-banco-dados.md). Exclusão é soft delete
@@ -390,6 +401,8 @@ type Querier interface {
 	// fk_setor_loja (tenant_id, loja_id) -> loja (tenant_id, id) só fecha com os
 	// dois, e é ela que torna impossível pendurar um setor numa loja de outro
 	// tenant -- o banco recusa, não depende de disciplina no service.
+	//
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_SETORES), opcional.
 	CriarSetor(ctx context.Context, arg CriarSetorParams) (Setor, error)
 	// POST /solicitacoes/direta -- Gestor/Administrador abrindo a OS sem passar
 	// pela fila (migration 000014). `origem` e `status` literais, mesmo motivo de

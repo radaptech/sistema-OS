@@ -33,19 +33,26 @@ type OrdemServicoServiceInterface interface {
 	CorrigirCusto(ctx context.Context, tenantId, atorId, ordemServicoId int64, payload model.LancamentoCustoManutencaoPayload) (model.OrdemServico, error)
 }
 
-// OrdemServicoController não guarda bucket nenhum, diferente de
-// SolicitacaoController e MaquinaController: o tipo OrdemServico do front não
-// tem campo de mídia (a foto do defeito é da SOLICITAÇÃO, e é lá que o modal
-// de detalhes vai buscá-la). Nada a assinar no R2 aqui.
+// OrdemServicoController guarda só o bucket das fotos de empresa terceirizada
+// (OrdemServico.empresaTerceirizadaFotoUrl). A foto do defeito é da
+// SOLICITAÇÃO, e é lá que o modal de detalhes vai buscá-la.
 type OrdemServicoController struct {
-	service OrdemServicoServiceInterface
+	service             OrdemServicoServiceInterface
+	bucketTerceirizadas string
 }
 
-func NewOrdemServicoController(service OrdemServicoServiceInterface) *OrdemServicoController {
+func NewOrdemServicoController(service OrdemServicoServiceInterface, bucketTerceirizadas string) *OrdemServicoController {
 
 	return &OrdemServicoController{
-		service: service,
+		service:             service,
+		bucketTerceirizadas: bucketTerceirizadas,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 da foto da terceirizada pela URL
+// assinada (assinarFoto, controller/foto.go).
+func (o *OrdemServicoController) resolverFoto(ctx context.Context, ordem *model.OrdemServico) {
+	ordem.EmpresaTerceirizadaFotoUrl = assinarFoto(ctx, o.bucketTerceirizadas, ordem.EmpresaTerceirizadaFotoUrl, "ordem_servico", ordem.Id)
 }
 
 // statusOsValidos e tiposOsValidos são os ENUMs status_os/tipo_os do banco.
@@ -181,6 +188,10 @@ func (o *OrdemServicoController) Listar() gin.HandlerFunc {
 			return
 		}
 
+		for i := range ordens {
+			o.resolverFoto(ctx.Request.Context(), &ordens[i])
+		}
+
 		ctx.JSON(http.StatusOK, ordens)
 	}
 }
@@ -304,6 +315,8 @@ func (o *OrdemServicoController) Iniciar() gin.HandlerFunc {
 			return
 		}
 
+		o.resolverFoto(ctx.Request.Context(), &os)
+
 		ctx.JSON(http.StatusOK, os)
 	}
 }
@@ -351,6 +364,8 @@ func (o *OrdemServicoController) Pausar() gin.HandlerFunc {
 			return
 		}
 
+		o.resolverFoto(ctx.Request.Context(), &os)
+
 		ctx.JSON(http.StatusOK, os)
 	}
 }
@@ -390,6 +405,8 @@ func (o *OrdemServicoController) Retomar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		o.resolverFoto(ctx.Request.Context(), &os)
 
 		ctx.JSON(http.StatusOK, os)
 	}
@@ -436,6 +453,8 @@ func (o *OrdemServicoController) AcionarTerceiro() gin.HandlerFunc {
 			}
 			return
 		}
+
+		o.resolverFoto(ctx.Request.Context(), &os)
 
 		ctx.JSON(http.StatusOK, os)
 	}
@@ -484,6 +503,8 @@ func (o *OrdemServicoController) Encerrar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		o.resolverFoto(ctx.Request.Context(), &os)
 
 		ctx.JSON(http.StatusOK, os)
 	}
@@ -540,6 +561,8 @@ func (o *OrdemServicoController) Custo() gin.HandlerFunc {
 			}
 			return
 		}
+
+		o.resolverFoto(ctx.Request.Context(), &os)
 
 		ctx.JSON(http.StatusOK, os)
 	}

@@ -18,27 +18,42 @@ export interface ItemNavegacao {
   // Quantos itens distintos o próximo nível vai listar ao entrar (setores de uma loja,
   // máquinas de um setor). Ausente no último nível.
   filhos?: number
+  // Linha extra abaixo do nome e foto no lugar do ícone — só o nível de máquina usa, para
+  // diferenciar máquinas iguais (mesmo nome) pelo patrimônio.
+  detalhe?: string
+  fotoUrl?: string
 }
 
 interface OpcoesItensNavegacao<T> {
   obterIdFilho?: (item: T) => number
   ehDestaque?: (item: T) => boolean
+  obterDetalhe?: (item: T) => string | undefined
+  obterFoto?: (item: T) => string | undefined
 }
 
-// Um card por id distinto, com quantos itens carrega, em ordem alfabética. Os cards saem
+// Um card por id distinto, com quantos itens carrega, em ordem alfabética (empate de nome
+// desempata pelo detalhe, para máquinas iguais saírem em ordem de patrimônio). Os cards saem
 // dos próprios itens já recortados pelo servidor, então nenhum leva a um nível vazio.
 export function montarItensNavegacao<T>(
   itens: T[],
   obterId: (item: T) => number,
   obterNome: (item: T) => string,
-  { obterIdFilho, ehDestaque }: OpcoesItensNavegacao<T> = {},
+  { obterIdFilho, ehDestaque, obterDetalhe, obterFoto }: OpcoesItensNavegacao<T> = {},
 ): ItemNavegacao[] {
   const grupos = new Map<number, ItemNavegacao & { idsFilhos: Set<number> }>()
   for (const item of itens) {
     const id = obterId(item)
     let grupo = grupos.get(id)
     if (!grupo) {
-      grupo = { id, nome: obterNome(item), quantidade: 0, destaques: 0, idsFilhos: new Set() }
+      grupo = {
+        id,
+        nome: obterNome(item),
+        quantidade: 0,
+        destaques: 0,
+        idsFilhos: new Set(),
+        detalhe: obterDetalhe?.(item),
+        fotoUrl: obterFoto?.(item),
+      }
       grupos.set(id, grupo)
     }
     grupo.quantidade += 1
@@ -53,7 +68,11 @@ export function montarItensNavegacao<T>(
     .map(({ idsFilhos, ...grupo }) =>
       obterIdFilho ? { ...grupo, filhos: idsFilhos.size } : grupo,
     )
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+    .sort(
+      (a, b) =>
+        a.nome.localeCompare(b.nome, 'pt-BR') ||
+        (a.detalhe ?? '').localeCompare(b.detalhe ?? '', 'pt-BR', { numeric: true }),
+    )
 }
 
 // Lê o id de um nível na URL e acha o card dele. Id que não casa com nada (link antigo,

@@ -29,6 +29,8 @@ function paraPreventivaListada(preventiva: PreventivaInterna): PreventivaListada
     proximaData: preventiva.proximaData,
     ativa: preventiva.ativa,
     maquinaNome: maquina.nome,
+    maquinaPatrimonio: maquina.numeroPatrimonio,
+    maquinaFotoUrl: maquina.fotoUrl,
     setorId: maquina.setorId,
     setorNome: maquina.setorNome,
     lojaId: maquina.lojaId,

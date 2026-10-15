@@ -48,6 +48,10 @@ export interface PreventivaManutencao {
 export interface PreventivaListada extends PreventivaManutencao {
   id: number
   maquinaNome: string
+  // Máquinas iguais têm o mesmo nome: é o patrimônio (com a foto) que diz ao Gestor qual
+  // delas é, na aba "Manutenção Prev.". A URL da foto vem assinada pelo servidor.
+  maquinaPatrimonio?: string
+  maquinaFotoUrl?: string
   setorId: number
   setorNome: string
   lojaId: number

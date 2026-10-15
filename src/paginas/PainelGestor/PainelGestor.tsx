@@ -13,7 +13,7 @@ import { usePreventivas } from '../../hooks/usePreventivas'
 import { useLojas } from '../../hooks/useLojas'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
 import { dataEstaNoIntervalo } from '../../utilitarios/dataEstaNoIntervalo'
-import { obterNomeAlvo } from '../../utilitarios/alvoOS'
+import { combinaBuscaAlvo, type AlvoOS } from '../../utilitarios/alvoOS'
 import type {
   OrdemServico,
   SolicitacaoOS,
@@ -199,16 +199,14 @@ export function PainelGestor() {
   // Custo de Manutenção) — itens sem custo definido (solicitações e OS ainda em
   // andamento) só "combinam" quando nenhum filtro de valor está ativo.
   function combinaFiltrosAvancados(
-    maquinaNome: string,
+    alvo: AlvoOS,
     lojaId: number,
     dataReferencia: string,
     valorTotal?: number,
   ): boolean {
-    const combinaMaquina =
-      !filtrosAvancados.maquina ||
-      maquinaNome
-        .toLowerCase()
-        .includes(filtrosAvancados.maquina.trim().toLowerCase())
+    // Nome ou patrimônio: máquinas iguais têm o mesmo nome, e é pelo patrimônio
+    // (maquinaCodigo) que o Gestor chega numa só.
+    const combinaMaquina = combinaBuscaAlvo(alvo, filtrosAvancados.maquina)
     const combinaLoja =
       !filtrosAvancados.loja || lojaId === Number(filtrosAvancados.loja)
     const combinaData = dataEstaNoIntervalo(
@@ -233,7 +231,7 @@ export function PainelGestor() {
       solicitacao.status === filtroStatus &&
       (!filtroTipo || solicitacao.tipo === filtroTipo) &&
       combinaFiltrosAvancados(
-        obterNomeAlvo(solicitacao),
+        solicitacao,
         solicitacao.lojaId,
         solicitacao.criadoEm,
       ),
@@ -255,7 +253,7 @@ export function PainelGestor() {
       ordem.finalizada &&
       (!filtroTipo || ordem.tipo === filtroTipo) &&
       combinaFiltrosAvancados(
-        obterNomeAlvo(ordem),
+        ordem,
         ordem.lojaId,
         ordem.dataAbertura,
         (ordem.custo?.custoHoraTecnico ?? 0) +
@@ -273,19 +271,11 @@ export function PainelGestor() {
       ordem.statusExecucao !== 'Concluída' &&
       (!filtroTipo || ordem.tipo === filtroTipo) &&
       combinaFiltrosAvancados(
-        obterNomeAlvo(ordem),
+        ordem,
         ordem.lojaId,
         ordem.dataAbertura,
       ),
   )
-
-  const maquinasDisponiveis = [
-    ...new Set(
-      [...solicitacoes, ...ordensServico]
-        .map((item) => item.maquinaNome)
-        .filter((maquinaNome): maquinaNome is string => Boolean(maquinaNome)),
-    ),
-  ].sort((a, b) => a.localeCompare(b, 'pt-BR'))
 
   const quantidadeFiltrosAtivos =
     Object.values(filtrosAvancados).filter(Boolean).length
@@ -461,7 +451,6 @@ export function PainelGestor() {
       {modalFiltrosAberto && (
         <ModalFiltrosOS
           lojas={lojas}
-          maquinas={maquinasDisponiveis}
           filtros={filtrosAvancados}
           aoFechar={() => setModalFiltrosAberto(false)}
           aoAplicar={(novosFiltros) => {

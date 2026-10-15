@@ -1,18 +1,17 @@
 import { useState, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { Filter, RotateCcw, Search, XCircle } from 'lucide-react'
+import { Filter, RotateCcw, XCircle } from 'lucide-react'
 import { Botao } from '../../../componentes/Botao'
 import { CampoSelecao } from '../../../componentes/CampoSelecao'
 import { CampoTexto } from '../../../componentes/CampoTexto'
 import type { Loja } from '../../../tipos/loja'
 import { FILTROS_AVANCADOS_OS_VAZIOS, type FiltrosAvancadosOS } from '../filtrosOS'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
-
-const ID_LISTA_MAQUINAS = 'filtro-os-maquinas-sugeridas'
+import { useMaquinas } from '../../../hooks/useMaquinas'
+import { CampoMaquinaFiltro } from './CampoMaquinaFiltro'
 
 interface ModalFiltrosOSProps {
   lojas: Loja[]
-  maquinas: string[]
   filtros: FiltrosAvancadosOS
   aoFechar: () => void
   aoAplicar: (filtros: FiltrosAvancadosOS) => void
@@ -20,7 +19,6 @@ interface ModalFiltrosOSProps {
 
 export function ModalFiltrosOS({
   lojas,
-  maquinas,
   filtros,
   aoFechar,
   aoAplicar,
@@ -28,6 +26,21 @@ export function ModalFiltrosOS({
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar)
 
   const [rascunho, setRascunho] = useState<FiltrosAvancadosOS>(filtros)
+
+  // As sugestões são as máquinas do escopo do Gestor (GET /maquinas, recortado pelo
+  // servidor), não as que aparecem nas solicitações/OS carregadas: o painel só busca a
+  // lista da aba aberta, e na aba de preventivas a sugestão saía vazia. Com loja
+  // escolhida, só as dela. Máquinas iguais ficam juntas, em ordem de patrimônio.
+  const { data: maquinasEscopo = [] } = useMaquinas()
+  const maquinasSugeridas = maquinasEscopo
+    .filter((maquina) => !rascunho.loja || maquina.lojaId === Number(rascunho.loja))
+    .sort(
+      (a, b) =>
+        a.nome.localeCompare(b.nome, 'pt-BR') ||
+        (a.numeroPatrimonio ?? '').localeCompare(b.numeroPatrimonio ?? '', 'pt-BR', {
+          numeric: true,
+        }),
+    )
 
   const dataInvalida =
     !!rascunho.dataInicio && !!rascunho.dataFim && rascunho.dataInicio > rascunho.dataFim
@@ -55,8 +68,8 @@ export function ModalFiltrosOS({
 
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
-        <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
+      <div className={`${classeCartao} w-full max-w-md rounded-2xl bg-white shadow-pop`}>
+        <div className="flex items-start justify-between rounded-t-2xl bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Gestor
@@ -88,21 +101,11 @@ export function ModalFiltrosOS({
             ))}
           </CampoSelecao>
 
-          <div>
-            <CampoTexto
-              rotulo="Máquina"
-              list={ID_LISTA_MAQUINAS}
-              placeholder="Digite ou escolha uma máquina..."
-              icone={<Search size={16} className="text-marca-500" />}
-              value={rascunho.maquina}
-              onChange={(evento) => atualizarCampo('maquina', evento.target.value)}
-            />
-            <datalist id={ID_LISTA_MAQUINAS}>
-              {maquinas.map((maquina) => (
-                <option key={maquina} value={maquina} />
-              ))}
-            </datalist>
-          </div>
+          <CampoMaquinaFiltro
+            maquinas={maquinasSugeridas}
+            valor={rascunho.maquina}
+            aoMudar={(valor) => atualizarCampo('maquina', valor)}
+          />
 
           <div className="flex flex-col gap-1">
             <div className="grid grid-cols-2 gap-4">

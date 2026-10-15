@@ -171,6 +171,7 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   `/preventivas`: a entidade não pende de loja nem setor, é do tenant inteiro, e por isso
   o service nem recebe `usuarioId`/`perfil`.
 - **`GET /preventivas/:id/historico`** devolve os ciclos da preventiva, mais recente primeiro: cada ciclo é a OS que o job abriu quando ela venceu (`solicitacao_os.preventiva_id` → `ordem_servico`), sem tabela própria. O front pinta `status === 'Concluída'` de verde e o resto de vermelho. Fora do escopo responde **404** (`PreventivaNoEscopo`), não lista vazia — vazio quer dizer "ainda não venceu".
+- **`maquinaPatrimonio` e `maquinaFotoUrl` em toda resposta de `/preventivas`**: máquinas iguais têm o mesmo nome, e é o patrimônio (com a foto) que diferencia uma da outra na aba "Manutenção Prev." do Gestor. A foto sai do banco como `foto_chave` e o `PreventivaController` assina a URL antes de responder, igual a `maquinaFotoUrl` da solicitação — falha na assinatura só tira a foto, não derruba a resposta.
 - **`POST /preventivas` é só a preventiva avulsa** (`ModalManutencaoPreventiva`). As
   preventivas do formulário de máquina **não passam por essa rota**: viajam dentro do
   corpo de `POST`/`PUT /maquinas` e gravam na mesma transação da máquina

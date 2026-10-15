@@ -52,61 +52,18 @@ func NewMaquinaController(service MaquinaServicesInterface, bucketFotos, bucketA
 	}
 }
 
-// resolverFoto troca, no lugar, a chave do R2 pela URL assinada de leitura. O
-// service devolve a chave crua (MontarListaMaquinarios copia foto_chave
-// direto): ela não abre nada no browser e não deve sair daqui.
-//
-// Falhar a assinatura não derruba a resposta -- sem foto a tela ainda serve
-// (fotoUrl é opcional no tipo do front), com 500 não sobra nada. Vale tanto
-// depois do commit do POST quanto no meio de uma listagem.
+// resolverFoto troca, no lugar, a chave do R2 pela URL assinada de leitura
+// (assinarFoto, controller/foto.go). O service devolve a chave crua
+// (MontarListaMaquinarios copia foto_chave direto).
 func (m *MaquinaController) resolverFoto(ctx context.Context, maquina *model.Maquinario) {
-
-	if maquina.FotoUrl == nil {
-		return
-	}
-
-	url, err := bucketr2.URLLeitura(ctx, m.bucketFotos, *maquina.FotoUrl, ttlFotoMaquina)
-	if err != nil {
-		slog.ErrorContext(ctx, "assinar url da foto", "maquina", maquina.Id, "err", err)
-		maquina.FotoUrl = nil
-		return
-	}
-
-	maquina.FotoUrl = &url
+	maquina.FotoUrl = assinarFoto(ctx, m.bucketFotos, maquina.FotoUrl, "maquina", maquina.Id)
 }
 
-// chaveDaFoto sobe a parte `foto` pro R2 e devolve a key. Ausência não é erro:
-// o Zod do front não exige foto no cadastro de máquina (só na solicitação), e
-// no PUT nil quer dizer "não troquei a foto" -- a query preserva a atual.
-//
-// Sobe ANTES da transação da máquina: falhar aqui não deixa resíduo no banco.
-// O contrário vale só pro outro lado -- transação falhando depois deixa um
-// objeto órfão no R2, que é lixo barato e sem referência; gravar linha
-// apontando pra objeto que não subiu seria pior.
+// chaveDaFoto sobe a parte `foto` pro bucket das máquinas -- ver
+// chaveDaFotoEnviada (controller/foto.go). O Zod do front não exige foto no
+// cadastro de máquina (só na solicitação).
 func (m *MaquinaController) chaveDaFoto(ctx *gin.Context, tenantId int64) (*string, bool) {
-
-	header, err := ctx.FormFile("foto")
-	if err != nil {
-
-		if errors.Is(err, http.ErrMissingFile) {
-			return nil, true
-		}
-
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error":    "erro ao ler a foto enviada",
-			"detalhes": err.Error(),
-		})
-		return nil, false
-	}
-
-	chave, err := bucketr2.UploadFoto(ctx.Request.Context(), tenantId, m.bucketFotos, header)
-	if err != nil {
-		slog.ErrorContext(ctx.Request.Context(), "upload foto maquina", "tenant", tenantId, "err", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao salvar a foto"})
-		return nil, false
-	}
-
-	return &chave, true
+	return chaveDaFotoEnviada(ctx, tenantId, m.bucketFotos, "maquina")
 }
 
 // Cadastrar é POST /maquinas.

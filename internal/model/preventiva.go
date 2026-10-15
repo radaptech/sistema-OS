@@ -39,14 +39,22 @@ type PreventivaPayload struct {
 //
 // Vencida é calculado no banco, nunca coluna: a preventiva está ativa e a
 // proxima_data já chegou. É o que o front usa para o destaque em âmbar.
+//
+// MaquinaPatrimonio/MaquinaFotoUrl: máquinas iguais têm o mesmo nome, e é o
+// patrimônio (com a foto) que o gestor usa para saber qual é qual na aba
+// "Manutenção Prev.". MaquinaFotoUrl nasce com a foto_chave crua e o controller
+// troca pela URL assinada antes de responder -- mesmo padrão de
+// SolicitacaoOS.MaquinaFotoUrl.
 type Preventiva struct {
-	Id            int64          `json:"id"`
-	MaquinaId     int64          `json:"maquinaId"`
-	MaquinaNome   string         `json:"maquinaNome"`
-	Descricao     string         `json:"descricao"`
-	IntervaloDias int32          `json:"intervaloDias"`
-	ProximaData   *config.DataBr `json:"proximaData"`
-	Ativa         bool           `json:"ativa"`
+	Id                int64          `json:"id"`
+	MaquinaId         int64          `json:"maquinaId"`
+	MaquinaNome       string         `json:"maquinaNome"`
+	MaquinaPatrimonio string         `json:"maquinaPatrimonio"`
+	MaquinaFotoUrl    *string        `json:"maquinaFotoUrl,omitempty"`
+	Descricao         string         `json:"descricao"`
+	IntervaloDias     int32          `json:"intervaloDias"`
+	ProximaData       *config.DataBr `json:"proximaData"`
+	Ativa             bool           `json:"ativa"`
 	// TecnicoId/TecnicoNome são ponteiro porque a coluna é nullable: preventiva
 	// anterior à migration 000008 não tem técnico e precisa aparecer assim
 	// mesmo na listagem, que é onde o Administrador vai corrigi-la. Toda
@@ -65,20 +73,22 @@ type Preventiva struct {
 // sqlc (listagem e por id) têm os mesmos campos, então uma função serve as duas.
 func MontarPreventiva(p repository.ListarPreventivasRow) Preventiva {
 	return Preventiva{
-		Id:            p.ID,
-		MaquinaId:     p.MaquinaID,
-		MaquinaNome:   p.MaquinaNome,
-		Descricao:     p.Descricao,
-		IntervaloDias: p.IntervaloDias,
-		ProximaData:   config.NewDataBrPtr(p.ProximaData.Time),
-		Ativa:         p.Ativa,
-		TecnicoId:     p.TecnicoID,
-		TecnicoNome:   p.TecnicoNome,
-		SetorId:       p.SetorID,
-		SetorNome:     p.SetorNome,
-		LojaId:        p.LojaID,
-		LojaNome:      p.LojaNome,
-		Vencida:       p.Vencida,
+		Id:                p.ID,
+		MaquinaId:         p.MaquinaID,
+		MaquinaNome:       p.MaquinaNome,
+		MaquinaPatrimonio: p.MaquinaPatrimonio,
+		MaquinaFotoUrl:    p.MaquinaFotoChave,
+		Descricao:         p.Descricao,
+		IntervaloDias:     p.IntervaloDias,
+		ProximaData:       config.NewDataBrPtr(p.ProximaData.Time),
+		Ativa:             p.Ativa,
+		TecnicoId:         p.TecnicoID,
+		TecnicoNome:       p.TecnicoNome,
+		SetorId:           p.SetorID,
+		SetorNome:         p.SetorNome,
+		LojaId:            p.LojaID,
+		LojaNome:          p.LojaNome,
+		Vencida:           p.Vencida,
 	}
 }
 

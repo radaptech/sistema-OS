@@ -82,7 +82,7 @@ func NewContainer(db *pgxpool.Pool) *Container {
 		Loja:    controller.NewLojaController(serviceLoja),
 		Setor:   controller.NewSetorController(serviceSetor),
 		Maquina: controller.NewMaquinaController(serviceMaquina, bucketMaquinas, bucketOsServico),
-		Prevent: controller.NewPreventivaController(servicePreventiva),
+		Prevent: controller.NewPreventivaController(servicePreventiva, bucketMaquinas),
 		Terceir: controller.NewEmpresaTerceirizadaController(serviceTerceirizada),
 		Solicit: controller.NewSolicitacaoController(serviceSolicitacao, bucketOsServico, bucketPequenosReparos, bucketMaquinas),
 		OrdemOS: controller.NewOrdemServicoController(serviceOrdemServico),

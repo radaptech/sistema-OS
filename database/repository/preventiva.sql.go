@@ -287,6 +287,11 @@ const listarPreventivas = `-- name: ListarPreventivas :many
 SELECT
     p.id, p.tenant_id, p.maquina_id, p.descricao, p.intervalo_dias, p.proxima_data, p.ativa, p.criado_em, p.tecnico_id,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -332,22 +337,24 @@ type ListarPreventivasParams struct {
 }
 
 type ListarPreventivasRow struct {
-	ID            int64
-	TenantID      int64
-	MaquinaID     int64
-	Descricao     string
-	IntervaloDias int32
-	ProximaData   pgtype.Date
-	Ativa         bool
-	CriadoEm      pgtype.Timestamptz
-	TecnicoID     *int64
-	MaquinaNome   string
-	SetorID       int64
-	SetorNome     string
-	LojaID        int64
-	LojaNome      string
-	TecnicoNome   *string
-	Vencida       bool
+	ID                int64
+	TenantID          int64
+	MaquinaID         int64
+	Descricao         string
+	IntervaloDias     int32
+	ProximaData       pgtype.Date
+	Ativa             bool
+	CriadoEm          pgtype.Timestamptz
+	TecnicoID         *int64
+	MaquinaNome       string
+	MaquinaPatrimonio string
+	MaquinaFotoChave  *string
+	SetorID           int64
+	SetorNome         string
+	LojaID            int64
+	LojaNome          string
+	TecnicoNome       *string
+	Vencida           bool
 }
 
 // maquina_id é opcional (NULL não filtra): a aba "Manutenção Prev." do painel
@@ -386,6 +393,8 @@ func (q *Queries) ListarPreventivas(ctx context.Context, arg ListarPreventivasPa
 			&i.CriadoEm,
 			&i.TecnicoID,
 			&i.MaquinaNome,
+			&i.MaquinaPatrimonio,
+			&i.MaquinaFotoChave,
 			&i.SetorID,
 			&i.SetorNome,
 			&i.LojaID,
@@ -486,6 +495,11 @@ const obterPreventivaPorID = `-- name: ObterPreventivaPorID :one
 SELECT
     p.id, p.tenant_id, p.maquina_id, p.descricao, p.intervalo_dias, p.proxima_data, p.ativa, p.criado_em, p.tecnico_id,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -506,22 +520,24 @@ type ObterPreventivaPorIDParams struct {
 }
 
 type ObterPreventivaPorIDRow struct {
-	ID            int64
-	TenantID      int64
-	MaquinaID     int64
-	Descricao     string
-	IntervaloDias int32
-	ProximaData   pgtype.Date
-	Ativa         bool
-	CriadoEm      pgtype.Timestamptz
-	TecnicoID     *int64
-	MaquinaNome   string
-	SetorID       int64
-	SetorNome     string
-	LojaID        int64
-	LojaNome      string
-	TecnicoNome   *string
-	Vencida       bool
+	ID                int64
+	TenantID          int64
+	MaquinaID         int64
+	Descricao         string
+	IntervaloDias     int32
+	ProximaData       pgtype.Date
+	Ativa             bool
+	CriadoEm          pgtype.Timestamptz
+	TecnicoID         *int64
+	MaquinaNome       string
+	MaquinaPatrimonio string
+	MaquinaFotoChave  *string
+	SetorID           int64
+	SetorNome         string
+	LojaID            int64
+	LojaNome          string
+	TecnicoNome       *string
+	Vencida           bool
 }
 
 // Traz os denormalizados porque PreventivaListada (o retorno de POST e PUT
@@ -547,6 +563,8 @@ func (q *Queries) ObterPreventivaPorID(ctx context.Context, arg ObterPreventivaP
 		&i.CriadoEm,
 		&i.TecnicoID,
 		&i.MaquinaNome,
+		&i.MaquinaPatrimonio,
+		&i.MaquinaFotoChave,
 		&i.SetorID,
 		&i.SetorNome,
 		&i.LojaID,

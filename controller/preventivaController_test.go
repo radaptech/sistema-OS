@@ -142,7 +142,7 @@ func TestPreventivaMapeiaErroParaStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 
-			ctrl := NewPreventivaController(preventivaFake{err: c.err})
+			ctrl := NewPreventivaController(preventivaFake{err: c.err}, "")
 
 			var w *httptest.ResponseRecorder
 			var ctx *gin.Context
@@ -188,7 +188,7 @@ func TestPreventivaMaquinaIdObrigatorioSoNoPost(t *testing.T) {
 		} {
 			var recebido model.PreventivaPayload
 			w, ctx := requisicaoPreventiva(http.MethodPost, "", "", ruim)
-			NewPreventivaController(preventivaFake{recebido: &recebido}).Cadastrar()(ctx)
+			NewPreventivaController(preventivaFake{recebido: &recebido}, "").Cadastrar()(ctx)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("corpo %s: status = %d, esperado 400", ruim, w.Code)
@@ -205,7 +205,7 @@ func TestPreventivaMaquinaIdObrigatorioSoNoPost(t *testing.T) {
 	t.Run("PUT sem maquinaId passa", func(t *testing.T) {
 		w, ctx := requisicaoPreventiva(http.MethodPut, "3", "",
 			`{"descricao":"Limpeza","intervaloDias":30,"proximaData":"01/09/2026"}`)
-		NewPreventivaController(preventivaFake{}).Atualizar()(ctx)
+		NewPreventivaController(preventivaFake{}, "").Atualizar()(ctx)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, esperado 200 (corpo: %s)", w.Code, w.Body)
@@ -231,7 +231,7 @@ func TestPreventivaCorpoInvalido(t *testing.T) {
 		t.Run(nome, func(t *testing.T) {
 			var recebido model.PreventivaPayload
 			w, ctx := requisicaoPreventiva(http.MethodPost, "", "", corpo)
-			NewPreventivaController(preventivaFake{recebido: &recebido}).Cadastrar()(ctx)
+			NewPreventivaController(preventivaFake{recebido: &recebido}, "").Cadastrar()(ctx)
 
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, esperado 400 (corpo: %s)", w.Code, w.Body)
@@ -245,7 +245,7 @@ func TestPreventivaCorpoInvalido(t *testing.T) {
 	// A data tem que voltar no formato do contrato, não em RFC3339.
 	t.Run("resposta traz a data em dd/mm/yyyy", func(t *testing.T) {
 		w, ctx := requisicaoPreventiva(http.MethodGet, "3", "", "")
-		NewPreventivaController(preventivaFake{}).Obter()(ctx)
+		NewPreventivaController(preventivaFake{}, "").Obter()(ctx)
 
 		if !strings.Contains(w.Body.String(), `"proximaData":"`) || strings.Contains(w.Body.String(), "T00:00:00Z") {
 			t.Errorf("data fora do contrato: %s", w.Body)
@@ -262,7 +262,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 	t.Run("sem filtro chega nil", func(t *testing.T) {
 		var recebido *int64
 		w, ctx := requisicaoPreventiva(http.MethodGet, "", "", "")
-		NewPreventivaController(preventivaFake{maquinaId: &recebido}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{maquinaId: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK || recebido != nil {
 			t.Fatalf("status %d, maquinaId %v", w.Code, recebido)
@@ -272,7 +272,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 	t.Run("maquinaId válido chega no service", func(t *testing.T) {
 		var recebido *int64
 		w, ctx := requisicaoPreventiva(http.MethodGet, "", "?maquinaId=3", "")
-		NewPreventivaController(preventivaFake{maquinaId: &recebido}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{maquinaId: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d", w.Code)
@@ -286,7 +286,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 		for _, ruim := range []string{"abc", "0", "-3"} {
 			var recebido *int64
 			w, ctx := requisicaoPreventiva(http.MethodGet, "", "?maquinaId="+ruim, "")
-			NewPreventivaController(preventivaFake{maquinaId: &recebido}).Listar()(ctx)
+			NewPreventivaController(preventivaFake{maquinaId: &recebido}, "").Listar()(ctx)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("maquinaId=%s: status = %d, esperado 400", ruim, w.Code)
@@ -301,7 +301,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 	// PreventivaListada[] e null quebra o .map.
 	t.Run("lista vazia sai como array", func(t *testing.T) {
 		w, ctx := requisicaoPreventiva(http.MethodGet, "", "", "")
-		NewPreventivaController(preventivaFake{}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{}, "").Listar()(ctx)
 
 		if corpo := strings.TrimSpace(w.Body.String()); corpo != "[]" {
 			t.Errorf("corpo = %s, esperado []", corpo)
@@ -313,7 +313,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 		ctx, _ := gin.CreateTestContext(w)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/preventivas", nil)
 
-		NewPreventivaController(preventivaFake{}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{}, "").Listar()(ctx)
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, esperado 500", w.Code)
@@ -327,7 +327,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 		ctx.Set(middleware.UserId, int64(42))
 		ctx.Set(middleware.UserPerfil, "gestor")
 
-		NewPreventivaController(preventivaFake{ator: &recebido}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{ator: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d", w.Code)
@@ -344,7 +344,7 @@ func TestPreventivaListarFiltroDeMaquina(t *testing.T) {
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/preventivas", nil)
 		ctx.Set(middleware.UserTenantId, int64(7)) // tenant ok, ator faltando
 
-		NewPreventivaController(preventivaFake{ator: &recebido}).Listar()(ctx)
+		NewPreventivaController(preventivaFake{ator: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, esperado 500", w.Code)

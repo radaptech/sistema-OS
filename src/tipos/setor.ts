@@ -3,6 +3,8 @@ export interface SetorCadastrado {
   nome: string
   lojaId: number
   ativo?: boolean
+  // URL assinada pelo servidor (a foto mora no R2); ausente = sem foto cadastrada.
+  fotoUrl?: string
 }
 
 export interface NovoSetorPayload {

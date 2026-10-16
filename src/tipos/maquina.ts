@@ -23,6 +23,10 @@ export interface Maquina {
   ativa?: boolean
 }
 
+// GET /solicitacoes/minhas/maquinas: as máquinas que aparecem nas solicitações do próprio
+// Solicitante (opções do filtro de Minhas Solicitações) — só o que o chip mostra.
+export type MaquinaDasMinhasSolicitacoes = Pick<Maquina, 'id' | 'nome' | 'numeroPatrimonio' | 'fotoUrl'>
+
 // GET /maquinas/:id/historico — o que a exclusão definitiva leva junto. emAberto é
 // solicitação pendente ou OS não concluída: é o que impede a desativação.
 export interface HistoricoMaquina {
@@ -48,6 +52,10 @@ export interface PreventivaManutencao {
 export interface PreventivaListada extends PreventivaManutencao {
   id: number
   maquinaNome: string
+  // Máquinas iguais têm o mesmo nome: é o patrimônio (com a foto) que diz ao Gestor qual
+  // delas é, na aba "Manutenção Prev.". A URL da foto vem assinada pelo servidor.
+  maquinaPatrimonio?: string
+  maquinaFotoUrl?: string
   setorId: number
   setorNome: string
   lojaId: number

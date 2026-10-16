@@ -18,6 +18,8 @@ import { SecaoSetor } from './SecaoSetor'
 export interface SetorComMaquinas {
   setorId: number
   setorNome: string
+  // Foto de cadastro do setor (useSetores), para o título da seção.
+  fotoUrl?: string
   maquinas: Maquina[]
 }
 
@@ -196,6 +198,7 @@ export function PainelIndicadoresLoja({
           <SecaoSetor
             key={setor.setorId}
             setorNome={setor.setorNome}
+            fotoUrl={setor.fotoUrl}
             maquinas={setor.maquinas}
             resumoSetor={
               indicadores

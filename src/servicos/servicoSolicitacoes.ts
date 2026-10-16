@@ -15,11 +15,14 @@ import type {
   TipoOS,
 } from '../tipos/ordemServico'
 import type { RespostaPaginada } from '../tipos/paginacao'
+import type { MaquinaDasMinhasSolicitacoes } from '../tipos/maquina'
 
 export interface ParametrosListagemSolicitacoes {
   pagina: number
   status?: StatusSolicitacao
   busca?: string
+  // Só as solicitações desta máquina (pequeno reparo, sem máquina, nunca casa).
+  maquinaId?: number
 }
 
 export interface ParametrosFilaGestor {
@@ -78,6 +81,11 @@ export const servicoSolicitacoes = {
     api.get<RespostaPaginada<SolicitacaoOS>>(
       `/solicitacoes/minhas${montarQuery(parametros)}`,
     ),
+
+  // Opções do filtro "de qual máquina": as máquinas das MINHAS solicitações, não as do
+  // setor — máquina desativada ou de um setor antigo continua no histórico.
+  listarMinhasMaquinas: () =>
+    api.get<MaquinaDasMinhasSolicitacoes[]>('/solicitacoes/minhas/maquinas'),
 
   // Fila do Gestor — já filtrada pelo escopo de Loja/Setor no servidor.
   listarTodas: (parametros: ParametrosFilaGestor = {}) =>

@@ -8,8 +8,9 @@ import { CampoBusca } from '../../componentes/CampoBusca'
 import { CampoSelecao } from '../../componentes/CampoSelecao'
 import { FiltroTipoOS } from '../../componentes/FiltroTipoOS'
 import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
+import { Paginacao } from '../../componentes/Paginacao'
 import { useLojas } from '../../hooks/useLojas'
-import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
+import { useOrdensServicoPaginadas } from '../../hooks/useOrdensServicoPaginadas'
 import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
 import { obterNomeAlvo } from '../../utilitarios/alvoOS'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
@@ -34,12 +35,50 @@ export function AdministradorCustosPendentes() {
   // Toda OS Concluída, com ou sem custo lançado: o Técnico já grava os dois custos no
   // encerramento e o Administrador só corrige se quiser — inclusive nas OS que foram
   // executadas por empresa externa, que também passam pelo Técnico.
-  const { data: ordensServico = [], isLoading } = useOrdensServicoTodas({
-    status: ['Concluída'],
+  //
+  // Uma consulta paginada por aba (12 por página, `?revisado=` no servidor): "Revisadas" é
+  // histórico e só cresce, então não dá mais para trazer tudo e separar no cliente. As
+  // duas rodam juntas porque as pílulas mostram a contagem das duas — o `total` de cada
+  // página. Cada aba guarda a própria página.
+  const [paginaPendentes, setPaginaPendentes] = useState(1)
+  const [paginaRevisadas, setPaginaRevisadas] = useState(1)
+  const filtros = {
+    status: ['Concluída' as const],
     busca: busca.trim() || undefined,
     lojaId: filtroLoja ? Number(filtroLoja) : undefined,
     tipo: filtroTipo || undefined,
+  }
+  const consultaPendentes = useOrdensServicoPaginadas({
+    ...filtros,
+    revisado: false,
+    pagina: paginaPendentes,
   })
+  const consultaRevisadas = useOrdensServicoPaginadas({
+    ...filtros,
+    revisado: true,
+    pagina: paginaRevisadas,
+  })
+
+  // Filtro novo começa da página 1 nas duas abas — ajuste durante a renderização, mesmo
+  // padrão das outras listagens do Administrador.
+  const chaveFiltros = `${busca}|${filtroLoja}|${filtroTipo}`
+  const [chaveFiltrosAnterior, setChaveFiltrosAnterior] = useState(chaveFiltros)
+  if (chaveFiltros !== chaveFiltrosAnterior) {
+    setChaveFiltrosAnterior(chaveFiltros)
+    setPaginaPendentes(1)
+    setPaginaRevisadas(1)
+  }
+
+  const consulta = aba === 'pendentes' ? consultaPendentes : consultaRevisadas
+  const pagina = aba === 'pendentes' ? paginaPendentes : paginaRevisadas
+  const setPagina = aba === 'pendentes' ? setPaginaPendentes : setPaginaRevisadas
+  const isLoading = consulta.isLoading
+  const totalPaginas = Math.max(1, consulta.data?.totalPaginas ?? 1)
+  // Revisar a última OS de uma página a tira de "Pendentes": a página encolhe e, se era a
+  // última, deixaria de existir. O servidor não segura no total — volta para a última.
+  if (consulta.data && pagina > totalPaginas) {
+    setPagina(totalPaginas)
+  }
   const { data: lojas = [] } = useLojas()
 
   const { mutateAsync: lancarCusto } = useMutation({
@@ -51,12 +90,10 @@ export function AdministradorCustosPendentes() {
   // Lista TODA OS Concluída (não só as com custoManutencao ainda vazio): o Técnico já
   // grava os dois custos no encerramento (item 11 do CLAUDE.md), então eles chegam aqui
   // pré-preenchidos e o Administrador só edita se precisar conferir contra a nota. A
-  // aba sai de custo.revisadoEm, gravado pelo servidor no POST /custo: "Pendentes" é o
-  // que ninguém conferiu ainda, "Revisadas" é o histórico do que já foi conferido —
-  // por qualquer Administrador, em qualquer aparelho.
-  const ordensPendentes = ordensServico.filter((os) => os.custo?.revisadoEm == null)
-  const ordensRevisadas = ordensServico.filter((os) => os.custo?.revisadoEm != null)
-  const ordensConcluidas = aba === 'pendentes' ? ordensPendentes : ordensRevisadas
+  // aba sai de custo.revisadoEm, gravado pelo servidor no POST /custo e filtrado lá
+  // (`?revisado=`): "Pendentes" é o que ninguém conferiu ainda, "Revisadas" é o histórico
+  // do que já foi conferido — por qualquer Administrador, em qualquer aparelho.
+  const ordensConcluidas = consulta.data?.dados ?? []
 
   async function aoSalvarCusto(dados: DadosLancarCustoManutencao) {
     if (!ordemParaLancarCusto) {
@@ -91,8 +128,8 @@ export function AdministradorCustosPendentes() {
           valor={aba}
           aoMudar={setAba}
           contagens={{
-            pendentes: ordensPendentes.length,
-            revisadas: ordensRevisadas.length,
+            pendentes: consultaPendentes.data?.total ?? 0,
+            revisadas: consultaRevisadas.data?.total ?? 0,
           }}
         />
 
@@ -231,6 +268,10 @@ export function AdministradorCustosPendentes() {
             </div>
           ))}
         </div>
+
+        {totalPaginas > 1 && (
+          <Paginacao pagina={pagina} totalPaginas={totalPaginas} aoMudarPagina={setPagina} />
+        )}
       </main>
 
       {ordemParaLancarCusto && (

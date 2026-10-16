@@ -1,4 +1,5 @@
 import {
+  Building2,
   CheckCircle2,
   Eye,
   FileSearch,
@@ -9,6 +10,7 @@ import {
 import { BadgeAfetaProducao } from '../../../componentes/BadgeAfetaProducao'
 import { BadgeStatusExecucao } from '../../../componentes/BadgeStatusExecucao'
 import { BadgeUrgencia } from '../../../componentes/BadgeUrgencia'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../../utilitarios/formatarData'
 import type { OrdemServico } from '../../../tipos/ordemServico'
@@ -126,9 +128,18 @@ export function CardOrdemServicoTecnico({
       </div>
 
       {ordemServico.empresaTerceirizadaNome && (
-        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          <span className="font-semibold">Terceiro acionado:</span>{' '}
-          {ordemServico.empresaTerceirizadaNome}
+        <p className="flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <MiniaturaFoto
+            fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+            alt={ordemServico.empresaTerceirizadaNome}
+            Icone={Building2}
+            className="h-7 w-7 rounded-md"
+            tamanhoIcone={14}
+          />
+          <span>
+            <span className="font-semibold">Terceiro acionado:</span>{' '}
+            {ordemServico.empresaTerceirizadaNome}
+          </span>
         </p>
       )}
 

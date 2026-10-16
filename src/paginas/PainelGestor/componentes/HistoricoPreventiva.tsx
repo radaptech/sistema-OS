@@ -26,8 +26,14 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-slate-800">{preventiva.descricao}</p>
           <p className="mt-1 font-mono text-xs text-slate-400">
-            {preventiva.maquinaNome} · A cada {preventiva.intervaloDias} dia(s)
-            {preventiva.tecnicoNome && ` · ${preventiva.tecnicoNome}`}
+            {[
+              preventiva.maquinaNome,
+              preventiva.maquinaPatrimonio && `Patrimônio ${preventiva.maquinaPatrimonio}`,
+              `A cada ${preventiva.intervaloDias} dia(s)`,
+              preventiva.tecnicoNome,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
         </div>
         <span

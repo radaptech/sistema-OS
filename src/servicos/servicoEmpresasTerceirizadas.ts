@@ -1,4 +1,5 @@
 import { api } from './api'
+import { montarMultipart } from './montarMultipart'
 import type {
   AtualizarEmpresaTerceirizadaPayload,
   EmpresaTerceirizada,
@@ -12,11 +13,13 @@ export const servicoEmpresasTerceirizadas = {
 
   obterPorId: (id: number) => api.get<EmpresaTerceirizada>(`${BASE}/${id}`),
 
-  criar: (dados: NovaEmpresaTerceirizadaPayload) =>
-    api.post<EmpresaTerceirizada>(BASE, dados),
+  // Multipart (parte `dados` + `foto` opcional), como em servicoMaquinas. No PUT, sem foto
+  // o servidor mantém a atual.
+  criar: (dados: NovaEmpresaTerceirizadaPayload, foto?: File) =>
+    api.post<EmpresaTerceirizada>(BASE, montarMultipart(dados, { foto })),
 
-  atualizar: ({ id, ...dados }: AtualizarEmpresaTerceirizadaPayload) =>
-    api.put<EmpresaTerceirizada>(`${BASE}/${id}`, dados),
+  atualizar: ({ id, ...dados }: AtualizarEmpresaTerceirizadaPayload, foto?: File) =>
+    api.put<EmpresaTerceirizada>(`${BASE}/${id}`, montarMultipart(dados, { foto })),
 
   deletar: (id: number) => api.delete<void>(`${BASE}/${id}`),
 }

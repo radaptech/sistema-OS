@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8,6 +8,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Botao } from '../../componentes/Botao'
 import { CampoTexto } from '../../componentes/CampoTexto'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
+import { UploadFoto } from '../../componentes/UploadFoto'
+import type { AtualizarEmpresaTerceirizadaPayload } from '../../tipos/empresaTerceirizada'
 import { servicoEmpresasTerceirizadas } from '../../servicos/servicoEmpresasTerceirizadas'
 import {
   esquemaCadastrarEmpresaTerceirizada,
@@ -18,6 +20,8 @@ export function CadastrarEmpresaTerceirizada() {
   const navegar = useNavigate()
   const { id } = useParams<{ id: string }>()
   const emEdicao = Boolean(id)
+  // Foto escolhida agora, ainda não enviada. Sem ela, salvar mantém a que está no servidor.
+  const [foto, setFoto] = useState<File | null>(null)
   const queryClient = useQueryClient()
 
   const { data: empresaExistente } = useQuery({
@@ -50,13 +54,14 @@ export function CadastrarEmpresaTerceirizada() {
   }, [empresaExistente, reset])
 
   const { mutateAsync: criar, isPending: criando } = useMutation({
-    mutationFn: servicoEmpresasTerceirizadas.criar,
+    mutationFn: (dados: DadosCadastrarEmpresaTerceirizada) => servicoEmpresasTerceirizadas.criar(dados, foto ?? undefined),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ['empresas-terceirizadas'] }),
   })
 
   const { mutateAsync: atualizar, isPending: atualizando } = useMutation({
-    mutationFn: servicoEmpresasTerceirizadas.atualizar,
+    mutationFn: (dados: AtualizarEmpresaTerceirizadaPayload) =>
+      servicoEmpresasTerceirizadas.atualizar(dados, foto ?? undefined),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ['empresas-terceirizadas'] }),
   })
@@ -72,6 +77,7 @@ export function CadastrarEmpresaTerceirizada() {
     await criar(dados)
     toast.success('Empresa terceirizada cadastrada com sucesso.')
     reset({ nome: '', especialidade: '', telefone: '' })
+    setFoto(null)
   }
 
   const isPending = criando || atualizando
@@ -91,6 +97,14 @@ export function CadastrarEmpresaTerceirizada() {
             noValidate
             className="flex flex-col gap-5 p-6 sm:p-8"
           >
+            <UploadFoto
+              foto={foto}
+              aoSelecionarFoto={setFoto}
+              urlExistente={empresaExistente?.fotoUrl}
+              rotulo="Foto / Logo da Empresa"
+              textoAlternativo="Pré-visualização da empresa"
+            />
+
             <CampoTexto
               rotulo="Nome *"
               placeholder="Ex: Balanças Cooprata Assistência Técnica"

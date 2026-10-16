@@ -8,6 +8,7 @@ import type {
   StatusExecucaoOS,
   TipoOS,
 } from '../tipos/ordemServico'
+import type { RespostaPaginada } from '../tipos/paginacao'
 
 export interface ParametrosListagemOrdensServico {
   status?: StatusExecucaoOS[]
@@ -19,7 +20,15 @@ export interface ParametrosListagemOrdensServico {
   setorId?: number
   tecnicoId?: number
   busca?: string
-  pagina?: number
+  // Abas de Custos Pendentes: o Administrador já conferiu o custo (custo.revisadoEm).
+  revisado?: boolean
+}
+
+// Com `pagina`, GET /ordens-servico devolve RespostaPaginada (12 por página). Sem ela,
+// o array inteiro — que é o que os painéis do Gestor e do Técnico usam para montar a
+// navegação Loja → Setor e as contagens.
+export interface ParametrosListagemPaginadaOS extends ParametrosListagemOrdensServico {
+  pagina: number
 }
 
 // Um endpoint serve os três painéis; o que muda é o filtro. O escopo (OS do técnico
@@ -27,6 +36,10 @@ export interface ParametrosListagemOrdensServico {
 export const servicoOrdensServico = {
   listar: (parametros: ParametrosListagemOrdensServico = {}) =>
     api.get<OrdemServico[]>(`/ordens-servico${montarQuery(parametros)}`),
+
+  // Histórico que só cresce (OS Finalizadas, Custos Pendentes): uma página por vez.
+  listarPaginada: (parametros: ParametrosListagemPaginadaOS) =>
+    api.get<RespostaPaginada<OrdemServico>>(`/ordens-servico${montarQuery(parametros)}`),
 
   obterPorId: (id: number) => api.get<OrdemServico>(`/ordens-servico/${id}`),
 

@@ -7,6 +7,7 @@ import { CampoBusca } from '../../componentes/CampoBusca'
 import { CampoSelecao } from '../../componentes/CampoSelecao'
 import { Paginacao } from '../../componentes/Paginacao'
 import { EsqueletoLista, EsqueletoLinhaCadastro } from '../../componentes/Esqueleto'
+import { MiniaturaFoto } from '../../componentes/MiniaturaFoto'
 import { useMaquinas } from '../../hooks/useMaquinas'
 import { servicoMaquinas } from '../../servicos/servicoMaquinas'
 import type { Maquina } from '../../tipos/maquina'
@@ -106,7 +107,7 @@ export function AdministradorStatusMaquinas() {
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-3 lg:grid lg:grid-cols-2 2xl:grid-cols-3 lg:content-start lg:items-start lg:gap-4">
+        <div className="flex flex-1 flex-col gap-3 lg:grid lg:grid-cols-2 2xl:grid-cols-3 lg:content-start lg:items-stretch lg:gap-4">
           {isLoading && (
             <EsqueletoLista quantidade={4}>
               <EsqueletoLinhaCadastro />
@@ -128,16 +129,28 @@ export function AdministradorStatusMaquinas() {
               style={atrasoEntrada(indice)}
               className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
-              <div className="min-w-0">
-                <p className="truncate font-semibold text-slate-800">
-                  {maquina.nome}{' '}
-                  <span className="font-mono text-sm text-slate-400">
-                    · {maquina.numeroPatrimonio || maquina.id}
-                  </span>
-                </p>
-                <p className="truncate text-xs text-slate-400">
-                  {maquina.lojaNome ?? maquina.lojaId} · {maquina.setorNome}
-                </p>
+              {/* Patrimônio numa linha própria e sem truncar: é ele que diferencia máquinas
+                  iguais (mesmo nome), e na mesma linha do nome o truncate o cortava
+                  primeiro. O nome quebra em até duas linhas em vez de esconder o resto. */}
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <MiniaturaFoto
+                  fotoUrl={maquina.fotoUrl}
+                  alt={maquina.nome}
+                  Icone={Wrench}
+                  className="h-14 w-14 rounded-xl"
+                  tamanhoIcone={20}
+                />
+                <div className="min-w-0">
+                  <p className="line-clamp-2 leading-snug font-semibold text-slate-800">
+                    {maquina.nome}
+                  </p>
+                  <p className="mt-0.5 font-mono text-xs font-semibold whitespace-nowrap text-slate-600">
+                    {maquina.numeroPatrimonio || `#${maquina.id}`}
+                  </p>
+                  <p className="truncate text-xs text-slate-400">
+                    {maquina.lojaNome ?? maquina.lojaId} · {maquina.setorNome}
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-2 sm:shrink-0">

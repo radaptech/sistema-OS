@@ -1,6 +1,7 @@
 import { ArrowLeft, ChevronRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { atrasoEntrada } from '../utilitarios/atrasoEntrada'
+import { ImagemProgressiva } from './ImagemProgressiva'
 import type { ItemNavegacao, NivelNavegacao } from '../utilitarios/navegacaoNiveis'
 
 export interface PassoTrilha {
@@ -93,11 +94,22 @@ export function ListaNavegacao({
             style={atrasoEntrada(indice)}
             className="animate-surgir group shadow-card hover:shadow-card-hover flex items-center gap-3 rounded-2xl bg-white p-4 text-left transition-shadow duration-200"
           >
-            <span className="bg-marca-600 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white">
-              <Icone size={18} />
-            </span>
+            {item.fotoUrl ? (
+              <ImagemProgressiva
+                src={item.fotoUrl}
+                alt={item.nome}
+                className="h-14 w-14 shrink-0 rounded-lg object-cover"
+              />
+            ) : (
+              <span className="bg-marca-600 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white">
+                <Icone size={18} />
+              </span>
+            )}
             <span className="min-w-0 flex-1">
               <span className="block truncate font-semibold text-slate-800">{item.nome}</span>
+              {item.detalhe && (
+                <span className="block truncate text-xs text-slate-500">{item.detalhe}</span>
+              )}
               <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-slate-400">
                 {item.filhos !== undefined && rotuloFilhos && (
                   <span>{rotuloFilhos(item.filhos)} ·</span>

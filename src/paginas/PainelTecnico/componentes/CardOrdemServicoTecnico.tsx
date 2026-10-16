@@ -1,3 +1,5 @@
+import { BadgeOrigemOS } from '../../../componentes/BadgeOrigemOS'
+import { fundoDoCardOS, fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import {
   Building2,
   CheckCircle2,
@@ -65,9 +67,9 @@ export function CardOrdemServicoTecnico({
   )
 
   return (
-    <div className="shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200">
+    <div className={`shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl p-4 transition-shadow duration-200 ${fundoDoCardOS(ordemServico.origem)}`}>
       <div className="flex items-start gap-4">
-        <span className="bg-marca-600 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white ${fundoDoNumeroOS(ordemServico.origem)}`}>
           #{ordemServico.id}
         </span>
 
@@ -82,6 +84,7 @@ export function CardOrdemServicoTecnico({
               </span>
             )}
             <BadgeStatusExecucao status={ordemServico.statusExecucao} />
+            <BadgeOrigemOS origem={ordemServico.origem} />
             {ordemServico.urgencia && (
               <BadgeUrgencia urgencia={ordemServico.urgencia} />
             )}

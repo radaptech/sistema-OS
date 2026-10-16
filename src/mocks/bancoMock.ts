@@ -922,6 +922,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 1,
     solicitacaoId: 4,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 3,
     maquinaNome: 'Câmara Fria',
@@ -980,6 +981,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 2,
     solicitacaoId: 5,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1006,6 +1008,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 3,
     solicitacaoId: 6,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 1,
     maquinaNome: 'Forno Industrial Turbo',
@@ -1047,6 +1050,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 4,
     solicitacaoId: 7,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 7,
     maquinaNome: 'Forno Padaria Loja 2',
@@ -1084,6 +1088,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 5,
     solicitacaoId: 8,
+    origem: 'solicitante',
     tipo: 'terceiros',
     maquinaId: null,
     maquinaNome: null,
@@ -1146,6 +1151,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 6,
     solicitacaoId: 9,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 2,
     maquinaNome: 'Batedeira Industrial 40L',
@@ -1171,6 +1177,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 7,
     solicitacaoId: 10,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 1,
     maquinaNome: 'Forno Industrial Turbo',
@@ -1197,6 +1204,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 8,
     solicitacaoId: 11,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1222,6 +1230,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 9,
     solicitacaoId: 12,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 3,
     maquinaNome: 'Câmara Fria',
@@ -1263,6 +1272,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 10,
     solicitacaoId: 13,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 7,
     maquinaNome: 'Forno Padaria Loja 2',
@@ -1313,6 +1323,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 11,
     solicitacaoId: 14,
+    origem: 'solicitante',
     tipo: 'terceiros',
     maquinaId: null,
     maquinaNome: null,
@@ -1374,6 +1385,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 12,
     solicitacaoId: 15,
+    origem: 'solicitante',
     tipo: 'terceiros',
     maquinaId: 4,
     maquinaNome: 'Serra Fita Açougue',
@@ -1423,6 +1435,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 13,
     solicitacaoId: 16,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 6,
     maquinaNome: 'Expositor Refrigerado Peixaria',
@@ -1449,6 +1462,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 14,
     solicitacaoId: 20,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 3,
     maquinaNome: 'Câmara Fria',
@@ -1499,6 +1513,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 15,
     solicitacaoId: 21,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1549,6 +1564,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 16,
     solicitacaoId: 22,
+    origem: 'solicitante',
     tipo: 'maquinario',
     maquinaId: 7,
     maquinaNome: 'Forno Padaria Loja 2',
@@ -1599,6 +1615,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 17,
     solicitacaoId: 23,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1624,6 +1641,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 18,
     solicitacaoId: 24,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1650,6 +1668,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 19,
     solicitacaoId: 25,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,
@@ -1691,6 +1710,7 @@ export const ordensServico: OrdemServico[] = [
   {
     id: 20,
     solicitacaoId: 26,
+    origem: 'solicitante',
     tipo: 'reparo',
     maquinaId: null,
     maquinaNome: null,

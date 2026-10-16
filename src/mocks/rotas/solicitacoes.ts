@@ -156,6 +156,7 @@ export const rotasSolicitacoes: Rota[] = [
       const novaOrdem: OrdemServico = {
         id: gerarId(ordensServico),
         solicitacaoId: nova.id,
+        origem: 'direta',
         tipo: nova.tipo,
         maquinaId: nova.maquinaId,
         maquinaNome: nova.maquinaNome,
@@ -414,6 +415,7 @@ export const rotasSolicitacoes: Rota[] = [
       const novaOrdem: OrdemServico = {
         id: gerarId(ordensServico),
         solicitacaoId: solicitacao.id,
+        origem: solicitacao.origem,
         tipo: solicitacao.tipo,
         maquinaId: solicitacao.maquinaId,
         maquinaNome: solicitacao.maquinaNome,

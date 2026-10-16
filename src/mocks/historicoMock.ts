@@ -62,6 +62,7 @@ for (const maquinaId of MAQUINAS_COM_HISTORICO) {
     ordensServico.push({
       id: gerarId(ordensServico),
       solicitacaoId,
+      origem: 'solicitante',
       tipo: 'maquinario',
       maquinaId,
       maquinaNome: maquina.nome,

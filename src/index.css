@@ -54,21 +54,27 @@ body {
   }
 }
 
-/* Impressão de OS: esconde toda a aplicação e mostra só o conteúdo marcado
-   com #area-impressao-os (ver ModalDetalhesOS, Painel do Administrador). */
+/* Impressão de OS: mostra só o conteúdo marcado com #area-impressao-os (ver ModalDetalhesOS).
+
+   ⚠️ O resto da aplicação sai do layout com `display: none`, NÃO com `visibility: hidden`.
+   `visibility` esconde mas mantém o espaço: o painel por trás (cabeçalho, abas, cards)
+   continuava ocupando páginas invisíveis, e o modal é `position: fixed` -- o navegador repete
+   elemento fixo em TODA página impressa, então a OS saía igual em duas ou mais páginas.
+   O modal vive num portal em <body>, fora do #root, por isso esconder o #root basta; e na
+   impressão o modal vira fluxo normal (classes `print:` do próprio componente), uma página
+   só e o conteúdo quebrando no lugar certo se for longo. */
 @media print {
-  body * {
-    visibility: hidden;
+  #root {
+    display: none !important;
   }
 
-  #area-impressao-os,
-  #area-impressao-os * {
-    visibility: visible;
+  /* Restos fixos de fora do #root (toast) não podem repetir em cada página. */
+  body > *:not(:has(#area-impressao-os)) {
+    display: none !important;
   }
 
   #area-impressao-os {
-    position: absolute;
-    inset: 0;
+    position: static;
     padding: 24px;
     max-height: none !important;
     overflow: visible !important;

@@ -1,3 +1,5 @@
+import { BadgeOrigemOS } from '../../../componentes/BadgeOrigemOS'
+import { fundoDoCardOS, fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import { BadgeStatusExecucao } from '../../../componentes/BadgeStatusExecucao'
 import { BadgeTipoOS } from '../../../componentes/BadgeTipoOS'
 import { BadgeUrgencia } from '../../../componentes/BadgeUrgencia'
@@ -21,12 +23,12 @@ export function CardOSEmExecucao({ ordemServico }: CardOSEmExecucaoProps) {
 
   return (
     <div
-      className={`flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card ${
+      className={`flex flex-col gap-3 rounded-2xl p-4 shadow-card ${fundoDoCardOS(ordemServico.origem)} ${
         ordemServico.statusExecucao === 'Pausada' ? 'border-l-4 border-amber-400' : ''
       }`}
     >
       <div className="flex items-start gap-4">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-marca-600 font-mono text-sm font-bold text-white">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white ${fundoDoNumeroOS(ordemServico.origem)}`}>
           #{ordemServico.id}
         </span>
 
@@ -40,6 +42,7 @@ export function CardOSEmExecucao({ ordemServico }: CardOSEmExecucaoProps) {
             )}
             <BadgeStatusExecucao status={ordemServico.statusExecucao} />
             <BadgeTipoOS tipo={ordemServico.tipo} />
+            <BadgeOrigemOS origem={ordemServico.origem} />
             {ordemServico.urgencia && <BadgeUrgencia urgencia={ordemServico.urgencia} />}
           </div>
           <p className="mt-1 text-sm text-slate-500">{ordemServico.descricao}</p>

@@ -1,4 +1,4 @@
-import type { TipoDefeito } from './ordemServico'
+import type { OrigemSolicitacao, TipoDefeito } from './ordemServico'
 
 export interface IndicadorPorDefeito {
   tipoDefeito: TipoDefeito
@@ -15,6 +15,12 @@ export interface ResumoIndicadores {
   mtbfHoras: number
   custoTotal: number
   porTipoDefeito: IndicadorPorDefeito[]
+  // Pequenos reparos, SEPARADOS de tudo acima: quantidadeOs/custoTotal/horas/MTBF/MTTR são do
+  // maquinário, e o reparo (que não tem máquina) soma só aqui. A tela os mostra lado a lado e
+  // nunca num número só. Preenchidos só na loja (total e setores) e nos meses dela; nas
+  // máquinas vêm zerados.
+  quantidadeReparos: number
+  custoReparos: number
 }
 
 export interface IndicadorMensal extends ResumoIndicadores {
@@ -48,4 +54,26 @@ export interface IndicadoresLoja extends ResumoIndicadores {
   porMes: IndicadorMensal[]
   porSetor: IndicadorSetor[]
   porMaquina: IndicadorMaquinaResumo[]
+}
+
+// Os dois cards de custo do painel da loja, cada um com a sua lista: o maquinário e os pequenos
+// reparos (que não têm máquina e ficam SEPARADOS dele).
+export type GrupoOrdensDoPainel = 'maquinario' | 'reparos'
+
+// Uma linha da lista por trás de um card de custo (GET /indicadores/lojas/:id/ordens): uma OS
+// encerrada que compõe o número do card. `id` é o da OS — o detalhe abre a partir dele, e a soma
+// de `custoTotal` dos itens é o número do card. No maquinário `item` é o nome da máquina e
+// `codigo` o patrimônio; no reparo `item` é o que o Solicitante digitou e `codigo` é nulo.
+export interface OrdemDoPainel {
+  id: number
+  item: string
+  codigo: string | null
+  maquinaId: number | null
+  origem: OrigemSolicitacao
+  descricao: string
+  setorId: number
+  setorNome: string
+  tecnicoNome: string
+  encerradaEm: string | null
+  custoTotal: number
 }

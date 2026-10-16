@@ -10,6 +10,7 @@ import { toast } from 'react-toastify'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
 import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
+import { NavegacaoLojaSetorPaginada } from '../../componentes/NavegacaoLojaSetorPaginada'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
 import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useOrdensServicoTecnico } from '../../hooks/useOrdensServicoTecnico'
@@ -31,6 +32,9 @@ import type { DadosAcionarTerceiro } from './esquemaAcionarTerceiro'
 
 const CHAVE_ORDENS_SERVICO_TECNICO = 'ordens-servico-tecnico'
 const TAMANHO_PAGINA = 12
+
+// Concluídas não vêm na lista do painel: são paginadas no servidor, só da aba delas.
+type AbaEmAndamento = Exclude<AbaPainelTecnico, 'concluidas'>
 
 // Em que aba a OS aparece -- mesmo critério de `ordensPorAba` abaixo. Concluída sem
 // custo lançado não aparece em aba nenhuma (ver o comentário de `concluidas`); fica na
@@ -68,42 +72,40 @@ export function PainelTecnico() {
   const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
     useState<SolicitacaoOS | null>(null)
 
-  const {
-    data: ordensServico = [],
-    isLoading,
-    refetch: recarregarOrdensServico,
-  } = useOrdensServicoTecnico(tecnicoId)
+  const { data: ordensServico = [], isLoading } = useOrdensServicoTecnico(tecnicoId)
 
-  // Link de notificação (sininho/push): ?os=N -- a OS nova no nome dele. Busca a lista de
-  // novo (a do cache pode ser de antes da OS nascer), vai pra aba onde a OS está e abre
-  // o detalhe da solicitação: é ali que estão a descrição e as fotos do problema.
+  // Link de notificação (sininho/push): ?os=N -- a OS nova no nome dele. Busca a OS por id
+  // (a lista do cache pode ser de antes dela nascer, e a concluída nem está nela), vai pra
+  // aba onde ela está e abre o detalhe da solicitação: é ali que estão a descrição e as
+  // fotos do problema.
   const [osDaUrl] = useIdDaUrl('os')
 
   useEffect(() => {
     if (osDaUrl === null) {
       return
     }
-    recarregarOrdensServico().then(({ data }) => {
-      const ordem = data?.find((item) => item.id === osDaUrl)
-      // Trocar a aba já tira o ?os= da URL (setParametros substitui a query inteira).
-      setParametros(
-        { aba: ordem ? abaDaOrdem(ordem) : abaSelecionada },
-        { replace: true },
-      )
-      if (ordem) {
-        void aoVerSolicitacao(ordem)
-      } else {
-        toast.info(`A OS #${osDaUrl} não está mais no seu painel.`)
-      }
-    })
+    servicoOrdensServico
+      .obterPorId(osDaUrl)
+      .then((ordem) => {
+        // Trocar a aba já tira o ?os= da URL (setParametros substitui a query inteira).
+        setParametros({ aba: abaDaOrdem(ordem) }, { replace: true })
+        return aoVerSolicitacao(ordem)
+      })
+      .catch(() => {
+        // Fora do escopo ou inexistente: o api.ts já mostra o toast do 404.
+        setParametros({ aba: abaSelecionada }, { replace: true })
+      })
     // Só reage ao id da URL: as funções acima mudam a cada render e reabririam o modal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [osDaUrl])
 
+  // As duas: a lista do que está em andamento, e a paginada/resumo das concluídas. Encerrar
+  // lança o custo na hora, então a OS sai de uma e entra na outra no mesmo passo.
   function invalidarOrdensServico() {
-    return queryClient.invalidateQueries({
-      queryKey: [CHAVE_ORDENS_SERVICO_TECNICO],
-    })
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: [CHAVE_ORDENS_SERVICO_TECNICO] }),
+      queryClient.invalidateQueries({ queryKey: ['ordens-servico-todas'] }),
+    ])
   }
 
   const { mutateAsync: iniciar } = useMutation({
@@ -183,7 +185,7 @@ export function PainelTecnico() {
     toast.success(`OS #${ordemParaEncerrar.id} encerrada com sucesso.`)
   }
 
-  const ordensPorAba: Record<AbaPainelTecnico, OrdemServico[]> = {
+  const ordensPorAba: Record<AbaEmAndamento, OrdemServico[]> = {
     'em-aberto': ordensServico.filter(
       (ordem) =>
         ordem.statusExecucao === 'Aberta' ||
@@ -192,11 +194,6 @@ export function PainelTecnico() {
     'pendentes-pausadas': ordensServico.filter(
       (ordem) => ordem.statusExecucao === 'Pausada',
     ),
-    // Só aparece aqui depois que o Administrador lança o custo de manutenção — a mesma
-    // regra de "OS Finalizada" usada no Gestor e no Administrador (ver CLAUDE.md, item
-    // 9/13). Uma OS que o Técnico já encerrou mas ainda sem custo lançado fica "invisível"
-    // nas abas dele até esse lançamento.
-    concluidas: ordensServico.filter((ordem) => ordem.finalizada),
   }
 
   const ESTADO_VAZIO: Record<
@@ -218,7 +215,9 @@ export function PainelTecnico() {
   // Máquina Parada primeiro, depois Urgência, depois a OS mais antiga — ver
   // ordenarPrioridadeOS.ts. Ordena antes de navegar para a lista de cada setor já sair
   // com os cards na prioridade certa (e a página 1 ser a mais urgente).
-  const ordensExibidas = ordenarPorPrioridade(ordensPorAba[abaSelecionada])
+  const ordensExibidas = ordenarPorPrioridade(
+    abaSelecionada === 'concluidas' ? [] : ordensPorAba[abaSelecionada],
+  )
   const { Icone: IconeVazio, mensagem: mensagemVazia } =
     ESTADO_VAZIO[abaSelecionada]
 
@@ -280,27 +279,36 @@ export function PainelTecnico() {
           aoSelecionarAba={aoSelecionarAba}
         />
 
-        <NavegacaoLojaSetor
-          itens={ordensExibidas}
-          carregando={isLoading}
-          mensagemVazio={mensagemVazia}
-          IconeVazio={IconeVazio}
-          rotuloNavegacao="Navegação das ordens de serviço"
-          rotuloQuantidade={(n) => (n === 1 ? '1 OS' : `${n} OS`)}
-          // Mesmo critério do BadgeAfetaProducao do card: máquina parada é o que o
-          // Técnico ataca primeiro, e o selo mostra em que loja/setor ela está. Em
-          // Concluídas não há o que atacar: a OS já foi encerrada e o selo enganaria.
-          ehDestaque={
-            abaSelecionada === 'concluidas'
-              ? undefined
-              : (ordemServico) => ordemServico.afetaProducao
-          }
-          rotuloDestaques={(n) =>
-            n === 1 ? '1 máquina parada' : `${n} máquinas paradas`
-          }
-          tamanhoPagina={TAMANHO_PAGINA}
-          renderItem={renderizarCard}
-        />
+        {abaSelecionada === 'concluidas' ? (
+          // Histórico que só cresce: paginado no servidor (resumo + uma página por vez). Só
+          // aparece aqui depois que o custo foi lançado — a mesma regra de "OS Finalizada" do
+          // Gestor e do Administrador (item 9/13). Concluída sem custo fica invisível até lá.
+          // Sem selo de máquina parada: a OS já foi encerrada e o selo enganaria.
+          <NavegacaoLojaSetorPaginada
+            filtros={{ tecnicoId: tecnicoId ?? undefined, finalizada: true }}
+            mensagemVazio={mensagemVazia}
+            IconeVazio={IconeVazio}
+            rotuloNavegacao="Navegação das ordens de serviço"
+            renderItem={renderizarCard}
+          />
+        ) : (
+          <NavegacaoLojaSetor
+            itens={ordensExibidas}
+            carregando={isLoading}
+            mensagemVazio={mensagemVazia}
+            IconeVazio={IconeVazio}
+            rotuloNavegacao="Navegação das ordens de serviço"
+            rotuloQuantidade={(n) => (n === 1 ? '1 OS' : `${n} OS`)}
+            // Mesmo critério do BadgeAfetaProducao do card: máquina parada é o que o
+            // Técnico ataca primeiro, e o selo mostra em que loja/setor ela está.
+            ehDestaque={(ordemServico) => ordemServico.afetaProducao}
+            rotuloDestaques={(n) =>
+              n === 1 ? '1 máquina parada' : `${n} máquinas paradas`
+            }
+            tamanhoPagina={TAMANHO_PAGINA}
+            renderItem={renderizarCard}
+          />
+        )}
       </main>
 
       <footer className="py-4 text-center">

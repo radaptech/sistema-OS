@@ -19,21 +19,32 @@ type EmpresaTerceirizadaServiceInterface interface {
 	DesativarEmpresaTerceirizada(ctx context.Context, tenantID, id int64) error
 }
 
+// bucketFotos é o bucket do R2 da foto de cadastro (R2_BUCKET_NAME_IMG_TERCERIZADOS), lido
+// pelo router -- mesma escolha de MaquinaController: o bucket é de wiring, não
+// coluna do banco.
 type EmpresaTerceirizadaController struct {
-	service EmpresaTerceirizadaServiceInterface
+	service     EmpresaTerceirizadaServiceInterface
+	bucketFotos string
 }
 
-func NewEmpresaTerceirizadaController(service EmpresaTerceirizadaServiceInterface) *EmpresaTerceirizadaController {
+func NewEmpresaTerceirizadaController(service EmpresaTerceirizadaServiceInterface, bucketFotos string) *EmpresaTerceirizadaController {
 
 	return &EmpresaTerceirizadaController{
-		service: service,
+		service:     service,
+		bucketFotos: bucketFotos,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 pela URL assinada (assinarFoto,
+// controller/foto.go).
+func (e *EmpresaTerceirizadaController) resolverFoto(ctx context.Context, empresa *model.EmpresaTerceirizada) {
+	empresa.FotoUrl = assinarFoto(ctx, e.bucketFotos, empresa.FotoUrl, "empresa_terceirizada", empresa.Id)
 }
 
 // Cadastrar é POST /empresas-terceirizadas.
 //
-// Corpo JSON puro (corpoJSON), não multipart: esta é a única entidade de
-// cadastro sem arquivo nenhum. Especialidade e telefone chegam como string
+// Corpo multipart (parte `dados` + `foto` opcional) ou JSON puro -- ver
+// corpoComFoto. Especialidade e telefone chegam como string
 // vazia quando o formulário não os preenche -- quem transforma em NULL é o
 // textoOuNil do service, não o binding.
 func (e *EmpresaTerceirizadaController) Cadastrar() gin.HandlerFunc {
@@ -45,10 +56,13 @@ func (e *EmpresaTerceirizadaController) Cadastrar() gin.HandlerFunc {
 			return
 		}
 
-		input, ok := corpoJSON[model.NovaEmpresaTerceirizadaPayload](ctx)
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovaEmpresaTerceirizadaPayload](ctx, tenantId, e.bucketFotos, "empresa_terceirizada")
 		if !ok {
 			return
 		}
+		input.FotoChave = chave
 
 		empresa, err := e.service.CadastrarEmpresaTerceirizada(ctx.Request.Context(), tenantId, input)
 		if err != nil {
@@ -66,6 +80,8 @@ func (e *EmpresaTerceirizadaController) Cadastrar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		e.resolverFoto(ctx.Request.Context(), &empresa)
 
 		ctx.JSON(http.StatusCreated, empresa)
 	}
@@ -94,6 +110,12 @@ func (e *EmpresaTerceirizadaController) Listar() gin.HandlerFunc {
 			slog.ErrorContext(ctx.Request.Context(), "listar empresas terceirizadas", "tenant", tenantId, "err", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao listar empresas terceirizadas"})
 			return
+		}
+
+		// Índice, não valor: o range daria uma cópia e a URL assinada não
+		// voltaria pro slice da resposta.
+		for i := range empresas {
+			e.resolverFoto(ctx.Request.Context(), &empresas[i])
 		}
 
 		ctx.JSON(http.StatusOK, empresas)
@@ -130,6 +152,8 @@ func (e *EmpresaTerceirizadaController) Obter() gin.HandlerFunc {
 			return
 		}
 
+		e.resolverFoto(ctx.Request.Context(), &empresa)
+
 		ctx.JSON(http.StatusOK, empresa)
 	}
 }
@@ -151,10 +175,13 @@ func (e *EmpresaTerceirizadaController) Atualizar() gin.HandlerFunc {
 			return
 		}
 
-		input, ok := corpoJSON[model.NovaEmpresaTerceirizadaPayload](ctx)
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovaEmpresaTerceirizadaPayload](ctx, tenantId, e.bucketFotos, "empresa_terceirizada")
 		if !ok {
 			return
 		}
+		input.FotoChave = chave
 
 		empresa, err := e.service.AtualizarEmpresaTerceirizada(ctx.Request.Context(), tenantId, id, input)
 		if err != nil {
@@ -174,6 +201,8 @@ func (e *EmpresaTerceirizadaController) Atualizar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		e.resolverFoto(ctx.Request.Context(), &empresa)
 
 		ctx.JSON(http.StatusOK, empresa)
 	}

@@ -13,9 +13,10 @@ const atualizarEmpresaTerceirizada = `-- name: AtualizarEmpresaTerceirizada :one
 UPDATE empresa_terceirizada
 SET nome = $3,
     especialidade = $4,
-    telefone = $5
+    telefone = $5,
+    foto_chave = COALESCE($6, foto_chave)
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, nome, especialidade, telefone, ativa, criado_em
+RETURNING id, tenant_id, nome, especialidade, telefone, ativa, criado_em, foto_chave
 `
 
 type AtualizarEmpresaTerceirizadaParams struct {
@@ -24,11 +25,15 @@ type AtualizarEmpresaTerceirizadaParams struct {
 	Nome          string
 	Especialidade *string
 	Telefone      *string
+	FotoChave     *string
 }
 
 // Todos os campos editáveis de uma vez (o front manda o objeto inteiro no PUT).
 // `ativa` fica de fora: reativar não existe pela API, e desativar tem rota
 // própria -- ver DesativarEmpresaTerceirizada.
+// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+// AtualizarMaquina). A antiga fica órfã no R2.
 func (q *Queries) AtualizarEmpresaTerceirizada(ctx context.Context, arg AtualizarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error) {
 	row := q.db.QueryRow(ctx, atualizarEmpresaTerceirizada,
 		arg.ID,
@@ -36,6 +41,7 @@ func (q *Queries) AtualizarEmpresaTerceirizada(ctx context.Context, arg Atualiza
 		arg.Nome,
 		arg.Especialidade,
 		arg.Telefone,
+		arg.FotoChave,
 	)
 	var i EmpresaTerceirizada
 	err := row.Scan(
@@ -46,15 +52,16 @@ func (q *Queries) AtualizarEmpresaTerceirizada(ctx context.Context, arg Atualiza
 		&i.Telefone,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
 
 const criarEmpresaTerceirizada = `-- name: CriarEmpresaTerceirizada :one
 
-INSERT INTO empresa_terceirizada (tenant_id, nome, especialidade, telefone)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, nome, especialidade, telefone, ativa, criado_em
+INSERT INTO empresa_terceirizada (tenant_id, nome, especialidade, telefone, foto_chave)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, nome, especialidade, telefone, ativa, criado_em, foto_chave
 `
 
 type CriarEmpresaTerceirizadaParams struct {
@@ -62,6 +69,7 @@ type CriarEmpresaTerceirizadaParams struct {
 	Nome          string
 	Especialidade *string
 	Telefone      *string
+	FotoChave     *string
 }
 
 // Empresa terceirizada é a prestadora externa que o TÉCNICO aciona quando
@@ -83,12 +91,14 @@ type CriarEmpresaTerceirizadaParams struct {
 // Nome é único por tenant (uq_empresa_terceirizada_nome): duplicado volta 23505
 // e vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
 // especialidade e telefone são opcionais (NULL) -- o front tipa os dois como `?`.
+// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_TERCERIZADOS), opcional.
 func (q *Queries) CriarEmpresaTerceirizada(ctx context.Context, arg CriarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error) {
 	row := q.db.QueryRow(ctx, criarEmpresaTerceirizada,
 		arg.TenantID,
 		arg.Nome,
 		arg.Especialidade,
 		arg.Telefone,
+		arg.FotoChave,
 	)
 	var i EmpresaTerceirizada
 	err := row.Scan(
@@ -99,6 +109,7 @@ func (q *Queries) CriarEmpresaTerceirizada(ctx context.Context, arg CriarEmpresa
 		&i.Telefone,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
@@ -133,7 +144,7 @@ func (q *Queries) DesativarEmpresaTerceirizada(ctx context.Context, arg Desativa
 }
 
 const listarEmpresasTerceirizadas = `-- name: ListarEmpresasTerceirizadas :many
-SELECT id, tenant_id, nome, especialidade, telefone, ativa, criado_em FROM empresa_terceirizada
+SELECT id, tenant_id, nome, especialidade, telefone, ativa, criado_em, foto_chave FROM empresa_terceirizada
 WHERE tenant_id = $1
   AND ativa
 ORDER BY nome
@@ -162,6 +173,7 @@ func (q *Queries) ListarEmpresasTerceirizadas(ctx context.Context, tenantID int6
 			&i.Telefone,
 			&i.Ativa,
 			&i.CriadoEm,
+			&i.FotoChave,
 		); err != nil {
 			return nil, err
 		}
@@ -174,7 +186,7 @@ func (q *Queries) ListarEmpresasTerceirizadas(ctx context.Context, tenantID int6
 }
 
 const obterEmpresaTerceirizadaPorID = `-- name: ObterEmpresaTerceirizadaPorID :one
-SELECT id, tenant_id, nome, especialidade, telefone, ativa, criado_em FROM empresa_terceirizada
+SELECT id, tenant_id, nome, especialidade, telefone, ativa, criado_em, foto_chave FROM empresa_terceirizada
 WHERE id = $1 AND tenant_id = $2
 `
 
@@ -197,6 +209,7 @@ func (q *Queries) ObterEmpresaTerceirizadaPorID(ctx context.Context, arg ObterEm
 		&i.Telefone,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }

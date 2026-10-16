@@ -32,6 +32,7 @@ func montarLoja(l repository.Loja) model.Loja {
 		// Empresa é o tenant: não há coluna empresa_id, é o mesmo id.
 		EmpresaId: l.TenantID,
 		Ativa:     l.Ativa,
+		FotoUrl:   l.FotoChave,
 	}
 }
 
@@ -47,8 +48,9 @@ func (l *LojaService) CadastrarLoja(ctx context.Context, tenantID int64, payload
 	repo := repository.New(l.Pool)
 
 	loja, err := repo.CriarLoja(ctx, repository.CriarLojaParams{
-		TenantID: tenantID,
-		Nome:     nome,
+		TenantID:  tenantID,
+		Nome:      nome,
+		FotoChave: payload.FotoChave,
 	})
 	if err != nil {
 		return model.Loja{}, helper.TraduzErroPostgres(err)
@@ -114,9 +116,10 @@ func (l *LojaService) AtualizarLoja(ctx context.Context, tenantID, id int64, pay
 	repo := repository.New(l.Pool)
 
 	loja, err := repo.AtualizarLoja(ctx, repository.AtualizarLojaParams{
-		ID:       id,
-		TenantID: tenantID,
-		Nome:     nome,
+		ID:        id,
+		TenantID:  tenantID,
+		Nome:      nome,
+		FotoChave: payload.FotoChave,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

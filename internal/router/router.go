@@ -76,16 +76,21 @@ func NewContainer(db *pgxpool.Pool) *Container {
 	// bucketMaquinas vazio: só o upload quebra, o resto do CRUD segue.
 	bucketOsServico := os.Getenv("R2_BUCKET_NAME_OS_SERVICO")
 	bucketPequenosReparos := os.Getenv("R2_BUCKET_NAME_PEQUENOS_REPAROS")
+	// Foto de cadastro de loja, setor e empresa terceirizada, um bucket cada.
+	// Vazio tem o mesmo efeito dos outros: só o upload quebra.
+	bucketLojas := os.Getenv("R2_BUCKET_NAME_IMG_LOJAS")
+	bucketSetores := os.Getenv("R2_BUCKET_NAME_IMG_SETORES")
+	bucketTerceirizadas := os.Getenv("R2_BUCKET_NAME_IMG_TERCERIZADOS")
 
 	return &Container{
 		Login:   controller.NewLoginController(serviceLogin),
-		Loja:    controller.NewLojaController(serviceLoja),
-		Setor:   controller.NewSetorController(serviceSetor),
+		Loja:    controller.NewLojaController(serviceLoja, bucketLojas),
+		Setor:   controller.NewSetorController(serviceSetor, bucketSetores),
 		Maquina: controller.NewMaquinaController(serviceMaquina, bucketMaquinas, bucketOsServico),
-		Prevent: controller.NewPreventivaController(servicePreventiva),
-		Terceir: controller.NewEmpresaTerceirizadaController(serviceTerceirizada),
+		Prevent: controller.NewPreventivaController(servicePreventiva, bucketMaquinas),
+		Terceir: controller.NewEmpresaTerceirizadaController(serviceTerceirizada, bucketTerceirizadas),
 		Solicit: controller.NewSolicitacaoController(serviceSolicitacao, bucketOsServico, bucketPequenosReparos, bucketMaquinas),
-		OrdemOS: controller.NewOrdemServicoController(serviceOrdemServico),
+		OrdemOS: controller.NewOrdemServicoController(serviceOrdemServico, bucketTerceirizadas),
 		Recuper: controller.NewRecuperacaoSenhaController(serviceRecuperacao),
 		Notific: controller.NewNotificacaoController(serviceNotificacao),
 		Push:    controller.NewPushController(serviceNotificacao),
@@ -211,6 +216,7 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// só o usuario.id do token (mesmo motivo de GET /lojas e /setores ficarem
 	// sem Permitir: o recorte já está no que a query pede, não no RBAC).
 	solicitacoes.GET("/minhas", c.Solicit.Minhas())
+	solicitacoes.GET("/minhas/maquinas", c.Solicit.MinhasMaquinas())
 	solicitacoes.GET("/resumo", c.Solicit.Resumo())
 	// A fila é do Gestor (e Administrador) -- Técnico não participa da
 	// aprovação, só recebe a OS depois que ela existe.

@@ -61,7 +61,13 @@ type Querier interface {
 	// Todos os campos editáveis de uma vez (o front manda o objeto inteiro no PUT).
 	// `ativa` fica de fora: reativar não existe pela API, e desativar tem rota
 	// própria -- ver DesativarEmpresaTerceirizada.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarEmpresaTerceirizada(ctx context.Context, arg AtualizarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarLoja(ctx context.Context, arg AtualizarLojaParams) (Loja, error)
 	// setor_id entra no SET (diferente de AtualizarSetor, que ignora loja_id):
 	// mover uma máquina de setor não arrasta setor/loja de ninguém, só o próprio
@@ -81,6 +87,9 @@ type Querier interface {
 	// Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 	// OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
 	// loja errada se resolve desativando e criando na certa.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarSetor(ctx context.Context, arg AtualizarSetorParams) (Setor, error)
 	// Sem senha_hash -- troca de senha tem query própria (AtualizarSenhaUsuario),
 	// porque na edição ela é opcional (ver CadastrarUsuario: senha omitida mantém
@@ -102,6 +111,11 @@ type Querier interface {
 	ContarNotificacoesDoUsuario(ctx context.Context, arg ContarNotificacoesDoUsuarioParams) (int64, error)
 	// O número do sininho e do badge do ícone (idx_notificacao_nao_lida).
 	ContarNotificacoesNaoLidas(ctx context.Context, arg ContarNotificacoesNaoLidasParams) (int64, error)
+	// O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+	// tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+	// aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+	// solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+	ContarOrdensServico(ctx context.Context, arg ContarOrdensServicoParams) (int64, error)
 	// Loja não é desativada por baixo dos setores: o escopo de acesso aponta pro
 	// setor (usuario_escopo_setor), então setor ativo pendurado em loja inativa
 	// continua dando acesso a uma loja que sumiu das listagens. Quem chama decide
@@ -156,6 +170,7 @@ type Querier interface {
 	// Nome é único por tenant (uq_empresa_terceirizada_nome): duplicado volta 23505
 	// e vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
 	// especialidade e telefone são opcionais (NULL) -- o front tipa os dois como `?`.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_TERCERIZADOS), opcional.
 	CriarEmpresaTerceirizada(ctx context.Context, arg CriarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
 	// Grava o que o Técnico apurou (docs/modelagem, 1.4.3 -- universal pros
 	// três tipos, inclusive terceiros: quem recebe o serviço da empresa
@@ -211,6 +226,7 @@ type Querier interface {
 	// ⚠️ A coluna é `ativa` (feminino) na loja e `ativo` no setor/usuário.
 	// Nome é único por tenant (uq_loja_tenant_nome): duplicado volta 23505 e
 	// vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_LOJAS), opcional.
 	CriarLoja(ctx context.Context, arg CriarLojaParams) (Loja, error)
 	// Máquina pertence a um setor (maquina só referencia setor_id -- a loja vem
 	// por join, docs/modelagem-banco-dados.md). Exclusão é soft delete
@@ -390,6 +406,8 @@ type Querier interface {
 	// fk_setor_loja (tenant_id, loja_id) -> loja (tenant_id, id) só fecha com os
 	// dois, e é ela que torna impossível pendurar um setor numa loja de outro
 	// tenant -- o banco recusa, não depende de disciplina no service.
+	//
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_SETORES), opcional.
 	CriarSetor(ctx context.Context, arg CriarSetorParams) (Setor, error)
 	// POST /solicitacoes/direta -- Gestor/Administrador abrindo a OS sem passar
 	// pela fila (migration 000014). `origem` e `status` literais, mesmo motivo de
@@ -685,6 +703,12 @@ type Querier interface {
 	//
 	// Array simples, sem paginação: o front pagina no cliente.
 	ListarMaquinas(ctx context.Context, arg ListarMaquinasParams) ([]ListarMaquinasRow, error)
+	// As opções do filtro "de qual máquina" de Minhas Solicitações: as máquinas
+	// que aparecem nas solicitações do PRÓPRIO solicitante, e não as do setor dele
+	// -- a máquina desativada, ou a do setor antigo de quem mudou de setor, continua
+	// no histórico e precisa continuar filtrável. Pequeno reparo não tem máquina e
+	// some no JOIN. Sem filtro de m.ativa, pelo mesmo motivo.
+	ListarMaquinasDasMinhasSolicitacoes(ctx context.Context, arg ListarMaquinasDasMinhasSolicitacoesParams) ([]ListarMaquinasDasMinhasSolicitacoesRow, error)
 	// GET /notificacoes -- sempre só as do próprio usuário (o id vem do token),
 	// mais novas primeiro, paginada por LIMIT/OFFSET pelo mesmo motivo de
 	// ListarSolicitacoesDoSolicitante: model.RespostaPaginada pede os dois números.
@@ -754,6 +778,13 @@ type Querier interface {
 	// administrador (não filtra), os demais perfis só enxergam OS cujo setor eles
 	// alcançam. O setor é o da solicitação de origem -- ordem_servico não tem
 	// setor_id próprio, e nem deveria: a OS é da solicitação, não de um lugar.
+	// os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+	// poderiam trocar de página entre uma requisição e outra.
+	//
+	// Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+	// deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+	// antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+	// Loja -> Setor a partir da lista inteira.
 	ListarOrdensServico(ctx context.Context, arg ListarOrdensServicoParams) ([]ListarOrdensServicoRow, error)
 	// maquina_id é opcional (NULL não filtra): a aba "Manutenção Prev." do painel
 	// do gestor lista tudo, e a tela de edição de máquina pede só as dela

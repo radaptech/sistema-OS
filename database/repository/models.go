@@ -561,14 +561,16 @@ type EmpresaTerceirizada struct {
 	Telefone      *string
 	Ativa         bool
 	CriadoEm      pgtype.Timestamptz
+	FotoChave     *string
 }
 
 type Loja struct {
-	ID       int64
-	TenantID int64
-	Nome     string
-	Ativa    bool
-	CriadoEm pgtype.Timestamptz
+	ID        int64
+	TenantID  int64
+	Nome      string
+	Ativa     bool
+	CriadoEm  pgtype.Timestamptz
+	FotoChave *string
 }
 
 type Maquina struct {
@@ -686,12 +688,13 @@ type Preventiva struct {
 }
 
 type Setor struct {
-	ID       int64
-	TenantID int64
-	LojaID   int64
-	Nome     string
-	Ativo    bool
-	CriadoEm pgtype.Timestamptz
+	ID        int64
+	TenantID  int64
+	LojaID    int64
+	Nome      string
+	Ativo     bool
+	CriadoEm  pgtype.Timestamptz
+	FotoChave *string
 }
 
 type SolicitacaoAnexo struct {

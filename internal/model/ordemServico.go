@@ -243,39 +243,42 @@ type LancamentoCustoManutencaoPayload struct {
 // HorasParada vem nula e as telas exibem "Não se aplica" em vez de um número
 // -- que é diferente de zero, e é por isso que o campo é ponteiro.
 type OrdemServico struct {
-	Id                      int64                     `json:"id"`
-	SolicitacaoId           int64                     `json:"solicitacaoId"`
-	Tipo                    string                    `json:"tipo"`
-	MaquinaId               *int64                    `json:"maquinaId"`
-	MaquinaNome             *string                   `json:"maquinaNome"`
-	MaquinaCodigo           *string                   `json:"maquinaCodigo"`
-	ItemDescricao           *string                   `json:"itemDescricao"`
-	Descricao               string                    `json:"descricao"`
-	TipoDefeito             *string                   `json:"tipoDefeito,omitempty"`
-	SetorId                 int64                     `json:"setorId"`
-	SetorNome               string                    `json:"setorNome"`
-	LojaId                  int64                     `json:"lojaId"`
-	LojaNome                string                    `json:"lojaNome"`
-	SolicitanteNome         *string                   `json:"solicitanteNome"`
-	Urgencia                string                    `json:"urgencia,omitempty"`
-	TecnicoId               int64                     `json:"tecnicoId,omitempty"`
-	TecnicoNome             *string                   `json:"tecnicoNome,omitempty"`
-	TecnicoArea             *string                   `json:"tecnicoArea,omitempty"`
-	EmpresaTerceirizadaId   *int64                    `json:"empresaTerceirizadaId,omitempty"`
-	EmpresaTerceirizadaNome *string                   `json:"empresaTerceirizadaNome,omitempty"`
-	StatusExecucao          string                    `json:"statusExecucao"`
-	Finalizada              bool                      `json:"finalizada"`
-	AfetaProducao           bool                      `json:"afetaProducao"`
-	DataSolicitacao         *config.DataBr            `json:"dataSolicitacao"`
-	DataAbertura            *config.DataBr            `json:"dataAbertura"`
-	DataInicio              *config.DataBr            `json:"dataInicio,omitempty"`
-	DataFim                 *config.DataBr            `json:"dataFim,omitempty"`
-	HorasTrabalhadas        *float64                  `json:"horasTrabalhadas,omitempty"`
-	HorasParada             *float64                  `json:"horasParada,omitempty"`
-	PausaAtual              *PausaOrdemServico        `json:"pausaAtual,omitempty"`
-	Pausas                  []PausaOrdemServico       `json:"pausas,omitempty"`
-	Encerramento            *EncerramentoOrdemServico `json:"encerramento,omitempty"`
-	Custo                   *CustoOrdemServico        `json:"custo,omitempty"`
+	Id                      int64   `json:"id"`
+	SolicitacaoId           int64   `json:"solicitacaoId"`
+	Tipo                    string  `json:"tipo"`
+	MaquinaId               *int64  `json:"maquinaId"`
+	MaquinaNome             *string `json:"maquinaNome"`
+	MaquinaCodigo           *string `json:"maquinaCodigo"`
+	ItemDescricao           *string `json:"itemDescricao"`
+	Descricao               string  `json:"descricao"`
+	TipoDefeito             *string `json:"tipoDefeito,omitempty"`
+	SetorId                 int64   `json:"setorId"`
+	SetorNome               string  `json:"setorNome"`
+	LojaId                  int64   `json:"lojaId"`
+	LojaNome                string  `json:"lojaNome"`
+	SolicitanteNome         *string `json:"solicitanteNome"`
+	Urgencia                string  `json:"urgencia,omitempty"`
+	TecnicoId               int64   `json:"tecnicoId,omitempty"`
+	TecnicoNome             *string `json:"tecnicoNome,omitempty"`
+	TecnicoArea             *string `json:"tecnicoArea,omitempty"`
+	EmpresaTerceirizadaId   *int64  `json:"empresaTerceirizadaId,omitempty"`
+	EmpresaTerceirizadaNome *string `json:"empresaTerceirizadaNome,omitempty"`
+	// Nasce com a foto_chave crua da terceirizada e o controller troca pela URL
+	// assinada -- mesmo padrão de SolicitacaoOS.MaquinaFotoUrl.
+	EmpresaTerceirizadaFotoUrl *string                   `json:"empresaTerceirizadaFotoUrl,omitempty"`
+	StatusExecucao             string                    `json:"statusExecucao"`
+	Finalizada                 bool                      `json:"finalizada"`
+	AfetaProducao              bool                      `json:"afetaProducao"`
+	DataSolicitacao            *config.DataBr            `json:"dataSolicitacao"`
+	DataAbertura               *config.DataBr            `json:"dataAbertura"`
+	DataInicio                 *config.DataBr            `json:"dataInicio,omitempty"`
+	DataFim                    *config.DataBr            `json:"dataFim,omitempty"`
+	HorasTrabalhadas           *float64                  `json:"horasTrabalhadas,omitempty"`
+	HorasParada                *float64                  `json:"horasParada,omitempty"`
+	PausaAtual                 *PausaOrdemServico        `json:"pausaAtual,omitempty"`
+	Pausas                     []PausaOrdemServico       `json:"pausas,omitempty"`
+	Encerramento               *EncerramentoOrdemServico `json:"encerramento,omitempty"`
+	Custo                      *CustoOrdemServico        `json:"custo,omitempty"`
 }
 
 // dataBrOuNil e floatOuNil traduzem os tipos nullable do pgx para os ponteiros
@@ -323,34 +326,35 @@ func MontarOrdemServico(
 ) OrdemServico {
 
 	ordem := OrdemServico{
-		Id:                      os.ID,
-		SolicitacaoId:           os.SolicitacaoID,
-		Tipo:                    string(os.Tipo),
-		MaquinaId:               os.MaquinaID,
-		MaquinaNome:             os.MaquinaNome,
-		MaquinaCodigo:           os.MaquinaCodigo,
-		ItemDescricao:           os.ItemDescricao,
-		Descricao:               os.Descricao,
-		SetorId:                 os.SetorID,
-		SetorNome:               os.SetorNome,
-		LojaId:                  os.LojaID,
-		LojaNome:                os.LojaNome,
-		SolicitanteNome:         os.SolicitanteNome,
-		Urgencia:                string(os.Urgencia),
-		TecnicoId:               os.TecnicoID,
-		TecnicoNome:             &os.TecnicoNome,
-		TecnicoArea:             os.TecnicoArea,
-		EmpresaTerceirizadaId:   os.EmpresaTerceirizadaID,
-		EmpresaTerceirizadaNome: os.EmpresaTerceirizadaNome,
-		StatusExecucao:          string(os.Status),
-		Finalizada:              os.Finalizada,
-		AfetaProducao:           os.AfetaProducao,
-		DataSolicitacao:         dataBrOuNil(os.DataSolicitacao),
-		DataAbertura:            dataBrOuNil(os.AbertaEm),
-		DataInicio:              dataBrOuNil(os.IniciadaEm),
-		DataFim:                 dataBrOuNil(os.DataFim),
-		HorasTrabalhadas:        floatOuNil(os.HorasTrabalhadas),
-		HorasParada:             floatOuNil(os.HorasParada),
+		Id:                         os.ID,
+		SolicitacaoId:              os.SolicitacaoID,
+		Tipo:                       string(os.Tipo),
+		MaquinaId:                  os.MaquinaID,
+		MaquinaNome:                os.MaquinaNome,
+		MaquinaCodigo:              os.MaquinaCodigo,
+		ItemDescricao:              os.ItemDescricao,
+		Descricao:                  os.Descricao,
+		SetorId:                    os.SetorID,
+		SetorNome:                  os.SetorNome,
+		LojaId:                     os.LojaID,
+		LojaNome:                   os.LojaNome,
+		SolicitanteNome:            os.SolicitanteNome,
+		Urgencia:                   string(os.Urgencia),
+		TecnicoId:                  os.TecnicoID,
+		TecnicoNome:                &os.TecnicoNome,
+		TecnicoArea:                os.TecnicoArea,
+		EmpresaTerceirizadaId:      os.EmpresaTerceirizadaID,
+		EmpresaTerceirizadaNome:    os.EmpresaTerceirizadaNome,
+		EmpresaTerceirizadaFotoUrl: os.EmpresaTerceirizadaFotoChave,
+		StatusExecucao:             string(os.Status),
+		Finalizada:                 os.Finalizada,
+		AfetaProducao:              os.AfetaProducao,
+		DataSolicitacao:            dataBrOuNil(os.DataSolicitacao),
+		DataAbertura:               dataBrOuNil(os.AbertaEm),
+		DataInicio:                 dataBrOuNil(os.IniciadaEm),
+		DataFim:                    dataBrOuNil(os.DataFim),
+		HorasTrabalhadas:           floatOuNil(os.HorasTrabalhadas),
+		HorasParada:                floatOuNil(os.HorasParada),
 	}
 
 	if os.TipoDefeito != nil {

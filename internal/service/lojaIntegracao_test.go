@@ -159,6 +159,36 @@ func TestLojaCrud(t *testing.T) {
 		}
 	})
 
+	t.Run("foto: cadastra com a chave, e atualizar sem foto nova mantém a atual", func(t *testing.T) {
+		chave := "tenant/1/loja.jpg"
+		criada, err := svc.CadastrarLoja(ctx, tenantID, model.NovaLojaPayload{Nome: "Loja Com Foto", FotoChave: &chave})
+		if err != nil {
+			t.Fatalf("erro ao cadastrar: %v", err)
+		}
+		// O service devolve a chave crua; quem assina é o controller.
+		if criada.FotoUrl == nil || *criada.FotoUrl != chave {
+			t.Fatalf("fotoUrl = %v, esperado a chave %q", criada.FotoUrl, chave)
+		}
+
+		// FotoChave nil = "não mandou foto nova" (COALESCE em loja.sql).
+		atualizada, err := svc.AtualizarLoja(ctx, tenantID, criada.Id, model.NovaLojaPayload{Nome: "Loja Com Foto II"})
+		if err != nil {
+			t.Fatalf("erro ao atualizar: %v", err)
+		}
+		if atualizada.FotoUrl == nil || *atualizada.FotoUrl != chave {
+			t.Errorf("atualizar sem foto apagou a atual: %v", atualizada.FotoUrl)
+		}
+
+		nova := "tenant/1/loja-2.jpg"
+		trocada, err := svc.AtualizarLoja(ctx, tenantID, criada.Id, model.NovaLojaPayload{Nome: "Loja Com Foto II", FotoChave: &nova})
+		if err != nil {
+			t.Fatalf("erro ao trocar a foto: %v", err)
+		}
+		if trocada.FotoUrl == nil || *trocada.FotoUrl != nova {
+			t.Errorf("foto não foi trocada: %v", trocada.FotoUrl)
+		}
+	})
+
 	t.Run("desativar recusa enquanto houver setor ativo", func(t *testing.T) {
 		loja, err := svc.CadastrarLoja(ctx, tenantID, model.NovaLojaPayload{Nome: "Loja Com Setor"})
 		if err != nil {

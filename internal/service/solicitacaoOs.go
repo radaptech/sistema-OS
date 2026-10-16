@@ -240,7 +240,7 @@ func (s *SolicitacaoService) CadastrarSolicitacaoReparo(ctx context.Context, ten
 
 // ListarMinhasSolicitacoes é GET /solicitacoes/minhas -- restrita ao próprio
 // solicitante (nunca escopo: é a lista pessoal, não a fila do gestor).
-func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string) (model.RespostaPaginada[model.SolicitacaoOS], error) {
+func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string, maquinaId *int64) (model.RespostaPaginada[model.SolicitacaoOS], error) {
 
 	var vazio model.RespostaPaginada[model.SolicitacaoOS]
 
@@ -254,6 +254,7 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TenantID:      tenantId,
 		SolicitanteID: &solicitanteId,
 		Status:        (*repository.StatusSolicitacao)(status),
+		MaquinaID:     maquinaId,
 		Busca:         busca,
 	})
 	if err != nil {
@@ -264,6 +265,7 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TenantID:      tenantId,
 		SolicitanteID: &solicitanteId,
 		Status:        (*repository.StatusSolicitacao)(status),
+		MaquinaID:     maquinaId,
 		Busca:         busca,
 		Limite:        TamanhoPaginaSolicitacoes,
 		Deslocamento:  (pagina - 1) * TamanhoPaginaSolicitacoes,
@@ -288,6 +290,36 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TotalPaginas: int32((total + TamanhoPaginaSolicitacoes - 1) / TamanhoPaginaSolicitacoes),
 		Total:        total,
 	}, nil
+}
+
+// MaquinasDasMinhasSolicitacoes é GET /solicitacoes/minhas/maquinas: as
+// máquinas que aparecem nas solicitações do próprio solicitante -- as opções
+// do filtro de Minhas Solicitações. Mesmo recorte de ListarMinhasSolicitacoes:
+// só o usuario.id do token, nunca escopo.
+func (s *SolicitacaoService) MaquinasDasMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64) ([]model.MaquinaDasMinhasSolicitacoes, error) {
+
+	repo := repository.New(s.Pool)
+
+	linhas, err := repo.ListarMaquinasDasMinhasSolicitacoes(ctx, repository.ListarMaquinasDasMinhasSolicitacoesParams{
+		TenantID:      tenantId,
+		SolicitanteID: &solicitanteId,
+	})
+	if err != nil {
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	// Não-nil: o front faz .map na resposta, e nil viraria `null` no JSON.
+	dto := make([]model.MaquinaDasMinhasSolicitacoes, 0, len(linhas))
+	for _, l := range linhas {
+		dto = append(dto, model.MaquinaDasMinhasSolicitacoes{
+			Id:               l.ID,
+			Nome:             l.Nome,
+			NumeroPatrimonio: l.NumeroPatrimonio,
+			FotoUrl:          l.FotoChave,
+		})
+	}
+
+	return dto, nil
 }
 
 // ListarSolicitacoes é GET /solicitacoes -- a fila do Gestor (e Administrador

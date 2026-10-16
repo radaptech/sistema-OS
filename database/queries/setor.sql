@@ -25,8 +25,10 @@ WHERE id = ANY(sqlc.arg(ids)::bigint[]) AND tenant_id = sqlc.arg(tenant_id);
 -- fk_setor_loja (tenant_id, loja_id) -> loja (tenant_id, id) só fecha com os
 -- dois, e é ela que torna impossível pendurar um setor numa loja de outro
 -- tenant -- o banco recusa, não depende de disciplina no service.
-INSERT INTO setor (tenant_id, loja_id, nome)
-VALUES ($1, $2, $3)
+--
+-- foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_SETORES), opcional.
+INSERT INTO setor (tenant_id, loja_id, nome, foto_chave)
+VALUES ($1, $2, $3, sqlc.narg(foto_chave))
 RETURNING *;
 
 -- name: ObterSetorCompletoPorID :one
@@ -52,8 +54,12 @@ ORDER BY nome;
 -- Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 -- OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
 -- loja errada se resolve desativando e criando na certa.
+-- foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+-- atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+-- AtualizarMaquina). A antiga fica órfã no R2.
 UPDATE setor
-SET nome = $3
+SET nome = $3,
+    foto_chave = COALESCE(sqlc.narg(foto_chave), foto_chave)
 WHERE id = $1 AND tenant_id = $2
 RETURNING *;
 

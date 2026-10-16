@@ -8,8 +8,9 @@
 -- name: CriarLoja :one
 -- Nome é único por tenant (uq_loja_tenant_nome): duplicado volta 23505 e
 -- vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
-INSERT INTO loja (tenant_id, nome)
-VALUES ($1, $2)
+-- foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_LOJAS), opcional.
+INSERT INTO loja (tenant_id, nome, foto_chave)
+VALUES ($1, $2, sqlc.narg(foto_chave))
 RETURNING *;
 
 -- name: ObterLojaPorID :one
@@ -29,8 +30,12 @@ WHERE tenant_id = $1
 ORDER BY nome;
 
 -- name: AtualizarLoja :one
+-- foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+-- atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+-- AtualizarMaquina). A antiga fica órfã no R2.
 UPDATE loja
-SET nome = $3
+SET nome = $3,
+    foto_chave = COALESCE(sqlc.narg(foto_chave), foto_chave)
 WHERE id = $1 AND tenant_id = $2
 RETURNING *;
 

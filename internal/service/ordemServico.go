@@ -43,13 +43,17 @@ func NewRepoOrdemServico(pool *pgxpool.Pool) *OrdemServicoService {
 // *int64 vizinhos de lugar (LojaId/TecnicoId) compila e devolve a lista
 // errada, calado.
 //
-// `pagina` do contrato do front não entra: a resposta é array simples e o
-// front pagina no cliente, mesmo padrão de ListarSolicitacoes/ListarMaquinas.
+// `pagina` não entra aqui: ela não filtra, decide o FORMATO da resposta -- por
+// isso é parâmetro de ListarOrdensServicoPaginada, e não um campo que a versão
+// sem página teria de ignorar.
 type FiltrosOrdemServico struct {
 	Status     []string
 	Tipo       *string
 	Finalizada *bool
-	LojaId     *int64
+	// Revisado separa as abas de Custos Pendentes: o Administrador já conferiu
+	// o custo (custo_revisado_em) ou não. OS sem custo conta como não revisada.
+	Revisado *bool
+	LojaId   *int64
 	// SetorId recorta pelo setor da SOLICITAÇÃO de origem -- a OS não tem setor
 	// próprio (ver a nota da query). Continua sendo filtro do cliente, então
 	// só estreita: setor fora do escopo de quem chama devolve vazio.
@@ -76,6 +80,7 @@ func (s *OrdemServicoService) ListarOrdensServico(ctx context.Context, tenantId,
 		Status:          filtros.Status,
 		Tipo:            (*repository.TipoOs)(filtros.Tipo),
 		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
 		TecnicoID:       filtros.TecnicoId,
@@ -87,6 +92,89 @@ func (s *OrdemServicoService) ListarOrdensServico(ctx context.Context, tenantId,
 	}
 
 	return montarOrdensServicoEmLote(ctx, repo, linhas)
+}
+
+// TamanhoPaginaOrdensServico é o tamanho da página de GET /ordens-servico?pagina=.
+// 12 e não os 10 de /solicitacoes/minhas: as telas de histórico de OS são grade
+// de 2 e 3 colunas (lg/2xl), e 12 fecha as duas sem sobrar card sozinho.
+const TamanhoPaginaOrdensServico = 12
+
+// ListarOrdensServicoPaginada é GET /ordens-servico?pagina= -- os mesmos
+// filtros e o mesmo escopo de ListarOrdensServico, uma página por vez, com o
+// total para o "1 de N". Existe à parte (em vez de a listagem passar a ser
+// sempre paginada) porque os painéis do Gestor e do Técnico ainda montam a
+// navegação Loja -> Setor e as contagens dos cards a partir da lista inteira.
+// As telas de histórico, que crescem sem parar, pedem por página.
+//
+// Contagem e página são duas queries fora de transação, como em
+// ListarMinhasSolicitacoes: uma OS que mude entre as duas no máximo deixa o
+// total desatualizado por uma requisição.
+func (s *OrdemServicoService) ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error) {
+	return s.listarPaginada(ctx, tenantId, usuarioId, perfil, filtros, pagina, TamanhoPaginaOrdensServico)
+}
+
+// listarPaginada recebe o tamanho da página só para o teste de integração
+// conseguir várias páginas com poucas OS de fixture; a rota usa sempre
+// TamanhoPaginaOrdensServico.
+func (s *OrdemServicoService) listarPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros FiltrosOrdemServico, pagina, tamanho int32) (model.RespostaPaginada[model.OrdemServico], error) {
+
+	var vazio model.RespostaPaginada[model.OrdemServico]
+
+	if pagina < 1 {
+		pagina = 1
+	}
+
+	repo := repository.New(s.Pool)
+	escopo := escopoDe(usuarioId, perfil)
+
+	total, err := repo.ContarOrdensServico(ctx, repository.ContarOrdensServicoParams{
+		TenantID:        tenantId,
+		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
+		Status:          filtros.Status,
+		Tipo:            (*repository.TipoOs)(filtros.Tipo),
+		LojaID:          filtros.LojaId,
+		SetorID:         filtros.SetorId,
+		TecnicoID:       filtros.TecnicoId,
+		Busca:           filtros.Busca,
+		EscopoUsuarioID: escopo,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	limite := tamanho
+	deslocamento := (pagina - 1) * limite
+
+	linhas, err := repo.ListarOrdensServico(ctx, repository.ListarOrdensServicoParams{
+		TenantID:        tenantId,
+		Status:          filtros.Status,
+		Tipo:            (*repository.TipoOs)(filtros.Tipo),
+		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
+		LojaID:          filtros.LojaId,
+		SetorID:         filtros.SetorId,
+		TecnicoID:       filtros.TecnicoId,
+		Busca:           filtros.Busca,
+		EscopoUsuarioID: escopo,
+		Limite:          &limite,
+		Deslocamento:    &deslocamento,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	dados, err := montarOrdensServicoEmLote(ctx, repo, linhas)
+	if err != nil {
+		return vazio, err
+	}
+
+	return model.RespostaPaginada[model.OrdemServico]{
+		Dados:        dados,
+		Pagina:       pagina,
+		TotalPaginas: int32((total + int64(tamanho) - 1) / int64(tamanho)),
+		Total:        total,
+	}, nil
 }
 
 // montarOrdensServicoEmLote busca as pausas da página inteira numa ida só e

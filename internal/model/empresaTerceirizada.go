@@ -22,6 +22,9 @@ type EmpresaTerceirizada struct {
 	Especialidade *string `json:"especialidade,omitempty"`
 	Telefone      *string `json:"telefone,omitempty"`
 	Ativa         bool    `json:"ativa"`
+	// FotoUrl nasce com a foto_chave crua e o controller troca pela URL
+	// assinada antes de responder -- mesmo padrão de Maquinario.FotoUrl.
+	FotoUrl *string `json:"fotoUrl,omitempty"`
 }
 
 // NovaEmpresaTerceirizadaPayload é o corpo de POST /empresas-terceirizadas e de
@@ -41,4 +44,8 @@ type NovaEmpresaTerceirizadaPayload struct {
 	Nome          string  `json:"nome" binding:"required"`
 	Especialidade *string `json:"especialidade"`
 	Telefone      *string `json:"telefone"`
+	// FotoChave não vem do JSON (json:"-"): é a key do upload da parte `foto`
+	// do multipart, preenchida pelo controller. nil = sem foto nova, e o UPDATE
+	// mantém a atual (COALESCE).
+	FotoChave *string `json:"-"`
 }

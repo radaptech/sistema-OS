@@ -18,10 +18,11 @@ import (
 type SolicitacaoServiceInterface interface {
 	CadastrarSolicitacaoMaquinario(ctx context.Context, tenantId, solicitanteId int64, payload model.NovaSolicitacaoMaquinarioPayload) (model.SolicitacaoOS, error)
 	CadastrarSolicitacaoReparo(ctx context.Context, tenantId, solicitanteId int64, payload model.NovaSolicitacaoReparoPayload) (model.SolicitacaoOS, error)
-	ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string) (model.RespostaPaginada[model.SolicitacaoOS], error)
+	ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string, maquinaId *int64) (model.RespostaPaginada[model.SolicitacaoOS], error)
 	ListarSolicitacoes(ctx context.Context, tenantId, usuarioId int64, perfil string, status, tipo, busca *string, lojaId *int64) ([]model.SolicitacaoOS, error)
 	ObterSolicitacao(ctx context.Context, tenantId, usuarioId int64, perfil string, id int64) (model.SolicitacaoOS, error)
 	ObterResumo(ctx context.Context, tenantId, solicitanteId int64) (model.ResumoSolicitacoes, error)
+	MaquinasDasMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64) ([]model.MaquinaDasMinhasSolicitacoes, error)
 	AbrirOS(ctx context.Context, tenantId, atorId int64, perfil string, solicitacaoId int64, payload model.AberturaOrdemServicoPayload) (model.OrdemServico, error)
 	CadastrarSolicitacaoDireta(ctx context.Context, tenantId, atorId int64, perfil string, payload model.NovaSolicitacaoDiretaPayload) (model.OrdemServico, error)
 	Rejeitar(ctx context.Context, tenantId, atorId int64, perfil string, solicitacaoId int64, motivoBruto string) (model.SolicitacaoOS, error)
@@ -298,7 +299,14 @@ func (s *SolicitacaoController) Minhas() gin.HandlerFunc {
 			busca = &bruto
 		}
 
-		pagina2, err := s.service.ListarMinhasSolicitacoes(ctx.Request.Context(), tenantId, solicitanteId, pagina, status, busca)
+		// ?maquinaId= é o filtro "de qual máquina" da tela. Não amplia nada: a
+		// query continua presa ao solicitante do token.
+		maquinaId, ok := idDeQuery(ctx, "maquinaId")
+		if !ok {
+			return
+		}
+
+		pagina2, err := s.service.ListarMinhasSolicitacoes(ctx.Request.Context(), tenantId, solicitanteId, pagina, status, busca, maquinaId)
 		if err != nil {
 			slog.ErrorContext(ctx.Request.Context(), "listar minhas solicitações", "tenant", tenantId, "err", err)
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao listar solicitações"})
@@ -307,6 +315,38 @@ func (s *SolicitacaoController) Minhas() gin.HandlerFunc {
 
 		s.resolverSolicitacoes(ctx.Request.Context(), pagina2.Dados)
 		ctx.JSON(http.StatusOK, pagina2)
+	}
+}
+
+// MinhasMaquinas é GET /solicitacoes/minhas/maquinas -- as opções do filtro
+// "de qual máquina" de Minhas Solicitações, com a foto de cadastro assinada
+// (bucket das máquinas, o mesmo de maquinaFotoUrl).
+func (s *SolicitacaoController) MinhasMaquinas() gin.HandlerFunc {
+
+	return func(ctx *gin.Context) {
+
+		tenantId, ok := tenantDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		solicitanteId, _, ok := atorDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		maquinas, err := s.service.MaquinasDasMinhasSolicitacoes(ctx.Request.Context(), tenantId, solicitanteId)
+		if err != nil {
+			slog.ErrorContext(ctx.Request.Context(), "máquinas das minhas solicitações", "tenant", tenantId, "err", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao listar as máquinas"})
+			return
+		}
+
+		for i := range maquinas {
+			maquinas[i].FotoUrl = assinarFoto(ctx.Request.Context(), s.bucketMaquinas, maquinas[i].FotoUrl, "maquina", maquinas[i].Id)
+		}
+
+		ctx.JSON(http.StatusOK, maquinas)
 	}
 }
 

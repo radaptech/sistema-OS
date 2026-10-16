@@ -317,6 +317,8 @@ SELECT
     tec.nome AS tecnico_nome,
     a.nome AS tecnico_area,
     et.nome AS empresa_terceirizada_nome,
+    -- KEY no R2 da foto da terceirizada; o controller assina antes de responder.
+    et.foto_chave AS empresa_terceirizada_foto_chave,
     (os.status = 'Concluída' AND c.id IS NOT NULL)::boolean AS finalizada,
     e.tipo_defeito,
     e.data_fim,
@@ -360,6 +362,13 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
     sqlc.narg(finalizada)::boolean IS NULL
     OR (os.status = 'Concluída' AND c.id IS NOT NULL) = sqlc.narg(finalizada)
   )
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao `custo?.revisadoEm == null` do front.
+  AND (
+    sqlc.narg(revisado)::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = sqlc.narg(revisado)
+  )
   AND (sqlc.narg(status)::text[] IS NULL OR os.status = ANY(sqlc.narg(status)::text[]::status_os[]))
   AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
   AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
@@ -387,7 +396,15 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
         AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
     )
   )
-ORDER BY os.aberta_em DESC;
+-- os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+-- poderiam trocar de página entre uma requisição e outra.
+--
+-- Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+-- deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+-- antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+-- Loja -> Setor a partir da lista inteira.
+ORDER BY os.aberta_em DESC, os.id DESC
+LIMIT sqlc.narg(limite) OFFSET sqlc.narg(deslocamento);
 
 -- name: ObterPausasDasOrdensServico :many
 -- Pausas de uma página inteira de OS numa ida só, mesmo padrão de
@@ -606,3 +623,54 @@ SELECT id, ordem_servico_id, numero, serie
 FROM os_nota_fiscal
 WHERE ordem_servico_id = ANY(sqlc.arg(ordens_servico_ids)::bigint[])
 ORDER BY ordem_servico_id, id;
+
+-- name: ContarOrdensServico :one
+-- O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+-- tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+-- aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+-- solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+LEFT JOIN maquina m    ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN os_custo c   ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.narg(finalizada)::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = sqlc.narg(finalizada)
+  )
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao `custo?.revisadoEm == null` do front.
+  AND (
+    sqlc.narg(revisado)::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = sqlc.narg(revisado)
+  )
+  AND (sqlc.narg(status)::text[] IS NULL OR os.status = ANY(sqlc.narg(status)::text[]::status_os[]))
+  AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
+  AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
+  -- setor_id sai da SOLICITAÇÃO (s.setor_id), não de ordem_servico -- a OS não
+  -- tem setor próprio, e nem deveria (ver a nota do escopo lá embaixo). Mesma
+  -- coluna que o EXISTS de escopo compara, então filtro e escopo falam da
+  -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
+  -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
+  AND (
+    sqlc.narg(busca)::text IS NULL
+    OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.nome ILIKE '%' || sqlc.narg(busca) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(busca) || '%'
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  );

@@ -20,15 +20,26 @@ type PreventivaServiceInterface interface {
 	DesativarPreventiva(ctx context.Context, tenantID, id int64) error
 }
 
+// PreventivaController guarda o bucket das fotos de máquina para assinar
+// Preventiva.MaquinaFotoUrl -- o mesmo de MaquinaController, resolvido aqui
+// de novo porque a preventiva denormaliza a foto da máquina na resposta.
 type PreventivaController struct {
-	service PreventivaServiceInterface
+	service        PreventivaServiceInterface
+	bucketMaquinas string
 }
 
-func NewPreventivaController(service PreventivaServiceInterface) *PreventivaController {
+func NewPreventivaController(service PreventivaServiceInterface, bucketMaquinas string) *PreventivaController {
 
 	return &PreventivaController{
-		service: service,
+		service:        service,
+		bucketMaquinas: bucketMaquinas,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 da foto da máquina pela URL
+// assinada de leitura (assinarFoto, controller/foto.go).
+func (p *PreventivaController) resolverFoto(ctx context.Context, preventiva *model.Preventiva) {
+	preventiva.MaquinaFotoUrl = assinarFoto(ctx, p.bucketMaquinas, preventiva.MaquinaFotoUrl, "preventiva", preventiva.Id)
 }
 
 // Cadastrar é POST /preventivas -- a preventiva avulsa do
@@ -78,6 +89,7 @@ func (p *PreventivaController) Cadastrar() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusCreated, preventiva)
 	}
 }
@@ -115,6 +127,10 @@ func (p *PreventivaController) Listar() gin.HandlerFunc {
 			return
 		}
 
+		for i := range preventivas {
+			p.resolverFoto(ctx.Request.Context(), &preventivas[i])
+		}
+
 		ctx.JSON(http.StatusOK, preventivas)
 	}
 }
@@ -147,6 +163,7 @@ func (p *PreventivaController) Obter() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusOK, preventiva)
 	}
 }
@@ -231,6 +248,7 @@ func (p *PreventivaController) Atualizar() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusOK, preventiva)
 	}
 }

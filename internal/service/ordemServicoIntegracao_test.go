@@ -793,6 +793,75 @@ func TestListarOrdensServico(t *testing.T) {
 			t.Errorf("tecnicoNome = %q, esperado Ivo", linhas[0].TecnicoNome)
 		}
 	})
+
+	// Paginação (?pagina=): mesmo WHERE da listagem inteira, uma fatia por vez.
+	// Tamanho 3 com as 4 OS do fixture dá duas páginas, a última incompleta.
+	t.Run("paginada fatia a listagem inteira na mesma ordem, com o total certo", func(t *testing.T) {
+		inteira := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{})
+
+		var juntas []model.OrdemServico
+		for pagina := int32(1); pagina <= 3; pagina++ {
+			resp, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{}, pagina, 3)
+			if err != nil {
+				t.Fatalf("página %d: %v", pagina, err)
+			}
+			if resp.Total != int64(len(inteira)) || resp.TotalPaginas != 2 || resp.Pagina != pagina {
+				t.Errorf("página %d: total=%d totalPaginas=%d pagina=%d, esperado total=%d totalPaginas=2", pagina, resp.Total, resp.TotalPaginas, resp.Pagina, len(inteira))
+			}
+			if resp.Dados == nil {
+				t.Errorf("página %d: dados nil -- o front faz .map", pagina)
+			}
+			juntas = append(juntas, resp.Dados...)
+		}
+		// Página além da última volta vazia, e as duas primeiras juntas são a
+		// lista inteira, na mesma ordem (o desempate por id deixa estável).
+		if len(juntas) != len(inteira) {
+			t.Fatalf("páginas somaram %d OS, a listagem inteira tem %d", len(juntas), len(inteira))
+		}
+		for i := range inteira {
+			if juntas[i].Id != inteira[i].Id {
+				t.Errorf("posição %d: paginada %d, inteira %d", i, juntas[i].Id, inteira[i].Id)
+			}
+		}
+
+		// Escopo continua valendo: o gestor parcial só tem a OS da serra.
+		doGestor, err := svcOS.listarPaginada(ctx, tenantID, gestorParcial.Id, "gestor", FiltrosOrdemServico{}, 1, 3)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		if doGestor.Total != 1 || len(doGestor.Dados) != 1 || doGestor.Dados[0].Id != osSerra.Id {
+			t.Errorf("gestor parcial: total=%d com %d OS na página, esperado só a OS da serra", doGestor.Total, len(doGestor.Dados))
+		}
+	})
+
+	t.Run("revisado separa as abas sem perder nem repetir OS", func(t *testing.T) {
+		sim, nao := true, false
+		todas, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		revisadas, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{Revisado: &sim}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		pendentes, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{Revisado: &nao}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		if revisadas.Total+pendentes.Total != todas.Total {
+			t.Errorf("revisadas (%d) + pendentes (%d) != total (%d)", revisadas.Total, pendentes.Total, todas.Total)
+		}
+		for _, o := range revisadas.Dados {
+			if o.Custo == nil || o.Custo.RevisadoEm == nil {
+				t.Errorf("OS %d veio em revisadas sem revisadoEm", o.Id)
+			}
+		}
+		for _, o := range pendentes.Dados {
+			if o.Custo != nil && o.Custo.RevisadoEm != nil {
+				t.Errorf("OS %d veio em pendentes já revisada", o.Id)
+			}
+		}
+	})
 }
 
 // TestIniciar cobre POST /ordens-servico/:id/iniciar: dono muda Aberta ->

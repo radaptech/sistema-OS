@@ -43,6 +43,11 @@ RETURNING *;
 SELECT
     p.*,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -76,6 +81,11 @@ WHERE p.id = $1 AND p.tenant_id = $2;
 SELECT
     p.*,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,

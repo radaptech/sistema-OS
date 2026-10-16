@@ -98,7 +98,7 @@ func TestSetorMapeiaErroParaStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 
-			ctrl := NewSetorController(setorFake{err: c.err})
+			ctrl := NewSetorController(setorFake{err: c.err}, "")
 
 			var w *httptest.ResponseRecorder
 			var ctx *gin.Context
@@ -127,7 +127,7 @@ func TestSetorMapeiaErroParaStatus(t *testing.T) {
 	// A mensagem do 422 diz qual loja está fechada -- vira o toast no front.
 	t.Run("422 preserva o motivo", func(t *testing.T) {
 		w, ctx := requisicaoSetor(http.MethodPost, "", "", corpo)
-		NewSetorController(setorFake{err: lojaFechada}).Cadastrar()(ctx)
+		NewSetorController(setorFake{err: lojaFechada}, "").Cadastrar()(ctx)
 		if !strings.Contains(w.Body.String(), "desativada") {
 			t.Errorf("mensagem perdeu o motivo: %s", w.Body)
 		}
@@ -136,7 +136,7 @@ func TestSetorMapeiaErroParaStatus(t *testing.T) {
 	t.Run("corpo sem lojaId não chega no service", func(t *testing.T) {
 		for _, ruim := range []string{`{"nome":"Padaria"}`, `{"nome":"Padaria","lojaId":0}`, `{"lojaId":1}`} {
 			w, ctx := requisicaoSetor(http.MethodPost, "", "", ruim)
-			NewSetorController(setorFake{}).Cadastrar()(ctx)
+			NewSetorController(setorFake{}, "").Cadastrar()(ctx)
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("corpo %s: status = %d, esperado 400", ruim, w.Code)
 			}
@@ -153,7 +153,7 @@ func TestSetorListarFiltroDeLoja(t *testing.T) {
 	t.Run("sem filtro chega nil", func(t *testing.T) {
 		var recebido *int64
 		w, ctx := requisicaoSetor(http.MethodGet, "", "", "")
-		NewSetorController(setorFake{lojaId: &recebido}).Listar()(ctx)
+		NewSetorController(setorFake{lojaId: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK || recebido != nil {
 			t.Fatalf("status %d, lojaId %v (esperado 200 e nil)", w.Code, recebido)
@@ -163,7 +163,7 @@ func TestSetorListarFiltroDeLoja(t *testing.T) {
 	t.Run("lojaId vazio é o mesmo que ausente", func(t *testing.T) {
 		var recebido *int64
 		w, ctx := requisicaoSetor(http.MethodGet, "", "?lojaId=", "")
-		NewSetorController(setorFake{lojaId: &recebido}).Listar()(ctx)
+		NewSetorController(setorFake{lojaId: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK || recebido != nil {
 			t.Fatalf("status %d, lojaId %v (esperado 200 e nil)", w.Code, recebido)
@@ -173,7 +173,7 @@ func TestSetorListarFiltroDeLoja(t *testing.T) {
 	t.Run("lojaId válido chega no service", func(t *testing.T) {
 		var recebido *int64
 		w, ctx := requisicaoSetor(http.MethodGet, "", "?lojaId=42", "")
-		NewSetorController(setorFake{lojaId: &recebido}).Listar()(ctx)
+		NewSetorController(setorFake{lojaId: &recebido}, "").Listar()(ctx)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d", w.Code)
@@ -187,7 +187,7 @@ func TestSetorListarFiltroDeLoja(t *testing.T) {
 		for _, ruim := range []string{"abc", "0", "-3"} {
 			var recebido *int64
 			w, ctx := requisicaoSetor(http.MethodGet, "", "?lojaId="+ruim, "")
-			NewSetorController(setorFake{lojaId: &recebido}).Listar()(ctx)
+			NewSetorController(setorFake{lojaId: &recebido}, "").Listar()(ctx)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("lojaId=%s: status = %d, esperado 400", ruim, w.Code)
@@ -204,7 +204,7 @@ func TestSetorListarFiltroDeLoja(t *testing.T) {
 		ctx, _ := gin.CreateTestContext(w)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/setores", nil)
 
-		NewSetorController(setorFake{}).Listar()(ctx)
+		NewSetorController(setorFake{}, "").Listar()(ctx)
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, esperado 500", w.Code)

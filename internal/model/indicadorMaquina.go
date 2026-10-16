@@ -35,6 +35,13 @@ type ResumoIndicadores struct {
 	MtbfHoras        float64               `json:"mtbfHoras"`
 	CustoTotal       float64               `json:"custoTotal"`
 	PorTipoDefeito   []IndicadorPorDefeito `json:"porTipoDefeito"`
+	// Pequenos reparos, SEPARADOS de tudo acima: quantidadeOs/custoTotal/horas/MTBF/MTTR
+	// são do maquinário, e o reparo (que não tem máquina) soma só aqui. O Gestor vê o
+	// custo das máquinas e o dos reparos lado a lado e nunca misturados num número só.
+	// Só a tela da loja (total e setores) e os meses dela os preenchem; nas máquinas
+	// ficam zerados.
+	QuantidadeReparos int     `json:"quantidadeReparos"`
+	CustoReparos      float64 `json:"custoReparos"`
 }
 
 type IndicadorMensal struct {
@@ -86,8 +93,15 @@ type IndicadorMaquinaResumo struct {
 // existir em dois lugares -- o painel da loja tem que bater com a soma das
 // máquinas que a tela mostra.
 type linhaHistorico struct {
-	maquinaId        int64
-	abertaEm         pgtype.Timestamptz
+	maquinaId int64
+	abertaEm  pgtype.Timestamptz
+	// preventiva marca a OS aberta pelo job de preventiva: revisão programada, não
+	// falha. Fica FORA do MTBF e do MTTR (ver mtbf e resumir), mas continua nas horas,
+	// no custo e na contagem.
+	preventiva bool
+	// reparo marca o pequeno reparo (sem máquina): conta só em quantidadeReparos e
+	// custoReparos, nunca no custo das máquinas, nas horas, no MTBF nem no MTTR.
+	reparo           bool
 	tipoDefeito      string
 	mesEncerramento  string
 	horasParada      pgtype.Float8
@@ -118,6 +132,7 @@ func MontarIndicadoresMaquina(maquinaId int64, historico []repository.ListarHist
 		linhas = append(linhas, linhaHistorico{
 			maquinaId:        maquinaId,
 			abertaEm:         os.AbertaEm,
+			preventiva:       os.Origem == repository.OrigemSolicitacaoPreventiva,
 			tipoDefeito:      string(os.TipoDefeito),
 			mesEncerramento:  os.MesEncerramento,
 			horasParada:      os.HorasParada,
@@ -142,7 +157,12 @@ func MontarIndicadoresMaquina(maquinaId int64, historico []repository.ListarHist
 //
 // O histórico chega ordenado por aberta_em (ListarHistoricoOsDaLoja), e os
 // recortes preservam a ordem -- o MTBF de cada um depende dela.
-func MontarIndicadoresLoja(lojaId int64, maquinas []repository.ListarMaquinasRow, historico []repository.ListarHistoricoOsDaLojaRow) IndicadoresLoja {
+//
+// `reparos` são os pequenos reparos encerrados da loja (ListarHistoricoReparosDaLoja):
+// não têm máquina, então entram só no total da loja, no setor e no mês, nos campos
+// próprios quantidadeReparos/custoReparos -- nunca no custo das máquinas, que é o
+// custoTotal. Um setor que só teve reparo (sem máquina cadastrada) ganha card também.
+func MontarIndicadoresLoja(lojaId int64, maquinas []repository.ListarMaquinasRow, historico []repository.ListarHistoricoOsDaLojaRow, reparos []repository.ListarHistoricoReparosDaLojaRow) IndicadoresLoja {
 
 	linhas := make([]linhaHistorico, 0, len(historico))
 	porSetor := make(map[int64][]linhaHistorico)
@@ -151,6 +171,7 @@ func MontarIndicadoresLoja(lojaId int64, maquinas []repository.ListarMaquinasRow
 		linha := linhaHistorico{
 			maquinaId:        os.MaquinaID,
 			abertaEm:         os.AbertaEm,
+			preventiva:       os.Origem == repository.OrigemSolicitacaoPreventiva,
 			tipoDefeito:      string(os.TipoDefeito),
 			mesEncerramento:  os.MesEncerramento,
 			horasParada:      os.HorasParada,
@@ -161,6 +182,21 @@ func MontarIndicadoresLoja(lojaId int64, maquinas []repository.ListarMaquinasRow
 		linhas = append(linhas, linha)
 		porSetor[os.SetorID] = append(porSetor[os.SetorID], linha)
 		porMaquina[os.MaquinaID] = append(porMaquina[os.MaquinaID], linha)
+	}
+
+	// Reparos: total da loja e setor (e os meses deles), nunca a máquina.
+	nomeSetorDeReparo := make(map[int64]string)
+	for _, r := range reparos {
+		linha := linhaHistorico{
+			reparo:           true,
+			abertaEm:         r.AbertaEm,
+			mesEncerramento:  r.MesEncerramento,
+			custoHoraTecnico: r.CustoHoraTecnico,
+			custoManutencao:  r.CustoManutencao,
+		}
+		linhas = append(linhas, linha)
+		porSetor[r.SetorID] = append(porSetor[r.SetorID], linha)
+		nomeSetorDeReparo[r.SetorID] = r.SetorNome
 	}
 
 	indicadores := IndicadoresLoja{
@@ -194,6 +230,25 @@ func MontarIndicadoresLoja(lojaId int64, maquinas []repository.ListarMaquinasRow
 			})
 		}
 		indicadores.PorSetor[i].QuantidadeMaquinas++
+	}
+
+	// Setor que só teve reparo não aparece em `maquinas` (não tem máquina): sem este
+	// passo o custo dele ficaria no total da loja sem nenhum card que o explique.
+	setoresComReparo := make([]int64, 0, len(nomeSetorDeReparo))
+	for id := range nomeSetorDeReparo {
+		setoresComReparo = append(setoresComReparo, id)
+	}
+	slices.Sort(setoresComReparo)
+	for _, id := range setoresComReparo {
+		if _, existe := posicaoSetor[id]; existe {
+			continue
+		}
+		indicadores.PorSetor = append(indicadores.PorSetor, IndicadorSetor{
+			SetorId:           id,
+			SetorNome:         nomeSetorDeReparo[id],
+			ResumoIndicadores: resumir(porSetor[id]),
+			PorMes:            resumirPorMes(porSetor[id]),
+		})
 	}
 
 	return indicadores
@@ -233,18 +288,29 @@ func resumir(historico []linhaHistorico) ResumoIndicadores {
 
 	horasPorDefeito := make(map[string]float64, len(tiposDefeito))
 
-	var horasParadaTotal, custoTotal, somaTrabalhadas float64
-	var comHorasTrabalhadas int
+	var horasParadaTotal, custoTotal, somaTrabalhadas, custoReparos float64
+	var comHorasTrabalhadas, quantidadeReparos int
+	// Só o maquinário alimenta os cards de falha e de custo das máquinas; o reparo
+	// (sem máquina) fica à parte, nos campos próprios.
+	var maquinario []linhaHistorico
 
 	for _, os := range historico {
+		if os.reparo {
+			quantidadeReparos++
+			custoReparos += zeroSeNulo(os.custoHoraTecnico) + zeroSeNulo(os.custoManutencao)
+			continue
+		}
+		maquinario = append(maquinario, os)
+
 		parada := zeroSeNulo(os.horasParada)
 		horasParadaTotal += parada
 		horasPorDefeito[os.tipoDefeito] += parada
 
 		// MTTR é a média do reparo, e OS sem horas trabalhadas não teve reparo
 		// medido -- entra como zero ela puxaria a média para baixo inventando
-		// um conserto instantâneo.
-		if os.horasTrabalhadas.Valid {
+		// um conserto instantâneo. Preventiva também fica de fora: revisão
+		// programada não é conserto, e uma revisão curta puxaria a média para baixo.
+		if os.horasTrabalhadas.Valid && !os.preventiva {
 			somaTrabalhadas += os.horasTrabalhadas.Float64
 			comHorasTrabalhadas++
 		}
@@ -253,11 +319,13 @@ func resumir(historico []linhaHistorico) ResumoIndicadores {
 	}
 
 	resumo := ResumoIndicadores{
-		QuantidadeOs:     len(historico),
-		HorasParadaTotal: arredondar(horasParadaTotal),
-		CustoTotal:       arredondar(custoTotal),
-		MtbfHoras:        mtbf(historico),
-		PorTipoDefeito:   make([]IndicadorPorDefeito, 0, len(tiposDefeito)),
+		QuantidadeOs:      len(maquinario),
+		HorasParadaTotal:  arredondar(horasParadaTotal),
+		CustoTotal:        arredondar(custoTotal),
+		MtbfHoras:         mtbf(maquinario),
+		PorTipoDefeito:    make([]IndicadorPorDefeito, 0, len(tiposDefeito)),
+		QuantidadeReparos: quantidadeReparos,
+		CustoReparos:      arredondar(custoReparos),
 	}
 
 	if comHorasTrabalhadas > 0 {
@@ -277,7 +345,8 @@ func resumir(historico []linhaHistorico) ResumoIndicadores {
 	return resumo
 }
 
-// mtbf é a média do intervalo entre aberturas consecutivas, em horas -- o tempo
+// mtbf é a média do intervalo entre aberturas de FALHA consecutivas (a OS de
+// preventiva fica de fora), em horas -- o tempo
 // que a máquina costuma passar rodando entre uma OS e a próxima. Com menos de
 // duas OS não há intervalo nenhum, e zero é o que o card exibe -- o que, no
 // recorte de um mês, é o caso comum: só conta o intervalo entre OS do mesmo mês.
@@ -297,6 +366,11 @@ func mtbf(historico []linhaHistorico) float64 {
 	var soma float64
 	var intervalos int
 	for _, os := range historico {
+		// Preventiva não é falha: contá-la como abertura encolheria o MTBF a cada
+		// revisão, sem a máquina quebrar mais. Não entra nem como ponta do intervalo.
+		if os.preventiva {
+			continue
+		}
 		if anterior, ok := ultimaAbertura[os.maquinaId]; ok {
 			soma += os.abertaEm.Time.Sub(anterior.Time).Hours()
 			intervalos++

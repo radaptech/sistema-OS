@@ -146,6 +146,60 @@ func (q *Queries) AtualizarCusto(ctx context.Context, arg AtualizarCustoParams) 
 	return i, err
 }
 
+const contarOrdensMaquinarioEncerradasDaLoja = `-- name: ContarOrdensMaquinarioEncerradasDaLoja :one
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN maquina m          ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+JOIN setor st           ON st.tenant_id = m.tenant_id AND st.id = m.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND st.loja_id = $2::bigint
+  AND m.ativa
+  AND ($3::bigint IS NULL OR m.setor_id = $3)
+  AND ($4::bigint IS NULL OR m.id = $4)
+  AND (
+    $5::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $5
+  )
+  AND (
+    $6::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $6
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+`
+
+type ContarOrdensMaquinarioEncerradasDaLojaParams struct {
+	TenantID        int64
+	LojaID          int64
+	SetorID         *int64
+	MaquinaID       *int64
+	Mes             *string
+	EscopoUsuarioID *int64
+}
+
+// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+func (q *Queries) ContarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ContarOrdensMaquinarioEncerradasDaLojaParams) (int64, error) {
+	row := q.db.QueryRow(ctx, contarOrdensMaquinarioEncerradasDaLoja,
+		arg.TenantID,
+		arg.LojaID,
+		arg.SetorID,
+		arg.MaquinaID,
+		arg.Mes,
+		arg.EscopoUsuarioID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const contarOrdensServico = `-- name: ContarOrdensServico :one
 SELECT count(*)
 FROM ordem_servico os
@@ -179,15 +233,40 @@ WHERE os.tenant_id = $1
     $9::text IS NULL
     OR s.descricao ILIKE '%' || $9 || '%'
     OR m.nome ILIKE '%' || $9 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $9 || '%'
     OR s.item_descricao ILIKE '%' || $9 || '%'
   )
+  -- Filtros avançados do Painel do Gestor (ModalFiltrosOS), que antes eram
+  -- aplicados no navegador sobre a lista inteira. ` + "`" + `maquina` + "`" + ` é o espelho de
+  -- combinaBuscaAlvo: nome OU patrimônio (ou o item digitado, no reparo) --
+  -- mais estreito que ` + "`" + `busca` + "`" + `, que também olha a descrição.
   AND (
-    $10::bigint IS NULL
+    $10::text IS NULL
+    OR m.nome ILIKE '%' || $10 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $10 || '%'
+    OR s.item_descricao ILIKE '%' || $10 || '%'
+  )
+  -- Período pela data de ABERTURA da OS, no dia de São Paulo (mesmo fuso do mês
+  -- dos indicadores): a OS aberta às 22h de 31/08 é de agosto para o Gestor.
+  AND ($11::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= $11)
+  AND ($12::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= $12)
+  -- Custo TOTAL já lançado (hora técnica + manutenção). OS sem custo lançado não
+  -- combina com filtro de valor, igual ao que a tela fazia.
+  AND (
+    $13::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= $13)
+  )
+  AND (
+    $14::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= $14)
+  )
+  AND (
+    $15::bigint IS NULL
     OR EXISTS (
       SELECT 1
       FROM usuario_escopo ue
       LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
-      WHERE ue.usuario_id = $10
+      WHERE ue.usuario_id = $15
         AND ue.loja_id = sc.loja_id
         AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
     )
@@ -204,6 +283,11 @@ type ContarOrdensServicoParams struct {
 	SetorID         *int64
 	TecnicoID       *int64
 	Busca           *string
+	Maquina         *string
+	DataInicio      pgtype.Date
+	DataFim         pgtype.Date
+	ValorMinimo     *float64
+	ValorMaximo     *float64
 	EscopoUsuarioID *int64
 }
 
@@ -222,6 +306,63 @@ func (q *Queries) ContarOrdensServico(ctx context.Context, arg ContarOrdensServi
 		arg.SetorID,
 		arg.TecnicoID,
 		arg.Busca,
+		arg.Maquina,
+		arg.DataInicio,
+		arg.DataFim,
+		arg.ValorMinimo,
+		arg.ValorMaximo,
+		arg.EscopoUsuarioID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const contarReparosEncerradosDaLoja = `-- name: ContarReparosEncerradosDaLoja :one
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND s.maquina_id IS NULL
+  AND st.loja_id = $2::bigint
+  AND ($3::bigint IS NULL OR s.setor_id = $3)
+  -- Mês de ENCERRAMENTO em São Paulo (YYYY-MM): o mesmo que o gráfico do painel usa
+  -- (mes_encerramento de ListarHistoricoReparosDaLoja), não a abertura da OS --
+  -- senão a lista e a barra do mês discordariam.
+  AND (
+    $4::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $4
+  )
+  AND (
+    $5::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $5
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+`
+
+type ContarReparosEncerradosDaLojaParams struct {
+	TenantID        int64
+	LojaID          int64
+	SetorID         *int64
+	Mes             *string
+	EscopoUsuarioID *int64
+}
+
+// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+func (q *Queries) ContarReparosEncerradosDaLoja(ctx context.Context, arg ContarReparosEncerradosDaLojaParams) (int64, error) {
+	row := q.db.QueryRow(ctx, contarReparosEncerradosDaLoja,
+		arg.TenantID,
+		arg.LojaID,
+		arg.SetorID,
+		arg.Mes,
 		arg.EscopoUsuarioID,
 	)
 	var count int64
@@ -631,6 +772,7 @@ SELECT
     m.id AS maquina_id,
     m.setor_id,
     os.aberta_em,
+    s.origem,
     e.tipo_defeito,
     to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
     h.horas_parada,
@@ -671,6 +813,7 @@ type ListarHistoricoOsDaLojaRow struct {
 	MaquinaID        int64
 	SetorID          int64
 	AbertaEm         pgtype.Timestamptz
+	Origem           OrigemSolicitacao
 	TipoDefeito      TipoDefeito
 	MesEncerramento  string
 	HorasParada      pgtype.Float8
@@ -712,6 +855,7 @@ func (q *Queries) ListarHistoricoOsDaLoja(ctx context.Context, arg ListarHistori
 			&i.MaquinaID,
 			&i.SetorID,
 			&i.AbertaEm,
+			&i.Origem,
 			&i.TipoDefeito,
 			&i.MesEncerramento,
 			&i.HorasParada,
@@ -732,6 +876,7 @@ func (q *Queries) ListarHistoricoOsDaLoja(ctx context.Context, arg ListarHistori
 const listarHistoricoOsDaMaquina = `-- name: ListarHistoricoOsDaMaquina :many
 SELECT
     os.aberta_em,
+    s.origem,
     e.tipo_defeito,
     to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
     h.horas_parada,
@@ -755,6 +900,7 @@ type ListarHistoricoOsDaMaquinaParams struct {
 
 type ListarHistoricoOsDaMaquinaRow struct {
 	AbertaEm         pgtype.Timestamptz
+	Origem           OrigemSolicitacao
 	TipoDefeito      TipoDefeito
 	MesEncerramento  string
 	HorasParada      pgtype.Float8
@@ -794,6 +940,11 @@ type ListarHistoricoOsDaMaquinaRow struct {
 // `vencida` em preventiva.sql: uma OS encerrada às 22h de 31/08 é agosto pro
 // Gestor e setembro pro UTC. Formato YYYY-MM porque ordena como texto -- o
 // 'MM/YYYY' do contrato é montado na hora de responder.
+// origem: MTBF e MTTR medem FALHA e conserto, e a OS de preventiva é revisão
+// programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
+// (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
+// o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
+// resumir/mtbf (model/indicadorMaquina.go). Custo e horas continuam contando.
 // Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
 // ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
 func (q *Queries) ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHistoricoOsDaMaquinaParams) ([]ListarHistoricoOsDaMaquinaRow, error) {
@@ -807,10 +958,224 @@ func (q *Queries) ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHist
 		var i ListarHistoricoOsDaMaquinaRow
 		if err := rows.Scan(
 			&i.AbertaEm,
+			&i.Origem,
 			&i.TipoDefeito,
 			&i.MesEncerramento,
 			&i.HorasParada,
 			&i.HorasTrabalhadas,
+			&i.CustoHoraTecnico,
+			&i.CustoManutencao,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarHistoricoReparosDaLoja = `-- name: ListarHistoricoReparosDaLoja :many
+SELECT
+    s.setor_id,
+    st.nome AS setor_nome,
+    os.aberta_em,
+    to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND s.maquina_id IS NULL
+  AND st.loja_id = $2::bigint
+  AND (
+    $3::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $3
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+ORDER BY os.aberta_em
+`
+
+type ListarHistoricoReparosDaLojaParams struct {
+	TenantID        int64
+	LojaID          int64
+	EscopoUsuarioID *int64
+}
+
+type ListarHistoricoReparosDaLojaRow struct {
+	SetorID          int64
+	SetorNome        string
+	AbertaEm         pgtype.Timestamptz
+	MesEncerramento  string
+	CustoHoraTecnico pgtype.Float8
+	CustoManutencao  pgtype.Float8
+}
+
+// Os PEQUENOS REPAROS encerrados da loja, para o custo separado do Painel de
+// Indicadores (GET /indicadores/lojas/:id). Reparo não tem máquina
+// (solicitacao_os.maquina_id é NULL: o Solicitante digita o item), então nunca
+// entra em ListarHistoricoOsDaLoja nem nos indicadores por máquina -- e, de
+// propósito, também não nos de falha (MTBF/MTTR) nem nas horas: só no custo e
+// na contagem, em campos próprios, para o Gestor ver o custo do maquinário e o
+// dos reparos SEPARADOS e nunca somados num número só.
+//
+// O reparo é identificado pela SOLICITAÇÃO (maquina_id IS NULL), não por
+// ordem_servico.tipo: o Técnico pode promover a OS a 'terceiros' no meio, e um
+// reparo terceirizado continua sendo reparo.
+//
+// O setor é o da SOLICITAÇÃO (s.setor_id, NOT NULL): é a única âncora que o
+// reparo tem. Escopo no WHERE, mesmo EXISTS das outras queries de histórico.
+// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+func (q *Queries) ListarHistoricoReparosDaLoja(ctx context.Context, arg ListarHistoricoReparosDaLojaParams) ([]ListarHistoricoReparosDaLojaRow, error) {
+	rows, err := q.db.Query(ctx, listarHistoricoReparosDaLoja, arg.TenantID, arg.LojaID, arg.EscopoUsuarioID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarHistoricoReparosDaLojaRow
+	for rows.Next() {
+		var i ListarHistoricoReparosDaLojaRow
+		if err := rows.Scan(
+			&i.SetorID,
+			&i.SetorNome,
+			&i.AbertaEm,
+			&i.MesEncerramento,
+			&i.CustoHoraTecnico,
+			&i.CustoManutencao,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarOrdensMaquinarioEncerradasDaLoja = `-- name: ListarOrdensMaquinarioEncerradasDaLoja :many
+SELECT
+    os.id,
+    m.id AS maquina_id,
+    m.nome AS maquina_nome,
+    m.numero_patrimonio AS maquina_codigo,
+    s.origem,
+    s.descricao,
+    m.setor_id,
+    st.nome AS setor_nome,
+    tec.nome AS tecnico_nome,
+    e.data_fim,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN maquina m          ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+JOIN setor st           ON st.tenant_id = m.tenant_id AND st.id = m.setor_id
+JOIN usuario tec        ON tec.tenant_id = os.tenant_id AND tec.id = os.tecnico_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND st.loja_id = $2::bigint
+  AND m.ativa
+  AND ($3::bigint IS NULL OR m.setor_id = $3)
+  AND ($4::bigint IS NULL OR m.id = $4)
+  AND (
+    $5::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $5
+  )
+  AND (
+    $6::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $6
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+ORDER BY e.data_fim DESC, os.id DESC
+LIMIT $8 OFFSET $7
+`
+
+type ListarOrdensMaquinarioEncerradasDaLojaParams struct {
+	TenantID        int64
+	LojaID          int64
+	SetorID         *int64
+	MaquinaID       *int64
+	Mes             *string
+	EscopoUsuarioID *int64
+	Deslocamento    int32
+	Limite          int32
+}
+
+type ListarOrdensMaquinarioEncerradasDaLojaRow struct {
+	ID               int64
+	MaquinaID        int64
+	MaquinaNome      string
+	MaquinaCodigo    string
+	Origem           OrigemSolicitacao
+	Descricao        string
+	SetorID          int64
+	SetorNome        string
+	TecnicoNome      string
+	DataFim          pgtype.Timestamptz
+	CustoHoraTecnico pgtype.Float8
+	CustoManutencao  pgtype.Float8
+}
+
+// A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
+// máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
+// ListarReparosEncerradosDaLoja, que cobre o outro grupo.
+//
+// ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
+// MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
+// desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
+// transferida leva o histórico), escopo no WHERE. Entram TODAS as OS de máquina, inclusive as
+// de preventiva (origem) e as terceirizadas -- o custo delas está no card, e a lista explica.
+// Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
+// Mais novo primeiro, paginada.
+// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+func (q *Queries) ListarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ListarOrdensMaquinarioEncerradasDaLojaParams) ([]ListarOrdensMaquinarioEncerradasDaLojaRow, error) {
+	rows, err := q.db.Query(ctx, listarOrdensMaquinarioEncerradasDaLoja,
+		arg.TenantID,
+		arg.LojaID,
+		arg.SetorID,
+		arg.MaquinaID,
+		arg.Mes,
+		arg.EscopoUsuarioID,
+		arg.Deslocamento,
+		arg.Limite,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarOrdensMaquinarioEncerradasDaLojaRow
+	for rows.Next() {
+		var i ListarOrdensMaquinarioEncerradasDaLojaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MaquinaID,
+			&i.MaquinaNome,
+			&i.MaquinaCodigo,
+			&i.Origem,
+			&i.Descricao,
+			&i.SetorID,
+			&i.SetorNome,
+			&i.TecnicoNome,
+			&i.DataFim,
 			&i.CustoHoraTecnico,
 			&i.CustoManutencao,
 		); err != nil {
@@ -832,6 +1197,9 @@ SELECT
     s.maquina_id,
     s.item_descricao,
     s.setor_id,
+    -- De onde veio a OS (solicitante, direta, preventiva): a tela marca a de
+    -- preventiva em âmbar. Antes só dava para deduzir pela ausência de solicitante.
+    s.origem,
     m.nome AS maquina_nome,
     m.numero_patrimonio AS maquina_codigo,
     sc.nome AS setor_nome,
@@ -907,21 +1275,46 @@ WHERE os.tenant_id = $1
     $10::text IS NULL
     OR s.descricao ILIKE '%' || $10 || '%'
     OR m.nome ILIKE '%' || $10 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $10 || '%'
     OR s.item_descricao ILIKE '%' || $10 || '%'
   )
+  -- Filtros avançados do Painel do Gestor (ModalFiltrosOS), que antes eram
+  -- aplicados no navegador sobre a lista inteira. ` + "`" + `maquina` + "`" + ` é o espelho de
+  -- combinaBuscaAlvo: nome OU patrimônio (ou o item digitado, no reparo) --
+  -- mais estreito que ` + "`" + `busca` + "`" + `, que também olha a descrição.
   AND (
-    $11::bigint IS NULL
+    $11::text IS NULL
+    OR m.nome ILIKE '%' || $11 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $11 || '%'
+    OR s.item_descricao ILIKE '%' || $11 || '%'
+  )
+  -- Período pela data de ABERTURA da OS, no dia de São Paulo (mesmo fuso do mês
+  -- dos indicadores): a OS aberta às 22h de 31/08 é de agosto para o Gestor.
+  AND ($12::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= $12)
+  AND ($13::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= $13)
+  -- Custo TOTAL já lançado (hora técnica + manutenção). OS sem custo lançado não
+  -- combina com filtro de valor, igual ao que a tela fazia.
+  AND (
+    $14::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= $14)
+  )
+  AND (
+    $15::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= $15)
+  )
+  AND (
+    $16::bigint IS NULL
     OR EXISTS (
       SELECT 1
       FROM usuario_escopo ue
       LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
-      WHERE ue.usuario_id = $11
+      WHERE ue.usuario_id = $16
         AND ue.loja_id = sc.loja_id
         AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
     )
   )
 ORDER BY os.aberta_em DESC, os.id DESC
-LIMIT $13 OFFSET $12
+LIMIT $18 OFFSET $17
 `
 
 type ListarOrdensServicoParams struct {
@@ -935,6 +1328,11 @@ type ListarOrdensServicoParams struct {
 	SetorID         *int64
 	TecnicoID       *int64
 	Busca           *string
+	Maquina         *string
+	DataInicio      pgtype.Date
+	DataFim         pgtype.Date
+	ValorMinimo     *float64
+	ValorMaximo     *float64
 	EscopoUsuarioID *int64
 	Deslocamento    *int32
 	Limite          *int32
@@ -960,6 +1358,7 @@ type ListarOrdensServicoRow struct {
 	MaquinaID                    *int64
 	ItemDescricao                *string
 	SetorID                      int64
+	Origem                       OrigemSolicitacao
 	MaquinaNome                  *string
 	MaquinaCodigo                *string
 	SetorNome                    string
@@ -1074,6 +1473,11 @@ func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServi
 		arg.SetorID,
 		arg.TecnicoID,
 		arg.Busca,
+		arg.Maquina,
+		arg.DataInicio,
+		arg.DataFim,
+		arg.ValorMinimo,
+		arg.ValorMaximo,
 		arg.EscopoUsuarioID,
 		arg.Deslocamento,
 		arg.Limite,
@@ -1105,6 +1509,7 @@ func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServi
 			&i.MaquinaID,
 			&i.ItemDescricao,
 			&i.SetorID,
+			&i.Origem,
 			&i.MaquinaNome,
 			&i.MaquinaCodigo,
 			&i.SetorNome,
@@ -1131,6 +1536,120 @@ func (q *Queries) ListarOrdensServico(ctx context.Context, arg ListarOrdensServi
 			&i.LancadoEm,
 			&i.CustoRevisadoEm,
 			&i.LancadoPorNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarReparosEncerradosDaLoja = `-- name: ListarReparosEncerradosDaLoja :many
+SELECT
+    os.id,
+    s.item_descricao,
+    s.origem,
+    s.descricao,
+    s.setor_id,
+    st.nome AS setor_nome,
+    tec.nome AS tecnico_nome,
+    e.data_fim,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN usuario tec        ON tec.tenant_id = os.tenant_id AND tec.id = os.tecnico_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND s.maquina_id IS NULL
+  AND st.loja_id = $2::bigint
+  AND ($3::bigint IS NULL OR s.setor_id = $3)
+  -- Mês de ENCERRAMENTO em São Paulo (YYYY-MM): o mesmo que o gráfico do painel usa
+  -- (mes_encerramento de ListarHistoricoReparosDaLoja), não a abertura da OS --
+  -- senão a lista e a barra do mês discordariam.
+  AND (
+    $4::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $4
+  )
+  AND (
+    $5::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $5
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+ORDER BY e.data_fim DESC, os.id DESC
+LIMIT $7 OFFSET $6
+`
+
+type ListarReparosEncerradosDaLojaParams struct {
+	TenantID        int64
+	LojaID          int64
+	SetorID         *int64
+	Mes             *string
+	EscopoUsuarioID *int64
+	Deslocamento    int32
+	Limite          int32
+}
+
+type ListarReparosEncerradosDaLojaRow struct {
+	ID               int64
+	ItemDescricao    *string
+	Origem           OrigemSolicitacao
+	Descricao        string
+	SetorID          int64
+	SetorNome        string
+	TecnicoNome      string
+	DataFim          pgtype.Timestamptz
+	CustoHoraTecnico pgtype.Float8
+	CustoManutencao  pgtype.Float8
+}
+
+// A LISTA por trás do card "Pequenos Reparos" do Painel de Indicadores: cada reparo
+// encerrado que compõe quantidadeReparos/custoReparos. ⚠️ O WHERE tem que ser o MESMO de
+// ListarHistoricoReparosDaLoja (e de ContarReparosEncerradosDaLoja logo abaixo) -- a soma
+// dos itens é o número do card, e divergir faz a lista mentir. Mesma definição de
+// reparo: solicitação sem máquina (um reparo terceirizado pelo Técnico continua reparo),
+// setor da solicitação, escopo no WHERE. Filtros opcionais: o setor e o mês que a tela
+// está mostrando. Mais novo primeiro, paginada.
+// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+func (q *Queries) ListarReparosEncerradosDaLoja(ctx context.Context, arg ListarReparosEncerradosDaLojaParams) ([]ListarReparosEncerradosDaLojaRow, error) {
+	rows, err := q.db.Query(ctx, listarReparosEncerradosDaLoja,
+		arg.TenantID,
+		arg.LojaID,
+		arg.SetorID,
+		arg.Mes,
+		arg.EscopoUsuarioID,
+		arg.Deslocamento,
+		arg.Limite,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarReparosEncerradosDaLojaRow
+	for rows.Next() {
+		var i ListarReparosEncerradosDaLojaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemDescricao,
+			&i.Origem,
+			&i.Descricao,
+			&i.SetorID,
+			&i.SetorNome,
+			&i.TecnicoNome,
+			&i.DataFim,
+			&i.CustoHoraTecnico,
+			&i.CustoManutencao,
 		); err != nil {
 			return nil, err
 		}
@@ -1411,6 +1930,154 @@ func (q *Queries) PausarOrdemServico(ctx context.Context, arg PausarOrdemServico
 		&i.Urgencia,
 	)
 	return i, err
+}
+
+const resumoOrdensServicoPorSetor = `-- name: ResumoOrdensServicoPorSetor :many
+SELECT
+    sc.loja_id,
+    l.nome AS loja_nome,
+    s.setor_id,
+    sc.nome AS setor_nome,
+    count(*)::bigint AS quantidade,
+    (count(*) FILTER (WHERE os.afeta_producao))::bigint AS afetam_producao
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+JOIN loja l            ON l.tenant_id = sc.tenant_id AND l.id = sc.loja_id
+LEFT JOIN maquina m    ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN os_custo c   ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND (
+    $2::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = $2
+  )
+  AND (
+    $3::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = $3
+  )
+  AND ($4::text[] IS NULL OR os.status = ANY($4::text[]::status_os[]))
+  AND ($5::tipo_os IS NULL OR os.tipo = $5)
+  AND ($6::bigint IS NULL OR sc.loja_id = $6)
+  AND ($7::bigint IS NULL OR s.setor_id = $7)
+  AND ($8::bigint IS NULL OR os.tecnico_id = $8)
+  AND (
+    $9::text IS NULL
+    OR s.descricao ILIKE '%' || $9 || '%'
+    OR m.nome ILIKE '%' || $9 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $9 || '%'
+    OR s.item_descricao ILIKE '%' || $9 || '%'
+  )
+  AND (
+    $10::text IS NULL
+    OR m.nome ILIKE '%' || $10 || '%'
+    OR m.numero_patrimonio ILIKE '%' || $10 || '%'
+    OR s.item_descricao ILIKE '%' || $10 || '%'
+  )
+  AND ($11::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= $11)
+  AND ($12::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= $12)
+  AND (
+    $13::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= $13)
+  )
+  AND (
+    $14::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= $14)
+  )
+  AND (
+    $15::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $15
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+GROUP BY sc.loja_id, l.nome, s.setor_id, sc.nome
+ORDER BY l.nome, sc.nome
+`
+
+type ResumoOrdensServicoPorSetorParams struct {
+	TenantID        int64
+	Finalizada      *bool
+	Revisado        *bool
+	Status          []string
+	Tipo            *TipoOs
+	LojaID          *int64
+	SetorID         *int64
+	TecnicoID       *int64
+	Busca           *string
+	Maquina         *string
+	DataInicio      pgtype.Date
+	DataFim         pgtype.Date
+	ValorMinimo     *float64
+	ValorMaximo     *float64
+	EscopoUsuarioID *int64
+}
+
+type ResumoOrdensServicoPorSetorRow struct {
+	LojaID         int64
+	LojaNome       string
+	SetorID        int64
+	SetorNome      string
+	Quantidade     int64
+	AfetamProducao int64
+}
+
+// Quantas OS há em cada loja/setor para os MESMOS filtros da listagem -- os
+// cards de loja e setor da navegação do Painel do Gestor. Existe porque a
+// lista de OS Finalizadas é paginada no servidor: a tela deixou de ter a lista
+// inteira para contar.
+//
+// ⚠️ O WHERE tem que ser o MESMO de ListarOrdensServico/ContarOrdensServico --
+// filtro mudado lá e esquecido aqui faz o card dizer 40 e a lista mostrar 12.
+// Só os JOINs que o WHERE usa mais os nomes de loja e setor.
+//
+// `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
+// finalizadas não usam, mas a query serve às abas em andamento no dia em que
+// elas também paginarem.
+func (q *Queries) ResumoOrdensServicoPorSetor(ctx context.Context, arg ResumoOrdensServicoPorSetorParams) ([]ResumoOrdensServicoPorSetorRow, error) {
+	rows, err := q.db.Query(ctx, resumoOrdensServicoPorSetor,
+		arg.TenantID,
+		arg.Finalizada,
+		arg.Revisado,
+		arg.Status,
+		arg.Tipo,
+		arg.LojaID,
+		arg.SetorID,
+		arg.TecnicoID,
+		arg.Busca,
+		arg.Maquina,
+		arg.DataInicio,
+		arg.DataFim,
+		arg.ValorMinimo,
+		arg.ValorMaximo,
+		arg.EscopoUsuarioID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ResumoOrdensServicoPorSetorRow
+	for rows.Next() {
+		var i ResumoOrdensServicoPorSetorRow
+		if err := rows.Scan(
+			&i.LojaID,
+			&i.LojaNome,
+			&i.SetorID,
+			&i.SetorNome,
+			&i.Quantidade,
+			&i.AfetamProducao,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const retomarOrdemServico = `-- name: RetomarOrdemServico :one

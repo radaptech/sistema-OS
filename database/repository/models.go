@@ -396,6 +396,53 @@ func (ns NullTipoDefeito) Value() (driver.Value, error) {
 	return string(ns.TipoDefeito), nil
 }
 
+type TipoEventoOs string
+
+const (
+	TipoEventoOsAberta           TipoEventoOs = "aberta"
+	TipoEventoOsIniciada         TipoEventoOs = "iniciada"
+	TipoEventoOsPausada          TipoEventoOs = "pausada"
+	TipoEventoOsRetomada         TipoEventoOs = "retomada"
+	TipoEventoOsTerceiroAcionado TipoEventoOs = "terceiro_acionado"
+	TipoEventoOsEncerrada        TipoEventoOs = "encerrada"
+	TipoEventoOsCustoCorrigido   TipoEventoOs = "custo_corrigido"
+)
+
+func (e *TipoEventoOs) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TipoEventoOs(s)
+	case string:
+		*e = TipoEventoOs(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TipoEventoOs: %T", src)
+	}
+	return nil
+}
+
+type NullTipoEventoOs struct {
+	TipoEventoOs TipoEventoOs
+	Valid        bool // Valid is true if TipoEventoOs is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTipoEventoOs) Scan(value interface{}) error {
+	if value == nil {
+		ns.TipoEventoOs, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TipoEventoOs.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTipoEventoOs) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TipoEventoOs), nil
+}
+
 type TipoNotificacao string
 
 const (
@@ -655,6 +702,18 @@ type OsEncerramento struct {
 	CausaRaiz         string
 	Solucao           string
 	CriadoEm          pgtype.Timestamptz
+}
+
+type OsEvento struct {
+	ID             int64
+	TenantID       int64
+	OrdemServicoID int64
+	Tipo           TipoEventoOs
+	UsuarioID      *int64
+	StatusAnterior *StatusOs
+	StatusNovo     *StatusOs
+	Detalhes       []byte
+	OcorridoEm     pgtype.Timestamptz
 }
 
 type OsNotaFiscal struct {

@@ -9,8 +9,8 @@ import (
 	"github.com/radaptech/sistema-OSm--Back-end/internal/service"
 )
 
-// executarPreventivasVencidas abre uma Solicitação (não uma OS) para cada
-// preventiva cuja proxima_data já passou, e avança o ciclo de cada uma. Mesmo
+// executarPreventivasVencidas abre a Solicitação e a OS para cada preventiva
+// cuja proxima_data já passou, avança o ciclo de cada uma e avisa o técnico. Mesmo
 // papel do provisionar-admin e do backup-banco: subcomando de CLI fora da API
 // HTTP, chamado pelo Railway Cron.
 //
@@ -32,7 +32,17 @@ func executarPreventivasVencidas(args []string) {
 	}
 	defer pool.Close()
 
-	criadas, err := service.NewRepoPreventiva(pool).AbrirSolicitacoesDePreventivasVencidas(context.Background())
+	// Sem o Notificador o job abria a OS e o técnico nunca era avisado: este é um
+	// processo à parte da API, e o wiring de lá não vale aqui. Mesmo
+	// NotificacaoService (sininho + Web Push, se houver VAPID_*) da API.
+	preventivas := service.NewRepoPreventiva(pool)
+	preventivas.Notificador = service.NewNotificacaoDoAmbiente(pool)
+
+	criadas, err := preventivas.AbrirSolicitacoesDePreventivasVencidas(context.Background())
+
+	// O aviso é gravado em segundo plano (depois do commit de cada OS). O processo
+	// sai logo abaixo, e sair antes de eles terminarem perderia as notificações.
+	service.AguardarAvisos()
 
 	// O total sai antes do erro de propósito: falha em uma preventiva não
 	// impede as outras, então erro aqui é resultado parcial. Sem imprimir o

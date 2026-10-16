@@ -172,7 +172,7 @@ func TestIndicadoresLojaMtbfPorMaquina(t *testing.T) {
 		osDaLoja(2, 10, 5, "2026-01", f8(4), f8(3), f8(50)),
 		osDaLoja(1, 10, 10, "2026-01", f8(6), f8(5), f8(10)),
 		osDaLoja(2, 10, 15, "2026-01", nulo(), f8(3), nulo()),
-	})
+	}, nil)
 
 	if ind.MtbfHoras != 240 {
 		t.Errorf("mtbfHoras = %v, esperado 240 (10 dias entre OS da mesma máquina)", ind.MtbfHoras)
@@ -201,7 +201,7 @@ func TestIndicadoresLojaMaquinaSemHistorico(t *testing.T) {
 	}
 	ind := MontarIndicadoresLoja(7, maquinas, []repository.ListarHistoricoOsDaLojaRow{
 		osDaLoja(1, 10, 0, "2026-01", f8(2), f8(1), f8(100)),
-	})
+	}, nil)
 
 	if len(ind.PorSetor) != 2 || ind.PorSetor[1].SetorNome != "Açougue" || ind.PorSetor[1].CustoTotal != 0 {
 		t.Errorf("porSetor = %+v, esperado o Açougue zerado", ind.PorSetor)
@@ -211,5 +211,147 @@ func TestIndicadoresLojaMaquinaSemHistorico(t *testing.T) {
 	}
 	if len(ind.PorMaquina) != 2 || ind.PorMaquina[1].QuantidadeOs != 0 {
 		t.Errorf("porMaquina = %+v, esperado a máquina 3 zerada", ind.PorMaquina)
+	}
+}
+
+// osPreventiva é uma OS encerrada aberta pelo job de preventiva.
+func osPreventiva(dias int, mes string, trabalhadas, custo pgtype.Float8) repository.ListarHistoricoOsDaMaquinaRow {
+	linha := osEncerrada(dias, "Predial", mes, nulo(), trabalhadas, custo)
+	linha.Origem = repository.OrigemSolicitacaoPreventiva
+	return linha
+}
+
+// MTBF e MTTR medem FALHA e conserto; a revisão programada não é nenhum dos
+// dois. Contada, ela encolheria o MTBF a cada revisão (a máquina "falharia" mais
+// só porque recebe manutenção em dia) e puxaria o MTTR para baixo.
+//
+// Duas quebras com 60 dias entre elas e uma revisão no meio: o MTBF correto é 60
+// dias (1440h), não os 30 de quando a revisão entra como falha.
+func TestIndicadoresPreventivaNaoEntraNoMtbfNemNoMttr(t *testing.T) {
+
+	historico := []repository.ListarHistoricoOsDaMaquinaRow{
+		osEncerrada(0, "Corretiva", "2026-01", f8(4), f8(4), f8(100)),
+		osPreventiva(20, "2026-01", f8(1), f8(30)),
+		osEncerrada(60, "Corretiva", "2026-03", f8(6), f8(6), f8(200)),
+	}
+
+	ind := MontarIndicadoresMaquina(1, historico)
+
+	if ind.MtbfHoras != 1440 {
+		t.Errorf("mtbfHoras = %v, esperado 1440 (60 dias entre as duas quebras, a revisão fora)", ind.MtbfHoras)
+	}
+	// (4 + 6) / 2 = 5; com a revisão de 1h entrando seria 3.67.
+	if ind.MttrHoras != 5 {
+		t.Errorf("mttrHoras = %v, esperado 5 (a revisão fora do divisor)", ind.MttrHoras)
+	}
+	// O dinheiro gasto na revisão é real e continua no custo, e a OS continua
+	// contando: só MTBF e MTTR a ignoram.
+	if ind.CustoTotal != 330 {
+		t.Errorf("custoTotal = %v, esperado 330 (a revisão conta no custo)", ind.CustoTotal)
+	}
+	if ind.QuantidadeOs != 3 {
+		t.Errorf("quantidadeOs = %d, esperado 3", ind.QuantidadeOs)
+	}
+}
+
+// Só preventiva no histórico: sem falha não há MTBF nem MTTR, e o custo aparece.
+func TestIndicadoresSoPreventivaNaoTemMtbfNemMttr(t *testing.T) {
+
+	ind := MontarIndicadoresMaquina(1, []repository.ListarHistoricoOsDaMaquinaRow{
+		osPreventiva(0, "2026-01", f8(2), f8(40)),
+		osPreventiva(30, "2026-01", f8(2), f8(40)),
+	})
+
+	if ind.MtbfHoras != 0 || ind.MttrHoras != 0 {
+		t.Errorf("mtbf = %v, mttr = %v, esperado 0 e 0 (nenhuma falha)", ind.MtbfHoras, ind.MttrHoras)
+	}
+	if ind.CustoTotal != 80 || ind.QuantidadeOs != 2 {
+		t.Errorf("custo = %v em %d OS, esperado 80 em 2", ind.CustoTotal, ind.QuantidadeOs)
+	}
+}
+
+// O recorte por mês usa o mesmo cálculo: preventiva fora do MTBF/MTTR do mês
+// também, senão o card do mês clicado discordaria do total.
+func TestIndicadoresPreventivaForaDoMesTambem(t *testing.T) {
+
+	ind := MontarIndicadoresMaquina(1, []repository.ListarHistoricoOsDaMaquinaRow{
+		osEncerrada(0, "Corretiva", "2026-01", f8(4), f8(4), f8(100)),
+		osPreventiva(10, "2026-01", f8(1), f8(30)),
+		osEncerrada(20, "Corretiva", "2026-01", f8(6), f8(6), f8(200)),
+	})
+
+	jan := ind.PorMes[0]
+	if jan.MtbfHoras != 480 || jan.MttrHoras != 5 {
+		t.Errorf("janeiro: mtbf %v, mttr %v, esperado 480 (20 dias) e 5", jan.MtbfHoras, jan.MttrHoras)
+	}
+}
+
+// reparoDaLoja é um pequeno reparo encerrado (sem máquina, só o setor).
+func reparoDaLoja(setor int64, nomeSetor string, dias int, mes string, custo pgtype.Float8) repository.ListarHistoricoReparosDaLojaRow {
+	return repository.ListarHistoricoReparosDaLojaRow{
+		SetorID:         setor,
+		SetorNome:       nomeSetor,
+		AbertaEm:        ts(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, dias)),
+		MesEncerramento: mes,
+		CustoManutencao: custo,
+	}
+}
+
+// O custo dos pequenos reparos aparece SEPARADO do custo das máquinas: nunca somado
+// ao custoTotal e fora de MTBF, MTTR e horas. Reparo não tem máquina, então também
+// nunca chega num card de máquina.
+func TestIndicadoresLojaReparosSaemSeparados(t *testing.T) {
+
+	maquinas := []repository.ListarMaquinasRow{{ID: 1, SetorID: 10, SetorNome: "Padaria"}}
+	ind := MontarIndicadoresLoja(7, maquinas, []repository.ListarHistoricoOsDaLojaRow{
+		osDaLoja(1, 10, 0, "2026-01", f8(2), f8(1), f8(100)),
+		osDaLoja(1, 10, 10, "2026-01", f8(4), f8(3), f8(50)),
+	}, []repository.ListarHistoricoReparosDaLojaRow{
+		reparoDaLoja(10, "Padaria", 3, "2026-01", f8(30)),
+		reparoDaLoja(10, "Padaria", 4, "2026-02", f8(20)),
+	})
+
+	// Máquinas: tudo como se os reparos não existissem.
+	if ind.CustoTotal != 150 || ind.QuantidadeOs != 2 || ind.HorasParadaTotal != 6 || ind.MttrHoras != 2 || ind.MtbfHoras != 240 {
+		t.Errorf("maquinário contaminado pelos reparos: %+v", ind.ResumoIndicadores)
+	}
+	// Reparos: em campos próprios.
+	if ind.QuantidadeReparos != 2 || ind.CustoReparos != 50 {
+		t.Errorf("reparos = %d em R$ %v, esperado 2 em R$ 50", ind.QuantidadeReparos, ind.CustoReparos)
+	}
+	// O setor leva os dois, separados; a máquina, nenhum reparo.
+	if ind.PorSetor[0].CustoTotal != 150 || ind.PorSetor[0].CustoReparos != 50 || ind.PorSetor[0].QuantidadeReparos != 2 {
+		t.Errorf("setor = %+v", ind.PorSetor[0].ResumoIndicadores)
+	}
+	if ind.PorMaquina[0].CustoReparos != 0 || ind.PorMaquina[0].QuantidadeReparos != 0 || ind.PorMaquina[0].CustoTotal != 150 {
+		t.Errorf("máquina recebeu reparo: %+v", ind.PorMaquina[0].ResumoIndicadores)
+	}
+	// Mês: janeiro tem máquinas e um reparo; fevereiro SÓ reparo (o mês existe por causa dele).
+	if len(ind.PorMes) != 2 {
+		t.Fatalf("porMes = %+v, esperado janeiro e fevereiro", ind.PorMes)
+	}
+	jan, fev := ind.PorMes[0], ind.PorMes[1]
+	if jan.CustoTotal != 150 || jan.CustoReparos != 30 || jan.QuantidadeReparos != 1 {
+		t.Errorf("janeiro = %+v", jan.ResumoIndicadores)
+	}
+	if fev.Mes != "02/2026" || fev.CustoTotal != 0 || fev.QuantidadeOs != 0 || fev.CustoReparos != 20 {
+		t.Errorf("fevereiro = %+v, esperado só reparo (20), maquinário zerado", fev.ResumoIndicadores)
+	}
+}
+
+// Setor que só teve reparo (sem máquina cadastrada) não aparece em `maquinas`, mas o
+// custo dele está no total da loja: precisa de um card que o explique.
+func TestIndicadoresLojaSetorSoComReparo(t *testing.T) {
+
+	maquinas := []repository.ListarMaquinasRow{{ID: 1, SetorID: 10, SetorNome: "Padaria"}}
+	ind := MontarIndicadoresLoja(7, maquinas, nil, []repository.ListarHistoricoReparosDaLojaRow{
+		reparoDaLoja(20, "Limpeza", 0, "2026-01", f8(80)),
+	})
+
+	if ind.CustoReparos != 80 {
+		t.Errorf("custoReparos da loja = %v, esperado 80", ind.CustoReparos)
+	}
+	if len(ind.PorSetor) != 2 || ind.PorSetor[1].SetorNome != "Limpeza" || ind.PorSetor[1].CustoReparos != 80 || ind.PorSetor[1].QuantidadeMaquinas != 0 {
+		t.Errorf("porSetor = %+v, esperado o setor Limpeza com os 80 e 0 máquinas", ind.PorSetor)
 	}
 }

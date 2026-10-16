@@ -111,11 +111,15 @@ type Querier interface {
 	ContarNotificacoesDoUsuario(ctx context.Context, arg ContarNotificacoesDoUsuarioParams) (int64, error)
 	// O número do sininho e do badge do ícone (idx_notificacao_nao_lida).
 	ContarNotificacoesNaoLidas(ctx context.Context, arg ContarNotificacoesNaoLidasParams) (int64, error)
+	// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+	ContarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ContarOrdensMaquinarioEncerradasDaLojaParams) (int64, error)
 	// O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
 	// tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
 	// aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
 	// solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
 	ContarOrdensServico(ctx context.Context, arg ContarOrdensServicoParams) (int64, error)
+	// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+	ContarReparosEncerradosDaLoja(ctx context.Context, arg ContarReparosEncerradosDaLojaParams) (int64, error)
 	// Loja não é desativada por baixo dos setores: o escopo de acesso aponta pro
 	// setor (usuario_escopo_setor), então setor ativo pendurado em loja inativa
 	// continua dando acesso a uma loja que sumiu das listagens. Quem chama decide
@@ -191,6 +195,17 @@ type Querier interface {
 	// transação -- não há UPDATE de escopo individual aqui de propósito.
 	CriarEscopo(ctx context.Context, arg CriarEscopoParams) (UsuarioEscopo, error)
 	CriarEscopoSetor(ctx context.Context, arg CriarEscopoSetorParams) error
+	// ==========================================================================
+	// Linha do tempo da OS (migration 000021): quem fez cada passo e quando.
+	// Escrita sempre DENTRO da transação do passo que registra -- evento e
+	// mudança de estado commitam juntos ou nenhum dos dois.
+	// ==========================================================================
+	// usuario_id é narg só pela OS de preventiva (ninguém abriu, foi o
+	// calendário); ck_os_evento_usuario recusa NULL em qualquer outro tipo.
+	// status_* são nulos nos eventos que não mudam o estado (terceiro_acionado,
+	// custo_corrigido). detalhes é o JSON do passo (motivo da pausa, estado do
+	// custo...), sempre objeto -- ver ck_os_evento_detalhes.
+	CriarEventoOS(ctx context.Context, arg CriarEventoOSParams) error
 	// Um INSERT por marcador (hoje só existe 'Afeta Produção' -- marcador_impacto
 	// é ENUM de um valor só, associativa porque o contrato já troca uma lista).
 	// Chamada em loop pelo service, na mesma transação da solicitação: sem
@@ -617,6 +632,18 @@ type Querier interface {
 	// não manda parâmetro nenhum e a tela do Administrador pagina no cliente
 	// (front-end/CLAUDE.md item 12).
 	ListarEmpresasTerceirizadas(ctx context.Context, tenantID int64) ([]EmpresaTerceirizada, error)
+	// A linha do tempo de UMA OS, do mais antigo para o mais novo (é assim que a
+	// tela conta a história). `id` desempata eventos no mesmo instante: o now()
+	// de uma transação é um só, e aberta+... nunca nascem juntos, mas uma
+	// correção e outra em sequência rápida sim.
+	//
+	// Nome do autor por JOIN (usuario.nome de hoje): quem renomear o usuário
+	// renomeia a história, e isso é o esperado -- é a pessoa, não um carimbo.
+	// Perfil vem junto para a tela dizer "Administrador" ao lado do nome.
+	//
+	// Sem escopo aqui: quem chama (OrdemServicoService.ListarHistorico) já provou
+	// que a OS está ao alcance do ator.
+	ListarEventosDaOS(ctx context.Context, arg ListarEventosDaOSParams) ([]ListarEventosDaOSRow, error)
 	// GET /indicadores/lojas/:id -- a mesma matéria-prima de
 	// ListarHistoricoOsDaMaquina, só que de todas as máquinas da loja que quem
 	// chama alcança. O Painel de Indicadores abre a loja com o total dela, um card
@@ -669,6 +696,11 @@ type Querier interface {
 	// `vencida` em preventiva.sql: uma OS encerrada às 22h de 31/08 é agosto pro
 	// Gestor e setembro pro UTC. Formato YYYY-MM porque ordena como texto -- o
 	// 'MM/YYYY' do contrato é montado na hora de responder.
+	// origem: MTBF e MTTR medem FALHA e conserto, e a OS de preventiva é revisão
+	// programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
+	// (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
+	// o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
+	// resumir/mtbf (model/indicadorMaquina.go). Custo e horas continuam contando.
 	// Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
 	// ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
 	ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHistoricoOsDaMaquinaParams) ([]ListarHistoricoOsDaMaquinaRow, error)
@@ -684,6 +716,22 @@ type Querier interface {
 	// LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
 	// ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
 	ListarHistoricoPreventiva(ctx context.Context, arg ListarHistoricoPreventivaParams) ([]ListarHistoricoPreventivaRow, error)
+	// Os PEQUENOS REPAROS encerrados da loja, para o custo separado do Painel de
+	// Indicadores (GET /indicadores/lojas/:id). Reparo não tem máquina
+	// (solicitacao_os.maquina_id é NULL: o Solicitante digita o item), então nunca
+	// entra em ListarHistoricoOsDaLoja nem nos indicadores por máquina -- e, de
+	// propósito, também não nos de falha (MTBF/MTTR) nem nas horas: só no custo e
+	// na contagem, em campos próprios, para o Gestor ver o custo do maquinário e o
+	// dos reparos SEPARADOS e nunca somados num número só.
+	//
+	// O reparo é identificado pela SOLICITAÇÃO (maquina_id IS NULL), não por
+	// ordem_servico.tipo: o Técnico pode promover a OS a 'terceiros' no meio, e um
+	// reparo terceirizado continua sendo reparo.
+	//
+	// O setor é o da SOLICITAÇÃO (s.setor_id, NOT NULL): é a única âncora que o
+	// reparo tem. Escopo no WHERE, mesmo EXISTS das outras queries de histórico.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarHistoricoReparosDaLoja(ctx context.Context, arg ListarHistoricoReparosDaLojaParams) ([]ListarHistoricoReparosDaLojaRow, error)
 	// Sem paginação nem filtro de busca de propósito: /lojas devolve array simples
 	// e o front pagina/filtra no cliente (front-end/CLAUDE.md item 12). Só
 	// /usuarios e /solicitacoes/minhas paginam no servidor.
@@ -713,6 +761,19 @@ type Querier interface {
 	// mais novas primeiro, paginada por LIMIT/OFFSET pelo mesmo motivo de
 	// ListarSolicitacoesDoSolicitante: model.RespostaPaginada pede os dois números.
 	ListarNotificacoesDoUsuario(ctx context.Context, arg ListarNotificacoesDoUsuarioParams) ([]ListarNotificacoesDoUsuarioRow, error)
+	// A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
+	// máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
+	// ListarReparosEncerradosDaLoja, que cobre o outro grupo.
+	//
+	// ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
+	// MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
+	// desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
+	// transferida leva o histórico), escopo no WHERE. Entram TODAS as OS de máquina, inclusive as
+	// de preventiva (origem) e as terceirizadas -- o custo delas está no card, e a lista explica.
+	// Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
+	// Mais novo primeiro, paginada.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ListarOrdensMaquinarioEncerradasDaLojaParams) ([]ListarOrdensMaquinarioEncerradasDaLojaRow, error)
 	// GET /ordens-servico -- um endpoint para os três painéis, o que muda é o
 	// filtro (front-end/src/servicos/servicoOrdensServico.ts):
 	//   Gestor  (PainelGestor)                 -> sem filtro, recorta pelo escopo
@@ -846,6 +907,15 @@ type Querier interface {
 	// pode estar velho quando o INSERT acontecer. Não usa p.* como as outras:
 	// aqui ninguém monta resposta de contrato.
 	ListarPreventivasVencidas(ctx context.Context) ([]ListarPreventivasVencidasRow, error)
+	// A LISTA por trás do card "Pequenos Reparos" do Painel de Indicadores: cada reparo
+	// encerrado que compõe quantidadeReparos/custoReparos. ⚠️ O WHERE tem que ser o MESMO de
+	// ListarHistoricoReparosDaLoja (e de ContarReparosEncerradosDaLoja logo abaixo) -- a soma
+	// dos itens é o número do card, e divergir faz a lista mentir. Mesma definição de
+	// reparo: solicitação sem máquina (um reparo terceirizado pelo Técnico continua reparo),
+	// setor da solicitação, escopo no WHERE. Filtros opcionais: o setor e o mês que a tela
+	// está mostrando. Mais novo primeiro, paginada.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarReparosEncerradosDaLoja(ctx context.Context, arg ListarReparosEncerradosDaLojaParams) ([]ListarReparosEncerradosDaLojaRow, error)
 	// loja_id é opcional (NULL não filtra) porque o front usa os dois modos: o
 	// select em cascata pede os setores de uma loja (GET /setores?lojaId=) e
 	// agruparPorEscopoGestor pede todos de uma vez, para nomear o cabeçalho de um
@@ -1025,6 +1095,14 @@ type Querier interface {
 	// Espelho de ObterItensDeCustoDasOrdensServico; ver as notas de lá sobre a
 	// ausência de tenant_id e sobre a ordenação.
 	ObterNotasFiscaisDasOrdensServico(ctx context.Context, ordensServicoIds []int64) ([]ObterNotasFiscaisDasOrdensServicoRow, error)
+	// "Esta OS está ao meu alcance?" para a leitura da linha do tempo. Mesmo
+	// critério da listagem, em três perfis:
+	//   - administrador (escopo NULL): qualquer OS do tenant;
+	//   - gestor: o EXISTS de escopo sobre o setor da SOLICITAÇÃO de origem;
+	//   - técnico: só a que é dele (tecnico_id).
+	// Fora disso é pgx.ErrNoRows -> 404, nunca 403, mesmo critério de
+	// ObterSolicitacaoPorID: não confirma que o id existe.
+	ObterOrdemServicoNoEscopo(ctx context.Context, arg ObterOrdemServicoNoEscopoParams) (int64, error)
 	// ==========================================================================
 	// Ordem de serviço -- leitura e ciclo de vida.
 	//
@@ -1204,6 +1282,19 @@ type Querier interface {
 	// outro mandando o endpoint dele. :exec e não :execrows -- zero linhas é
 	// sucesso: o logout de um aparelho cuja inscrição já morreu (410) não é erro.
 	RemoverDispositivoPushDoUsuario(ctx context.Context, arg RemoverDispositivoPushDoUsuarioParams) error
+	// Quantas OS há em cada loja/setor para os MESMOS filtros da listagem -- os
+	// cards de loja e setor da navegação do Painel do Gestor. Existe porque a
+	// lista de OS Finalizadas é paginada no servidor: a tela deixou de ter a lista
+	// inteira para contar.
+	//
+	// ⚠️ O WHERE tem que ser o MESMO de ListarOrdensServico/ContarOrdensServico --
+	// filtro mudado lá e esquecido aqui faz o card dizer 40 e a lista mostrar 12.
+	// Só os JOINs que o WHERE usa mais os nomes de loja e setor.
+	//
+	// `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
+	// finalizadas não usam, mas a query serve às abas em andamento no dia em que
+	// elas também paginarem.
+	ResumoOrdensServicoPorSetor(ctx context.Context, arg ResumoOrdensServicoPorSetorParams) ([]ResumoOrdensServicoPorSetorRow, error)
 	// POST /ordens-servico/:id/retomar -- Pausada -> status_anterior da pausa
 	// que acabou de fechar ('Aberta' ou 'Em Andamento', nunca um valor fixo
 	// como em IniciarOrdemServico/PausarOrdemServico -- por isso `status` entra

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -103,6 +104,32 @@ func TestAbrirSolicitacoesDePreventivasVencidas(t *testing.T) {
 		// e a OS só nascia quando o Gestor aprovava.
 		if n := contar("ordem_servico"); n != 1 {
 			t.Fatalf("ordens de serviço no banco = %d, esperado 1 -- a preventiva não passa mais pelo Gestor", n)
+		}
+	})
+
+	// A linha do tempo da OS de preventiva começa sem autor: ninguém abriu, foi o
+	// calendário. É o único evento que ck_os_evento_usuario deixa ficar sem
+	// usuário.
+	// A tela marca a OS de preventiva em âmbar por este campo; antes só dava para
+	// deduzir pela ausência de solicitante.
+	t.Run("a OS sai da listagem com origem preventiva", func(t *testing.T) {
+		lista, err := NewRepoOrdemServico(pool).ListarOrdensServico(ctx, tenantID, 0, "administrador", FiltrosOrdemServico{})
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		if len(lista) != 1 || lista[0].Origem != "preventiva" {
+			t.Fatalf("origem = %+v, esperado uma OS com origem preventiva", lista)
+		}
+	})
+
+	t.Run("a linha do tempo nasce com 'aberta' sem autor", func(t *testing.T) {
+		var tipo, origem string
+		var usuario *int64
+		if err := pool.QueryRow(ctx, `SELECT tipo, usuario_id, detalhes->>'origem' FROM os_evento`).Scan(&tipo, &usuario, &origem); err != nil {
+			t.Fatalf("erro ao ler os_evento (esperado exatamente 1 linha): %v", err)
+		}
+		if tipo != "aberta" || usuario != nil || origem != "preventiva" {
+			t.Errorf("evento = %s / usuario %v / origem %s, esperado aberta / nil / preventiva", tipo, usuario, origem)
 		}
 	})
 
@@ -314,3 +341,64 @@ const (
 	intervalo  = 30
 	diasAtraso = 5
 )
+
+// TestJobDePreventivaAvisaOTecnico tranca o bug em que o job abria a OS e o
+// técnico nunca era avisado: o job roda no comando de CLI (processo à parte da
+// API), e só a API ligava o Notificador. Aqui o serviço é montado como o
+// executarPreventivasVencidas monta -- NewNotificacaoDoAmbiente, sem VAPID, então
+// só o sininho -- e a notificação tem que existir DEPOIS de AguardarAvisos, que é
+// o que impede o comando de sair antes de a goroutine gravar.
+func TestJobDePreventivaAvisaOTecnico(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+
+	var tenantID, lojaID, setorID, maquinaID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('job-aviso', 'Empresa Aviso') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+	tecnico := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Padaria') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO maquina (tenant_id, setor_id, numero_patrimonio, nome, criticidade) VALUES ($1, $2, 'P-9', 'Forno', 'Alta') RETURNING id`, tenantID, setorID).Scan(&maquinaID); err != nil {
+		t.Fatalf("erro ao criar máquina: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO preventiva (tenant_id, maquina_id, descricao, intervalo_dias, proxima_data, ativa, tecnico_id)
+		VALUES ($1, $2, 'Troca de óleo', 30, CURRENT_DATE - 1, true, $3)`, tenantID, maquinaID, tecnico); err != nil {
+		t.Fatalf("erro ao criar preventiva: %v", err)
+	}
+
+	// Exatamente o que cli_preventivas_vencidas.go faz.
+	svc := NewRepoPreventiva(pool)
+	svc.Notificador = NewNotificacaoDoAmbiente(pool)
+
+	criadas, err := svc.AbrirSolicitacoesDePreventivasVencidas(ctx)
+	if err != nil || criadas != 1 {
+		t.Fatalf("criadas = %d, err = %v, esperado 1 sem erro", criadas, err)
+	}
+	AguardarAvisos()
+
+	var osID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM ordem_servico`).Scan(&osID); err != nil {
+		t.Fatalf("erro ao ler a OS: %v", err)
+	}
+
+	var n int
+	var url string
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(url), '') FROM notificacao
+		 WHERE tenant_id = $1 AND usuario_id = $2 AND tipo = 'os_preventiva'`, tenantID, tecnico).Scan(&n, &url); err != nil {
+		t.Fatalf("erro ao ler notificação: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("%d notificações os_preventiva para o técnico, esperado 1 -- o job abriu a OS e não avisou", n)
+	}
+	if want := "/painel-tecnico?os=" + strconv.FormatInt(osID, 10); url != want {
+		t.Errorf("url = %q, esperado %q (o toque abre a OS certa)", url, want)
+	}
+}

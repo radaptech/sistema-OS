@@ -12,6 +12,7 @@ import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
 import { usePreventivas } from '../../hooks/usePreventivas'
 import { useLojas } from '../../hooks/useLojas'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
+import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
 import { dataEstaNoIntervalo } from '../../utilitarios/dataEstaNoIntervalo'
 import { combinaBuscaAlvo, type AlvoOS } from '../../utilitarios/alvoOS'
 import type {
@@ -32,7 +33,7 @@ import {
   type StatusFilaGestor,
 } from './componentes/FiltroStatusSolicitacao'
 import { CardOSEmExecucao } from './componentes/CardOSEmExecucao'
-import { CardOSFinalizada } from './componentes/CardOSFinalizada'
+import { OSFinalizadasGestor } from './componentes/OSFinalizadasGestor'
 import { ModalRejeitarSolicitacao } from './componentes/ModalRejeitarSolicitacao'
 import { SeletorPreventivas } from './componentes/SeletorPreventivas'
 import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
@@ -42,9 +43,6 @@ import {
   FILTROS_AVANCADOS_OS_VAZIOS,
   type FiltrosAvancadosOS,
 } from './filtrosOS'
-
-// Só a lista de um setor pagina: OS Finalizadas é histórico e cresce sem parar.
-const TAMANHO_PAGINA_FINALIZADAS = 12
 
 function rotuloOS(quantidade: number) {
   return quantidade === 1 ? '1 OS' : `${quantidade} OS`
@@ -92,17 +90,13 @@ export function PainelGestor() {
   const [selecaoOS, setSelecaoOS] = useState<SelecaoOS | null>(null)
 
   // Só a lista da aba aberta é buscada: abrir o painel não baixa as quatro de uma vez.
-  // A que já foi vista fica no cache, então voltar a uma aba é instantâneo. As duas
-  // abas de OS dividem a mesma lista.
-  const abaDeOS =
-    abaSelecionada === 'os-em-andamento' || abaSelecionada === 'os-finalizadas'
+  // A que já foi vista fica no cache, então voltar a uma aba é instantâneo. OS Finalizadas
+  // não usa esta lista: é histórico, e a aba busca o resumo e uma página por vez no servidor
+  // (OSFinalizadasGestor).
   const { data: solicitacoes = [], isLoading: carregandoSolicitacoes } =
     useTodasSolicitacoes({}, abaSelecionada === 'solicitacoes')
-  const {
-    data: ordensServico = [],
-    isLoading: carregandoOrdensServico,
-    refetch: recarregarOrdensServico,
-  } = useOrdensServicoTodas({}, abaDeOS)
+  const { data: ordensServico = [], isLoading: carregandoOrdensServico } =
+    useOrdensServicoTodas({}, abaSelecionada === 'os-em-andamento')
   const { data: preventivas = [], isLoading: carregandoPreventivas } =
     usePreventivas(undefined, abaSelecionada === 'manutencao-preventiva')
 
@@ -131,17 +125,13 @@ export function PainelGestor() {
       return
     }
     consumirOSDaUrl()
-    // Não há GET /ordens-servico/:id: a OS sai da lista do escopo, buscada de novo
-    // (refetch ignora o `habilitado`) pra não abrir uma versão de antes do encerramento.
-    recarregarOrdensServico().then(({ data }) => {
-      const ordem = data?.find((item) => item.id === osDaUrl)
-      if (ordem) {
-        setSelecaoOS({ ordem, imprimir: false })
-      } else {
-        toast.info(`A OS #${osDaUrl} não está mais no seu painel.`)
-      }
-    })
-  }, [osDaUrl, consumirOSDaUrl, recarregarOrdensServico])
+    // Uma OS só, buscada na hora (versão de depois do encerramento). Fora do escopo ou
+    // inexistente: o api.ts já mostra o toast do 404.
+    servicoOrdensServico
+      .obterPorId(osDaUrl)
+      .then((ordem) => setSelecaoOS({ ordem, imprimir: false }))
+      .catch(() => {})
+  }, [osDaUrl, consumirOSDaUrl])
 
   async function invalidarSolicitacoesEOrdens() {
     await Promise.all([
@@ -244,22 +234,6 @@ export function PainelGestor() {
     Rejeitada: solicitacoes.filter((item) => item.status === 'Rejeitada')
       .length,
   }
-  // Só é "OS Finalizada" para o Gestor quando ela passou por todas as etapas com
-  // sucesso: Técnico encerrou (Concluída) e o Administrador já lançou o custo de
-  // manutenção — ver regra de negócio no CLAUDE.md (item 11/12/13).
-  const ordensFinalizadas = ordensServico.filter(
-    (ordem) =>
-      ordem.statusExecucao === 'Concluída' &&
-      ordem.finalizada &&
-      (!filtroTipo || ordem.tipo === filtroTipo) &&
-      combinaFiltrosAvancados(
-        ordem,
-        ordem.lojaId,
-        ordem.dataAbertura,
-        (ordem.custo?.custoHoraTecnico ?? 0) +
-          (ordem.custo?.custoManutencao ?? 0),
-      ),
-  )
   // Acompanhamento em tempo real do que o Técnico está fazendo (Aberta/Em Andamento/
   // Pausada) — o botão de pausa continua com o Técnico (ele é quem está na frente do
   // problema), mas o Gestor enxerga aqui o motivo de cada pausa para dar visibilidade
@@ -381,22 +355,11 @@ export function PainelGestor() {
         )}
 
         {abaSelecionada === 'os-finalizadas' && (
-          <NavegacaoLojaSetor
-            itens={ordensFinalizadas}
-            carregando={carregandoOrdensServico}
-            mensagemVazio="Nenhuma OS finalizada ainda — a OS só aparece aqui depois que o Técnico encerra o atendimento e o Administrador lança o custo de manutenção."
-            rotuloNavegacao="Navegação das OS finalizadas"
-            rotuloQuantidade={rotuloOS}
-            tamanhoPagina={TAMANHO_PAGINA_FINALIZADAS}
-            renderItem={(ordemServico) => (
-              <CardOSFinalizada
-                ordemServico={ordemServico}
-                aoVisualizar={(ordem) =>
-                  setSelecaoOS({ ordem, imprimir: false })
-                }
-                aoImprimir={(ordem) => setSelecaoOS({ ordem, imprimir: true })}
-              />
-            )}
+          <OSFinalizadasGestor
+            filtroTipo={filtroTipo}
+            filtrosAvancados={filtrosAvancados}
+            aoVisualizar={(ordem) => setSelecaoOS({ ordem, imprimir: false })}
+            aoImprimir={(ordem) => setSelecaoOS({ ordem, imprimir: true })}
           />
         )}
 

@@ -13,6 +13,8 @@ export const RESUMO_ZERADO: ResumoIndicadores = {
   mttrHoras: 0,
   mtbfHoras: 0,
   custoTotal: 0,
+  quantidadeReparos: 0,
+  custoReparos: 0,
   porTipoDefeito: tiposDefeito.map((tipoDefeito) => ({
     tipoDefeito,
     horasParada: 0,
@@ -35,6 +37,7 @@ export function resumoDoPeriodo(
 // calendário até o atual, com zero nos vazios.
 export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
   const custoPorMes = new Map(porMes.map((item) => [item.mes, item.custoTotal]))
+  const reparosPorMes = new Map(porMes.map((item) => [item.mes, item.custoReparos]))
   const hoje = new Date()
 
   return Array.from({ length: 12 }, (_, indice) => {
@@ -42,6 +45,7 @@ export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
     const mes = String(data.getMonth() + 1).padStart(2, '0')
     const chave = `${mes}/${data.getFullYear()}`
     const custo = custoPorMes.get(chave) ?? 0
+    const reparos = reparosPorMes.get(chave) ?? 0
 
     return {
       chave,
@@ -49,6 +53,8 @@ export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
       rotulo: `${mes}/${String(data.getFullYear()).slice(2)}`,
       valor: custo,
       valorFormatado: formatarMoeda(custo),
+      valorReparos: reparos,
+      valorReparosFormatado: formatarMoeda(reparos),
     }
   })
 }

@@ -4,7 +4,7 @@ import { CampoBusca } from '../../../componentes/CampoBusca'
 import { Esqueleto } from '../../../componentes/Esqueleto'
 import { useIndicadoresLoja } from '../../../hooks/useIndicadoresLoja'
 import type { Maquina } from '../../../tipos/maquina'
-import type { ResumoIndicadores } from '../../../tipos/indicadorMaquina'
+import type { GrupoOrdensDoPainel, ResumoIndicadores } from '../../../tipos/indicadorMaquina'
 import {
   montarBarrasMensais,
   RESUMO_ZERADO,
@@ -13,6 +13,7 @@ import {
 import { BarraPeriodo } from './BarraPeriodo'
 import { GraficoBarras } from './GraficoBarras'
 import { EsqueletoGradeIndicadores, GradeIndicadores } from './GradeIndicadores'
+import { ModalOrdensDaLoja } from './ModalOrdensDaLoja'
 import { SecaoSetor } from './SecaoSetor'
 
 export interface SetorComMaquinas {
@@ -49,6 +50,13 @@ export function PainelIndicadoresLoja({
   const [mesSelecionado, setMesSelecionado] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
   const [setorFiltro, setSetorFiltro] = useState<number | null>(null)
+  // Lista por trás de um card aberta: de qual (maquinário ou reparos), de qual setor (undefined = o
+  // recorte do topo da tela) e com que rótulo.
+  const [listaAberta, setListaAberta] = useState<{
+    grupo: GrupoOrdensDoPainel
+    setorId?: number
+    rotulo: string
+  } | null>(null)
   const { data: indicadores, isLoading: carregando } =
     useIndicadoresLoja(lojaId)
 
@@ -136,7 +144,7 @@ export function PainelIndicadoresLoja({
           {resumoTopo && (
             <span className="font-mono text-[11px] text-slate-400">
               {resumoTopo.quantidadeOs}{' '}
-              {resumoTopo.quantidadeOs === 1 ? 'OS encerrada' : 'OS encerradas'}
+              {resumoTopo.quantidadeOs === 1 ? 'OS de máquina encerrada' : 'OS de máquina encerradas'}
             </span>
           )}
         </div>
@@ -162,7 +170,16 @@ export function PainelIndicadoresLoja({
               mesSelecionado={mesSelecionado}
               aoLimpar={() => setMesSelecionado(null)}
             />
-            <GradeIndicadores resumo={resumoTopo} />
+            <GradeIndicadores
+              resumo={resumoTopo}
+              mostrarReparos
+              aoVerReparos={() =>
+                setListaAberta({ grupo: 'reparos', setorId: setorEscolhido?.setorId, rotulo: tituloTopo })
+              }
+              aoVerMaquinario={() =>
+                setListaAberta({ grupo: 'maquinario', setorId: setorEscolhido?.setorId, rotulo: tituloTopo })
+              }
+            />
             <GraficoBarras
               titulo="Custo Mensal (últimos 12 meses)"
               dados={montarBarrasMensais(fonteTopo.porMes)}
@@ -218,9 +235,27 @@ export function PainelIndicadoresLoja({
             }
             atraso={indice * 40}
             aoSelecionarMaquina={aoSelecionarMaquina}
+            aoVerReparos={() =>
+              setListaAberta({ grupo: 'reparos', setorId: setor.setorId, rotulo: `Setor ${setor.setorNome}` })
+            }
+            aoVerMaquinario={() =>
+              setListaAberta({ grupo: 'maquinario', setorId: setor.setorId, rotulo: `Setor ${setor.setorNome}` })
+            }
           />
         ))}
       </section>
+
+      {listaAberta && (
+        <ModalOrdensDaLoja
+          lojaId={lojaId}
+          grupo={listaAberta.grupo}
+          setorId={listaAberta.setorId}
+          // O mês clicado no gráfico vale para a lista, como vale para os números.
+          mes={mesSelecionado ?? undefined}
+          escopoRotulo={listaAberta.rotulo}
+          aoFechar={() => setListaAberta(null)}
+        />
+      )}
     </div>
   )
 }

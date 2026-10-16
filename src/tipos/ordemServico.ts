@@ -225,6 +225,10 @@ export interface EncerramentoOrdemServico {
 export interface OrdemServico {
   id: number
   solicitacaoId: number
+  // De onde veio a OS: pedido do Solicitante, abertura direta do Gestor/Administrador ou o job
+  // de preventiva. É o que marca a OS de preventiva em âmbar (BadgeOrigemOS) em vez de deduzir
+  // pela ausência de `solicitanteNome`.
+  origem: OrigemSolicitacao
   tipo: TipoOS
   maquinaId: number | null
   maquinaNome: string | null

@@ -12,6 +12,7 @@ import { BarraPeriodo } from './BarraPeriodo'
 import { GraficoBarras } from './GraficoBarras'
 import { GraficoRosca } from './GraficoRosca'
 import { EsqueletoGradeIndicadores, GradeIndicadores } from './GradeIndicadores'
+import { ModalOrdensDaLoja } from './ModalOrdensDaLoja'
 
 interface PainelIndicadoresMaquinaProps {
   maquina: Maquina
@@ -24,6 +25,8 @@ export function PainelIndicadoresMaquina({
 }: PainelIndicadoresMaquinaProps) {
   // "MM/YYYY" do mês clicado no gráfico; null mostra o histórico inteiro.
   const [mesSelecionado, setMesSelecionado] = useState<string | null>(null)
+  // Lista das OS desta máquina, aberta pelo card de custo.
+  const [listaAberta, setListaAberta] = useState(false)
   const { data: indicadores, isLoading: carregandoIndicadores } =
     useIndicadoresMaquina(maquina.id)
 
@@ -100,7 +103,7 @@ export function PainelIndicadoresMaquina({
             aoLimpar={() => setMesSelecionado(null)}
           />
 
-          <GradeIndicadores resumo={resumo} />
+          <GradeIndicadores resumo={resumo} aoVerMaquinario={() => setListaAberta(true)} />
 
           <GraficoBarras
             titulo="Custo Mensal (últimos 12 meses)"
@@ -119,6 +122,18 @@ export function PainelIndicadoresMaquina({
             valorCentral={formatarHoras(resumo.horasParadaTotal)}
           />
         </>
+      )}
+
+      {listaAberta && (
+        <ModalOrdensDaLoja
+          lojaId={maquina.lojaId}
+          grupo="maquinario"
+          maquinaId={maquina.id}
+          // O mês clicado no gráfico vale para a lista, como vale para os números.
+          mes={mesSelecionado ?? undefined}
+          escopoRotulo={maquina.nome}
+          aoFechar={() => setListaAberta(false)}
+        />
       )}
     </div>
   )

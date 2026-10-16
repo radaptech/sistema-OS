@@ -3,6 +3,7 @@ import {
   computarIndicadores,
   computarIndicadoresLoja,
   construirEscoposGestor,
+  listarOrdensDoPainelMock,
 } from '../regrasMock'
 import {
   atraso,
@@ -40,6 +41,41 @@ export const rotasIndicadores: Rota[] = [
         return responderErro('Loja não encontrada.', 404)
       }
       return responderJson(computarIndicadoresLoja(lojaId, usuario))
+    },
+  },
+  {
+    metodo: 'GET',
+    padrao: /^\/indicadores\/lojas\/(\d+)\/ordens$/,
+    async tratar({ params, query }) {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+      const lojaId = Number(params[0])
+      if (
+        usuario.perfil !== 'administrador' &&
+        !construirEscoposGestor(usuario).some((escopo) => escopo.lojaId === lojaId)
+      ) {
+        return responderErro('Loja não encontrada.', 404)
+      }
+      const grupo = query.get('grupo')
+      if (grupo !== 'maquinario' && grupo !== 'reparos') {
+        return responderErro('grupo inválido (use maquinario ou reparos)', 400)
+      }
+      const setorId = query.get('setorId')
+      const maquinaId = query.get('maquinaId')
+      return responderJson(
+        listarOrdensDoPainelMock(
+          lojaId,
+          usuario,
+          grupo,
+          setorId ? Number(setorId) : null,
+          maquinaId ? Number(maquinaId) : null,
+          query.get('mes'),
+          Number(query.get('pagina') ?? 1),
+        ),
+      )
     },
   },
 ]

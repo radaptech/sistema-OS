@@ -17,8 +17,10 @@ import type {
   IndicadoresLoja,
   IndicadoresMaquina,
   IndicadorMensal,
+  OrdemDoPainel,
   ResumoIndicadores,
 } from '../tipos/indicadorMaquina'
+import type { RespostaPaginada } from '../tipos/paginacao'
 import {
   maquinas,
   ordensServico,
@@ -29,7 +31,7 @@ import {
   type PreventivaInterna,
   type UsuarioInterno,
 } from './bancoMock'
-import { gerarId } from './utilidadesMock'
+import { gerarId, paginarLista } from './utilidadesMock'
 // Ciclo com notificacoesMock (que usa construirEscoposGestor daqui): inofensivo, ninguém
 // chama nada no carregamento -- ver semearNotificacoes.
 import { notificarOSPreventiva } from './notificacoesMock'
@@ -169,6 +171,7 @@ export function sincronizarPreventivasVencidas(): void {
     const ordem: OrdemServico = {
       id: gerarId(ordensServico),
       solicitacaoId: solicitacao.id,
+      origem: 'preventiva',
       tipo: 'maquinario',
       maquinaId: solicitacao.maquinaId,
       maquinaNome: solicitacao.maquinaNome,
@@ -287,12 +290,25 @@ function ordenarChaveMes(mes: string): number {
 
 // Mesma divisão do back (model/indicadorMaquina.go): um resumo do histórico inteiro e
 // um por mês de encerramento, que o painel exibe ao clicar na barra do mês.
-function resumirIndicadores(historico: OrdemServico[]): ResumoIndicadores {
+function resumirIndicadores(historicoBruto: OrdemServico[]): ResumoIndicadores {
+  // O pequeno reparo (sem máquina) fica à parte, como no servidor: só o maquinário alimenta
+  // os cards de falha e o custo das máquinas; o reparo soma em quantidadeReparos/custoReparos.
+  const historico = historicoBruto.filter((ordem) => ordem.maquinaId !== null)
+  const reparos = historicoBruto.filter((ordem) => ordem.maquinaId === null)
+  const custoReparos = arredondar(
+    reparos.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0),
+  )
+
   const horasParadaTotal = arredondar(
     historico.reduce((soma, ordem) => soma + (ordem.horasParada ?? 0), 0),
   )
 
-  const horasTrabalhadasValidas = historico
+  // MTBF e MTTR medem FALHA e conserto: a OS de preventiva é revisão programada e fica de
+  // fora dos dois (como no servidor, `preventiva` em model/indicadorMaquina.go). Horas,
+  // custo e contagem seguem contando todas. Sem isso o MTBF encolheria a cada revisão.
+  const falhas = historico.filter((ordem) => ordem.origem !== 'preventiva')
+
+  const horasTrabalhadasValidas = falhas
     .map((ordem) => ordem.horasTrabalhadas)
     .filter((horas): horas is number => horas !== undefined)
 
@@ -307,7 +323,7 @@ function resumirIndicadores(historico: OrdemServico[]): ResumoIndicadores {
   // (mtbf em model/indicadorMaquina.go): entre máquinas diferentes o intervalo encolheria
   // a cada máquina cadastrada no setor. Para uma máquina só, é a conta de sempre.
   const aberturasPorMaquina = new Map<number, number[]>()
-  for (const ordem of historico) {
+  for (const ordem of falhas) {
     const chave = ordem.maquinaId ?? 0
     aberturasPorMaquina.set(chave, [
       ...(aberturasPorMaquina.get(chave) ?? []),
@@ -341,7 +357,16 @@ function resumirIndicadores(historico: OrdemServico[]): ResumoIndicadores {
     horasParada: arredondar(horasPorTipo.get(tipo) ?? 0),
   }))
 
-  return { quantidadeOs: historico.length, horasParadaTotal, mttrHoras, mtbfHoras, custoTotal, porTipoDefeito }
+  return {
+    quantidadeOs: historico.length,
+    horasParadaTotal,
+    mttrHoras,
+    mtbfHoras,
+    custoTotal,
+    porTipoDefeito,
+    quantidadeReparos: reparos.length,
+    custoReparos,
+  }
 }
 
 export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
@@ -373,8 +398,27 @@ export function computarIndicadoresLoja(lojaId: number, usuario: UsuarioInterno)
         maquinaIds.includes(ordem.maquinaId),
     )
 
-  const historico = historicoDa(maquinasDaLoja.map((maquina) => maquina.id))
-  const setoresIds = [...new Set(maquinasDaLoja.map((maquina) => maquina.setorId))]
+  // Pequenos reparos encerrados da loja, no escopo de quem chama: sem máquina, só o setor.
+  // Entram no total da loja e no setor (e nos meses deles), nunca na máquina.
+  const reparosDaLoja = ordensServico.filter(
+    (ordem) =>
+      ordem.statusExecucao === 'Concluída' &&
+      ordem.maquinaId === null &&
+      ordem.lojaId === lojaId &&
+      usuarioAlcanca(usuario, ordem.lojaId, ordem.setorId),
+  )
+
+  const historico = [
+    ...historicoDa(maquinasDaLoja.map((maquina) => maquina.id)),
+    ...reparosDaLoja,
+  ]
+  // Setor que só teve reparo (sem máquina) ganha card também, como no servidor.
+  const setoresIds = [
+    ...new Set([
+      ...maquinasDaLoja.map((maquina) => maquina.setorId),
+      ...reparosDaLoja.map((ordem) => ordem.setorId),
+    ]),
+  ]
 
   return {
     lojaId,
@@ -382,10 +426,14 @@ export function computarIndicadoresLoja(lojaId: number, usuario: UsuarioInterno)
     porMes: resumirPorMes(historico),
     porSetor: setoresIds.map((setorId) => {
       const doSetor = maquinasDaLoja.filter((maquina) => maquina.setorId === setorId)
-      const historicoSetor = historicoDa(doSetor.map((maquina) => maquina.id))
+      const reparosDoSetor = reparosDaLoja.filter((ordem) => ordem.setorId === setorId)
+      const historicoSetor = [
+        ...historicoDa(doSetor.map((maquina) => maquina.id)),
+        ...reparosDoSetor,
+      ]
       return {
         setorId,
-        setorNome: doSetor[0].setorNome,
+        setorNome: doSetor[0]?.setorNome ?? reparosDoSetor[0].setorNome,
         quantidadeMaquinas: doSetor.length,
         ...resumirIndicadores(historicoSetor),
         porMes: resumirPorMes(historicoSetor),
@@ -401,6 +449,77 @@ export function computarIndicadoresLoja(lojaId: number, usuario: UsuarioInterno)
       }
     }),
   }
+}
+
+// GET /indicadores/lojas/:id/ordens: a lista por trás de um card de custo do painel da loja — o
+// "maquinario" (as OS de máquina, preventiva inclusa) ou os "reparos" (sem máquina, à parte).
+// Mesma definição e mesmo escopo do painel (setor ATUAL da máquina, só máquina ativa), então a
+// soma dos itens é o custo do card. `mes` é o rótulo "MM/YYYY" do gráfico (mês de encerramento).
+export function listarOrdensDoPainelMock(
+  lojaId: number,
+  usuario: UsuarioInterno,
+  grupo: 'maquinario' | 'reparos',
+  setorId: number | null,
+  maquinaId: number | null,
+  mes: string | null,
+  pagina: number,
+): RespostaPaginada<OrdemDoPainel> {
+  const rotuloDoMes = (dataFim: string | undefined) => {
+    if (!dataFim) {
+      return null
+    }
+    const data = converterDataBackend(dataFim)
+    return `${String(data.getMonth() + 1).padStart(2, '0')}/${data.getFullYear()}`
+  }
+
+  const ordens: OrdemDoPainel[] = []
+
+  for (const ordem of ordensServico) {
+    if (ordem.statusExecucao !== 'Concluída' || (mes !== null && rotuloDoMes(ordem.dataFim) !== mes)) {
+      continue
+    }
+
+    // O setor do reparo é o da solicitação; o da máquina é o ATUAL dela.
+    const maquina = ordem.maquinaId === null ? undefined : maquinas.find((m) => m.id === ordem.maquinaId)
+    const setorDaOrdem = maquina ? maquina.setorId : ordem.setorId
+    const lojaDaOrdem = maquina ? maquina.lojaId : ordem.lojaId
+
+    const doGrupo =
+      grupo === 'reparos'
+        ? ordem.maquinaId === null
+        : ordem.maquinaId !== null && maquina !== undefined && maquina.ativa !== false
+    if (
+      !doGrupo ||
+      lojaDaOrdem !== lojaId ||
+      !usuarioAlcanca(usuario, lojaDaOrdem, setorDaOrdem) ||
+      (setorId !== null && setorDaOrdem !== setorId) ||
+      (maquinaId !== null && ordem.maquinaId !== maquinaId)
+    ) {
+      continue
+    }
+
+    ordens.push({
+      id: ordem.id,
+      item: grupo === 'reparos' ? (ordem.itemDescricao ?? '') : (ordem.maquinaNome ?? ''),
+      codigo: grupo === 'reparos' ? null : ordem.maquinaCodigo,
+      maquinaId: grupo === 'reparos' ? null : ordem.maquinaId,
+      origem: ordem.origem,
+      descricao: ordem.descricao,
+      setorId: setorDaOrdem,
+      setorNome: maquina ? maquina.setorNome : ordem.setorNome,
+      tecnicoNome: ordem.tecnicoNome ?? '—',
+      encerradaEm: ordem.dataFim ?? null,
+      custoTotal: ordem.custo?.custoTotal ?? 0,
+    })
+  }
+
+  ordens.sort(
+    (a, b) =>
+      converterDataBackend(b.encerradaEm ?? '01/01/1970').getTime() -
+      converterDataBackend(a.encerradaEm ?? '01/01/1970').getTime(),
+  )
+
+  return paginarLista(ordens, pagina, 12)
 }
 
 function resumirPorMes(historico: OrdemServico[]): IndicadorMensal[] {

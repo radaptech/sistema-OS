@@ -1,4 +1,4 @@
-import { ChevronRight, Tag, Wrench } from 'lucide-react'
+import { ChevronRight, Hammer, Tag, Wrench } from 'lucide-react'
 import { Esqueleto } from '../../../componentes/Esqueleto'
 import { ImagemProgressiva } from '../../../componentes/ImagemProgressiva'
 import { formatarHoras } from '../../../utilitarios/formatarHoras'
@@ -21,6 +21,10 @@ interface SecaoSetorProps {
   aoSelecionarSetor?: () => void
   atraso: number
   aoSelecionarMaquina: (maquina: Maquina) => void
+  // Abre a lista dos pequenos reparos deste setor (a linha laranja vira clicável).
+  aoVerReparos?: () => void
+  // Abre a lista das OS de máquina deste setor (as que formam o "Custo Maquinário" acima).
+  aoVerMaquinario?: () => void
 }
 
 // Um setor da loja: os quatro indicadores dele no topo e as máquinas embaixo, cada uma
@@ -35,6 +39,8 @@ export function SecaoSetor({
   aoSelecionarSetor,
   atraso,
   aoSelecionarMaquina,
+  aoVerReparos,
+  aoVerMaquinario,
 }: SecaoSetorProps) {
   return (
     <section
@@ -82,10 +88,41 @@ export function SecaoSetor({
             valor={resumoSetor && formatarHoras(resumoSetor.mtbfHoras)}
           />
           <Metrica
-            rotulo="Custo Total"
+            rotulo="Custo Maquinário"
             valor={resumoSetor && formatarMoeda(resumoSetor.custoTotal)}
           />
         </div>
+      )}
+
+      {mostrarResumo && resumoSetor && resumoSetor.quantidadeOs > 0 && aoVerMaquinario && (
+        <button
+          type="button"
+          onClick={aoVerMaquinario}
+          title="Ver as OS que formam o custo do maquinário deste setor"
+          className="hover:text-marca-700 flex items-center gap-1 self-start font-mono text-[11px] font-semibold text-slate-500 transition-colors"
+        >
+          Ver as {resumoSetor.quantidadeOs} {resumoSetor.quantidadeOs === 1 ? 'OS de máquina' : 'OS de máquina'}
+          <ChevronRight size={12} />
+        </button>
+      )}
+
+      {/* Pequenos reparos não têm máquina: o custo deles fica à parte, nunca somado ao do
+          maquinário acima. Só aparece quando o setor teve algum no período. */}
+      {mostrarResumo && resumoSetor && resumoSetor.quantidadeReparos > 0 && (
+        <button
+          type="button"
+          onClick={aoVerReparos}
+          disabled={!aoVerReparos}
+          title="Ver os pequenos reparos deste setor"
+          className="flex items-center gap-2 rounded-xl border-l-4 border-orange-400 bg-slate-50/50 px-3 py-2 text-left font-mono text-[11px] text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
+        >
+          <Hammer size={12} className="shrink-0 text-orange-500" />
+          <span className="font-semibold">Pequenos reparos</span>
+          {resumoSetor.quantidadeReparos}{' '}
+          {resumoSetor.quantidadeReparos === 1 ? 'reparo' : 'reparos'} ·{' '}
+          {formatarMoeda(resumoSetor.custoReparos)}
+          {aoVerReparos && <ChevronRight size={12} className="ml-auto shrink-0 text-slate-300" />}
+        </button>
       )}
 
       {maquinas.length === 0 ? (

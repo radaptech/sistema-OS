@@ -895,7 +895,11 @@ garantindo o corte no banco e não só na aplicação.
    `bucket`: o bucket de cada tipo de anexo é fixo no código que registra a rota, não varia por
    linha. Falta política de retenção: foto de OS de 2019 continua ocupando espaço — ainda em aberto.
 
-2. **Histórico de lançamento de custo.** *(mais urgente desde a revisão 4, e ainda mais desde a 4.3)*
+2. ~~**Histórico de lançamento de custo.**~~ **Resolvido na migration `000021` (`os_evento`).** Cada
+   correção do Administrador grava um evento `custo_corrigido` com o estado do custo depois dela
+   (itens, notas, totais), e o lançamento do Técnico fica no evento `encerrada`. Não foi preciso
+   `os_custo_historico`: uma tabela só cobre este ponto e o 4. Texto original, por registro:
+   *(mais urgente desde a revisão 4, e ainda mais desde a 4.3)*
    `os_custo` é 1:1 com a OS e guarda quem lançou e quando — mas se o Administrador corrigir o valor,
    o anterior se perde. Isso deixou de ser hipótese: agora a linha **nasce** com o valor do Técnico e
    o fluxo normal é o Administrador editá-la contra a nota fiscal (seção 2.3), então o valor
@@ -915,10 +919,17 @@ garantindo o corte no banco e não só na aplicação.
    (`setorId`/`setorNome`, ou `setoresIds` onde é uma lista). Ver CLAUDE.md, regra "Setor é cadastro
    dinâmico, referenciado por id".
 
-4. **Auditoria de toda transição de status.**
-   Modelei o status atual mais o histórico de pausas. Se for preciso saber quem moveu a OS de Aberta
-   para Em Andamento e quando, vale `os_evento` (`status_anterior`, `status_novo`, `usuario_id`,
-   `ocorrido_em`) — e aí `os_pausa` poderia até ser derivada dela.
+4. ~~**Auditoria de toda transição de status.**~~ **Resolvido na migration `000021`.**
+   `os_evento` (append-only, trigger recusa `UPDATE`) grava um evento por passo do ciclo de vida:
+   `aberta`, `iniciada`, `pausada`, `retomada`, `terceiro_acionado`, `encerrada` e
+   `custo_corrigido`, com `usuario_id`, `status_anterior`/`status_novo` (nulos onde o estado não
+   muda), `detalhes jsonb` e `ocorrido_em`, na mesma transação do passo. `usuario_id` só é nulo em
+   `aberta` da OS de preventiva (`ck_os_evento_usuario`). `os_pausa` **continua** sendo a fonte das
+   horas (`vw_os_horas`); `os_evento` é a auditoria, não a substitui. As OS que já existiam
+   ganharam eventos reconstituídos, marcados `detalhes.retroativo = true`: abertura e encerramento
+   têm autor gravado (fato), mas iniciada/pausa/retomada/terceiro usam o técnico da OS
+   (**presumido**), e correções de custo antigas não foram inventadas. Lido por
+   `GET /ordens-servico/:id/historico`.
 
 5. **Empresa terceirizada por loja.**
    Modelada como cadastro do tenant, sem vínculo de loja. Se na prática cada filial negociar com
@@ -933,3 +944,5 @@ garantindo o corte no banco e não só na aplicação.
    transições (item 4 acima): quem iniciou/pausou/encerrou só pode ter sido ele. No dia em que uma OS
    puder ser reatribuída — férias, turno, especialidade errada — a inferência quebra e `os_evento`
    deixa de ser opcional. Vale decidir a ordem: reatribuição **depois** da auditoria, nunca antes.
+   **A auditoria (`os_evento`, `000021`) já existe**, então a reatribuição pode vir quando for
+   pedida: o evento nasce com o autor real, e só falta um tipo novo (`reatribuida`).

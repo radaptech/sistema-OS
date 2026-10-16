@@ -97,11 +97,10 @@ nenhuma. Sem hora lançada o agregado é **zero** em maquinário (a coluna exist
   quantas vezes o Administrador clicasse em salvar. Violação vira **409**, e o `case` de
   `ErrDadoDuplicado` no `switch` de `Custo` foi adicionado junto — até a `000011` esta
   rota era um `UPDATE` 1:1, sem como colidir, e sem esse ramo o Administrador levava 500.
-- ⚠️ **Isso amplia o ponto 2 da seção 6 da modelagem** ("histórico de lançamento de
-  custo"): antes o Administrador sobrescrevia um número, agora substitui a itemização
-  inteira que o Técnico escreveu. Há um marcador `ponytail:` em `CorrigirCusto` apontando
-  para cá. O caminho, quando doer, é `os_custo_historico` em append-only — não um merge
-  incremental.
+- ⚠️ A correção do Administrador **substitui** a itemização inteira que o Técnico escreveu
+  (ponto 2 da seção 6 da modelagem), mas o que ele lançou **não se perde mais**: está no evento
+  `encerrada` de `os_evento`, e cada correção grava o seu `custo_corrigido` (ver "Linha do
+  tempo da OS" abaixo).
 
 `AtualizarCusto` grava `os_custo.custo_revisado_em = now()` de quebra: toda passagem do
 Administrador por aqui É a conferência. `GET /ordens-servico` projeta a coluna como
@@ -121,8 +120,8 @@ e o domínio verificado no Resend — ver "Recuperação de senha" em `docs/api-
 
 **O que ainda não existe, de propósito ou por falta de pedido:** `GET /tecnicos/:id` (o
 front não chama), aviso ao Técnico quando o **Gestor** abre uma OS para ele (só a OS de
-preventiva avisa), histórico de lançamento de custo e `os_evento` (pontos 2 e 4 da seção 6
-da modelagem), revogação de token (`token_version`, ver "Revogação" em
+preventiva avisa), reatribuir o Técnico de uma OS (ponto 7 da seção 6 da modelagem; a
+auditoria que ele pedia já existe, ver "Linha do tempo" abaixo), revogação de token (`token_version`, ver "Revogação" em
 `docs/api-e-rotas.md`) e rotação de backup antigo no R2.
 
 Listagem nova que precise recortar por escopo usa `atorDaRota` no controller +
@@ -175,8 +174,13 @@ real antes de seguir pra próxima (histórico: PR #11, `radaptech/sistema-OSm--B
 Um endpoint para os **três** painéis; o que muda é o filtro que cada um manda:
 Gestor sem filtro (abas "OS em Andamento"/"OS Finalizadas"), Técnico `?tecnicoId=`,
 Administrador `?status=Concluída` (Custos Pendentes) e `?finalizada=true` (OS
-Finalizadas). Array simples, sem paginação — `?pagina=` é aceito e **ignorado**, o front
-pagina no cliente (mesmo padrão de `/solicitacoes`, `/maquinas`, `/preventivas`).
+Finalizadas). Array simples por padrão; com `?pagina=` vira `RespostaPaginada` de 12 (o histórico do Administrador e a
+aba OS Finalizadas do Gestor). Para essa aba existem ainda `GET /ordens-servico/resumo` (contagem por
+loja/setor, mesmos filtros e mesmo escopo — a soma é o `total` da lista, e há teste trancando isso) e
+`GET /ordens-servico/:id` (uma OS no escopo, para o link de notificação). Os **filtros avançados** do
+Gestor foram para o `WHERE`: `?maquina=` (nome ou patrimônio), `?dataInicio=`/`?dataFim=` (dia de
+abertura, fuso de São Paulo), `?valorMinimo=`/`?valorMaximo=` (custo total lançado; OS sem custo não
+combina). `?busca=` passou a olhar também o patrimônio.
 
 Por cima disso as telas estreitam com `?busca=`, `?tipo=`, `?lojaId=` e `?setorId=`,
 todos opcionais e cumulativos. **`?setorId=` recorta pelo setor da SOLICITAÇÃO de
@@ -286,6 +290,37 @@ o total, um item por setor e um por máquina (`IndicadoresLoja`), cada um com o 
 de escopo de `ListarMaquinas`) e de `ListarMaquinas` (para toda máquina/setor ganhar
 card, zerado quando não tem OS). Os dois recortes usam o MESMO `resumir`
 (`MontarIndicadoresLoja`): o total da loja tem que bater com a soma do que a tela mostra.
+- ⚠️ **A OS de preventiva fica FORA do MTBF e do MTTR** (`origem = 'preventiva'`, corrigido em 15/10/2026).
+  Os dois medem falha e conserto, e a revisão programada não é nenhum dos dois: contada, o MTBF encolhia a
+  cada revisão (a máquina "falhava" mais só por receber manutenção em dia) e o MTTR era puxado pelo tempo de
+  uma revisão curta -- o indicador punia quem fazia a manutenção em dia. **Horas, custo e a contagem
+  (`quantidadeOs`) continuam contando a preventiva**: o dinheiro gasto na revisão é real. O corte está em
+  `resumir`/`mtbf` (`model/indicadorMaquina.go`), alimentado por `s.origem` nas duas queries de histórico;
+  vale no total, no recorte por mês, por setor e por loja (mesmo `resumir`). A OS direta continua entrando:
+  é o Gestor abrindo conserto sem fila. Pequeno reparo (sem máquina) segue fora dos indicadores de máquina.
+  Testes: `indicadorMaquina_test.go` e `indicadorPreventivaIntegracao_test.go`.
+- **Pequenos reparos têm custo próprio, SEPARADO do maquinário** (15/10/2026). O reparo não tem máquina, então
+  continua fora dos indicadores por máquina, do MTBF, do MTTR e das horas; mas o custo dele aparece na tela da
+  loja (`GET /indicadores/lojas/:id`) em campos próprios, `quantidadeReparos` e `custoReparos`, no total da loja,
+  em cada setor e em cada mês (`porMes`). **`custoTotal` e `quantidadeOs` continuam sendo só do maquinário**:
+  o Gestor vê os dois lado a lado e nunca somados num número só. Vêm de `ListarHistoricoReparosDaLoja`: reparo
+  é a solicitação sem máquina (`maquina_id IS NULL`), então um reparo que o Técnico terceirizou continua
+  reparo; o setor é o da solicitação; o escopo do Gestor vale (EXISTS sobre o setor). Um setor que só teve
+  reparo (sem máquina cadastrada) ganha card, para explicar o custo que está no total. Nas máquinas os dois
+  campos vêm zerados. Testes: `indicadorMaquina_test.go` e `indicadorReparosIntegracao_test.go`.
+  **A lista por trás de cada card:** `GET /indicadores/lojas/:id/ordens?grupo=maquinario|reparos`
+  (`ListarOrdensMaquinarioEncerradasDaLoja` / `ListarReparosEncerradosDaLoja`) devolve as OS encerradas que
+  compõem o número, paginadas (12), mais novas primeiro, com item (a máquina ou o que o Solicitante digitou),
+  patrimônio, origem, setor, técnico, data de encerramento e custo. O **maquinário inclui a preventiva** (o custo
+  dela está no card; a lista a marca pela origem) e aceita `?maquinaId=` (a tela da máquina individual usa); o
+  filtro de máquina é recusado em reparos (400). Os dois aceitam `?setorId=` e `?mes=MM/AAAA` (o rótulo do
+  gráfico; o **mês de encerramento**, em São Paulo — não o da abertura, senão a lista e a barra discordariam).
+  Mesma definição e mesmo escopo do painel (loja fora do escopo é 404; só máquina ativa; setor ATUAL da máquina),
+  então **a soma dos itens é o `custoTotal` / `custoReparos` do card** (há teste dos dois). É endpoint próprio e
+  não `GET /ordens-servico` porque o reparo terceirizado vira `tipo = 'terceiros'` e ficaria de fora, e porque
+  aquela listagem filtra o mês pela abertura e define "finalizada" (encerrada **e com custo lançado**) de outro
+  jeito que o painel (encerrada). A aba **OS Finalizadas** do Gestor continua sendo a ferramenta operacional
+  (buscar, imprimir, filtrar por período e valor); a lista do painel é para explicar o número.
 - **MTBF de grupo só mede entre OS da mesma máquina** (`mtbf` agrupa por `maquinaId`):
   entre OS consecutivas do setor ele mediria o espaçamento entre falhas de máquinas
   diferentes, que encolhe a cada máquina cadastrada sem nenhuma quebrar mais. Para uma
@@ -330,6 +365,40 @@ card, zerado quando não tem OS). Os dois recortes usam o MESMO `resumir`
   ignorando nulo, MTBF precisando de duas OS, corte de 12 meses com meses fora de ordem) e
   `internal/service/indicadorIntegracao_test.go` (a query contra Postgres: OS aberta não
   entra, os dois relógios, o mês em BRT, escopo → 404, administrador sem escopo).
+
+## Linha do tempo da OS (`os_evento`, migration `000021`, feito)
+
+Responde "quem fez, e quando" para cada passo da OS — e preserva o que a correção de custo
+apagaria. `GET /ordens-servico/:id/historico` devolve os eventos do mais antigo ao mais novo.
+
+- **Um evento por passo, na transação do passo** (`registrarEvento`, `ordemServicoEvento.go`):
+  `aberta` (em `criarOrdemServico`, então vale para abrir-os e direta, e no job de preventiva),
+  `iniciada`, `pausada` (`detalhes.motivo`), `retomada`, `terceiro_acionado` (id **e nome** da
+  empresa, que pode ser renomeada depois), `encerrada` e `custo_corrigido`. Passo recusado não
+  deixa evento: ele commita junto com a mudança de estado ou nenhum dos dois.
+- **Dinheiro: guarda o estado DEPOIS do passo.** `encerrada` e `custo_corrigido` levam em
+  `detalhes` o custo inteiro (itens, notas, totais, `temNotaFiscal`). A versão anterior de uma
+  correção é o evento anterior, então o lançamento original do Técnico — que `CorrigirCusto`
+  apaga de `os_custo_item`/`os_nota_fiscal` — fica no `encerrada`, sem um evento extra "de
+  lançamento". A tela calcula o "de → para" comparando snapshots consecutivos.
+- **Append-only de verdade:** `trg_os_evento_imutavel` recusa `UPDATE`. `DELETE` fica livre só
+  porque `ExcluirMaquinaDefinitivo` apaga a máquina com todo o histórico (`os_evento` entrou na
+  CTE, antes de `os_custo_item`).
+- **`usuario_id` nulo só em `aberta`** da OS de preventiva — ninguém abriu, foi o calendário
+  (`ck_os_evento_usuario`, mesmo critério de `aberta_por_id`).
+- **Quem lê:** gestor (escopo no `WHERE`, sobre o setor da solicitação), administrador e o
+  técnico dono. Fora do alcance é 404, como OS inexistente. **Solicitante não lê**: acompanha o
+  pedido, não a execução. A checagem é `ObterOrdemServicoNoEscopo`, query à parte.
+- **Retroativo:** a migration reconstituiu eventos das OS existentes e os marcou
+  `detalhes.retroativo = true`. Abertura e encerramento têm autor gravado; iniciada, pausa,
+  retomada e terceiro usam o técnico da OS — **autoria presumida**, e a tela escreve isso.
+  Correções de custo antigas não foram inventadas.
+- **Não substitui `os_pausa`:** as horas continuam saindo de `vw_os_horas`. Se um dia a
+  reatribuição de técnico existir (ponto 7 da modelagem), é um tipo novo de evento.
+- Testado: `ordemServicoEventoIntegracao_test.go` (ordem e autor de cada passo, o lançamento
+  do Técnico sobrevivendo à correção, motivo e nome da empresa, escopo dos 6 perfis, recusa sem
+  evento, append-only, abertura sem autor), mais a checagem da abertura em
+  `preventivaJobIntegracao_test.go` e `solicitacaoDiretaIntegracao_test.go`.
 
 ## Notificações (central no app + Web Push)
 
@@ -444,6 +513,7 @@ segunda aprovação a cada ciclo não decidia nada, só atrasava. O Gestor conti
 tudo pelas abas de **OS em Andamento** e **Manutenção Prev.**; ele só perdeu o passo de
 clicar em "Abrir OS".
 
+- **`GET /ordens-servico` devolve `origem`** (`solicitante`/`direta`/`preventiva`, de `solicitacao_os.origem`): é o que as telas usam para marcar a OS de preventiva em âmbar, em vez de deduzir pela ausência de solicitante. A resposta do abrir-os e da OS direta também a traz.
 - **A solicitação continua existindo, e isso não é cerimônia.** `horas_parada` é medida
   desde `solicitacao_os.criado_em` (`vw_os_horas`), `uq_os_solicitacao` exige uma
   solicitação por OS, e o card do Técnico busca a origem para mostrar o problema. Tirá-la
@@ -521,8 +591,13 @@ curto para ninguém mais ler a notificação de solicitação de verdade.
 - **Configurar o Cron Job no Railway** (o que falta): mesmo repo, **Dockerfile Path
   `dockerfile`** (produção, não o `.dev`), **Custom Start Command `./main
   preventivas-vencidas`** — o comando inteiro, mesma armadilha do Cron-BACKUP (ver "Backup
-  do banco"). Variáveis: só as `DB_*` + `DB_SSLMODE`; **não precisa das `R2_*` nem da
-  `JWT_SECRET`**. Frequência: 1×/dia de manhã (`0 9 * * *` UTC = 06:00 BRT) — preventiva
+  do banco"). Variáveis: as `DB_*` + `DB_SSLMODE`; **não precisa das `R2_*` nem da
+  `JWT_SECRET`**. **Mais `VAPID_PUBLIC_KEY`/`_PRIVATE_KEY`/`_SUBJECT`, as mesmas da API**, se quiser que o aviso
+  chegue também como push no celular: sem elas o job grava a notificação (o sininho) e só não manda o push.
+  ⚠️ O job é um processo à parte da API e **monta o próprio notificador**
+  (`NewNotificacaoDoAmbiente`, também usado pelo router) e espera os avisos terminarem
+  (`AguardarAvisos`) antes de sair. Antes de 15/10/2026 ele não ligava o `Notificador` e abria a OS sem
+  avisar o técnico, e sem a espera o processo morria antes de a goroutine gravar a notificação. Frequência: 1×/dia de manhã (`0 9 * * *` UTC = 06:00 BRT) — preventiva
   vence no dia, não na hora, e rodar mais vezes não duplica nada, só não adianta.
 - O job **não roda migrations**: quem faz isso é o boot da API. O container do cron sobe o
   mesmo binário contra o mesmo banco já migrado.

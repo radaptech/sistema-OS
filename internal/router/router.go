@@ -1,7 +1,6 @@
 package router
 
 import (
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -49,20 +48,8 @@ func NewContainer(db *pgxpool.Pool) *Container {
 	// Notificador é campo público, não parâmetro de construtor (ver o
 	// comentário em SolicitacaoService/PreventivaService). O mesmo
 	// NotificacaoService grava as notificações e serve as rotas do sininho.
-	serviceNotificacao := service.NewRepoNotificacao(db)
-	// Web Push. Sem as chaves (gere com `make chaves-vapid`) o push fica
-	// desligado e a notificação só aparece no sininho -- mesmo degrade do Resend
-	// sem RESEND_API_KEY. O `if` não é enfeite: atribuir um *WebPush nil à
-	// interface a deixaria não-nil, e entregar() tentaria mandar.
-	if enviador := service.NewWebPush(
-		os.Getenv("VAPID_PUBLIC_KEY"),
-		os.Getenv("VAPID_PRIVATE_KEY"),
-		os.Getenv("VAPID_SUBJECT"),
-	); enviador != nil {
-		serviceNotificacao.Push = enviador
-	} else {
-		slog.Warn("Web Push desligado: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY ausentes")
-	}
+	// Com o Web Push das variáveis VAPID_* (o job de preventivas monta o mesmo).
+	serviceNotificacao := service.NewNotificacaoDoAmbiente(db)
 	serviceSolicitacao.Notificador = serviceNotificacao
 	servicePreventiva.Notificador = serviceNotificacao
 	serviceOrdemServico.Notificador = serviceNotificacao
@@ -249,6 +236,17 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// genérico, mesmo critério do resto da API.
 	api.GET("/ordens-servico", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador", "tecnico"), c.OrdemOS.Listar())
 
+	// Resumo por loja/setor (cards da navegação do Gestor, que lista OS
+	// finalizadas paginadas no servidor) e OS por id (link de notificação). Mesmo
+	// RBAC e mesmo recorte da listagem; fora do escopo é 404.
+	api.GET("/ordens-servico/resumo", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador", "tecnico"), c.OrdemOS.Resumo())
+	api.GET("/ordens-servico/:id", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador", "tecnico"), c.OrdemOS.Obter())
+
+	// Linha do tempo da OS (quem fez cada passo, quando, e o custo a cada
+	// lançamento). Os três perfis da listagem; o recorte é o escopo da query no
+	// service (gestor pelo setor, técnico pela OS dele), não este Permitir.
+	api.GET("/ordens-servico/:id/historico", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador", "tecnico"), c.OrdemOS.Historico())
+
 	// Ciclo de vida da OS -- só o Técnico DONO (checagem no service, não
 	// aqui: OS de outro técnico é 404, não 403 -- ver a nota em
 	// ObterOrdemServicoPorID).
@@ -283,6 +281,10 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// setores e máquinas da loja numa ida só. Mesmo RBAC e mesmo recorte da rota
 	// de máquina; aqui o EXISTS de escopo recorta os setores da loja.
 	api.GET("/indicadores/lojas/:id", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador"), c.OrdemOS.IndicadoresLoja())
+	// A lista por trás de um card de custo desse painel -- maquinário ou pequenos reparos
+	// (?grupo=), paginada, com os recortes de setor, máquina e mês que a tela mostra. Mesmo
+	// RBAC e mesmo escopo.
+	api.GET("/indicadores/lojas/:id/ordens", middleware.AutenticacaoJwt(), middleware.Permitir("gestor", "administrador"), c.OrdemOS.OrdensDoPainelDaLoja())
 
 	// Central de notificações (o sininho): qualquer perfil logado, sempre só
 	// as do próprio usuário -- o id vem do token, nunca da URL.

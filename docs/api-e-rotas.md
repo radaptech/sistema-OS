@@ -133,7 +133,10 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   | `GET /ordens-servico` | gestor, administrador, **técnico** (escopo no `WHERE`) |
   | `POST /ordens-servico/:id/{iniciar,pausar,retomar,acionar-terceiro,encerrar}` | **técnico** (dono da OS — checado no service, não aqui: de outro técnico é 404, não 403) |
   | `POST /ordens-servico/:id/custo` | **administrador** (correção pós-encerramento, sem dono pra checar) |
+  | `GET /ordens-servico/resumo`, `GET /ordens-servico/:id` | gestor, administrador, **técnico** (mesmo escopo da listagem; `:id` fora dele é 404) |
+  | `GET /ordens-servico/:id/historico` | gestor (escopo no `WHERE`), administrador, técnico dono — 404 fora do alcance; solicitante não |
   | `GET /indicadores/maquinas/:id` | gestor, administrador (escopo no `WHERE`, 404 fora dele) |
+  | `GET /indicadores/lojas/:id/ordens` | gestor, administrador (a lista por trás de um card de custo: `?grupo=maquinario|reparos` obrigatório, `&setorId=&maquinaId=&mes=MM/AAAA&pagina=`; `maquinaId` não vale em reparos; loja fora do escopo é 404) |
   | `GET /indicadores/lojas/:id` | gestor, administrador (loja fora dos escopos é 404; o `WHERE` recorta os setores) |
   | `GET /notificacoes`, `/notificacoes/nao-lidas`, `POST /notificacoes/lidas`, `/notificacoes/:id/lida` | **qualquer perfil autenticado** (sempre só as do próprio usuário) |
   | `GET /push/chave-publica`, `POST /push/inscricoes`, `/push/inscricoes/remover` | **qualquer perfil autenticado** (o aparelho fica do usuário do token) |

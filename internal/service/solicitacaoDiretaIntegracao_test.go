@@ -111,6 +111,9 @@ func TestSolicitacaoDireta(t *testing.T) {
 		if err != nil {
 			t.Fatalf("erro ao abrir OS direta: %v", err)
 		}
+		if os.Origem != "direta" {
+			t.Errorf("origem = %q, esperado direta", os.Origem)
+		}
 		if os.TecnicoId != tecnicoA.Id || os.Urgencia != "Alta" || !os.AfetaProducao || os.StatusExecucao != "Aberta" {
 			t.Errorf("OS com forma errada: %+v", os)
 		}
@@ -124,6 +127,16 @@ func TestSolicitacaoDireta(t *testing.T) {
 		}
 		if sol.SolicitanteId == nil || *sol.SolicitanteId != gestor.Id {
 			t.Errorf("solicitanteId = %v, esperado o gestor (%d)", sol.SolicitanteId, gestor.Id)
+		}
+
+		// A linha do tempo registra o gestor como quem abriu, e que foi direta.
+		var autor int64
+		var origem string
+		if err := pool.QueryRow(ctx, `SELECT usuario_id, detalhes->>'origem' FROM os_evento WHERE ordem_servico_id = $1 AND tipo = 'aberta'`, os.Id).Scan(&autor, &origem); err != nil {
+			t.Fatalf("evento 'aberta' não gravado: %v", err)
+		}
+		if autor != gestor.Id || origem != "direta" {
+			t.Errorf("evento aberta = autor %d / origem %s, esperado %d / direta", autor, origem, gestor.Id)
 		}
 	})
 

@@ -243,20 +243,24 @@ type LancamentoCustoManutencaoPayload struct {
 // HorasParada vem nula e as telas exibem "Não se aplica" em vez de um número
 // -- que é diferente de zero, e é por isso que o campo é ponteiro.
 type OrdemServico struct {
-	Id                      int64   `json:"id"`
-	SolicitacaoId           int64   `json:"solicitacaoId"`
-	Tipo                    string  `json:"tipo"`
-	MaquinaId               *int64  `json:"maquinaId"`
-	MaquinaNome             *string `json:"maquinaNome"`
-	MaquinaCodigo           *string `json:"maquinaCodigo"`
-	ItemDescricao           *string `json:"itemDescricao"`
-	Descricao               string  `json:"descricao"`
-	TipoDefeito             *string `json:"tipoDefeito,omitempty"`
-	SetorId                 int64   `json:"setorId"`
-	SetorNome               string  `json:"setorNome"`
-	LojaId                  int64   `json:"lojaId"`
-	LojaNome                string  `json:"lojaNome"`
-	SolicitanteNome         *string `json:"solicitanteNome"`
+	Id              int64   `json:"id"`
+	SolicitacaoId   int64   `json:"solicitacaoId"`
+	Tipo            string  `json:"tipo"`
+	MaquinaId       *int64  `json:"maquinaId"`
+	MaquinaNome     *string `json:"maquinaNome"`
+	MaquinaCodigo   *string `json:"maquinaCodigo"`
+	ItemDescricao   *string `json:"itemDescricao"`
+	Descricao       string  `json:"descricao"`
+	TipoDefeito     *string `json:"tipoDefeito,omitempty"`
+	SetorId         int64   `json:"setorId"`
+	SetorNome       string  `json:"setorNome"`
+	LojaId          int64   `json:"lojaId"`
+	LojaNome        string  `json:"lojaNome"`
+	SolicitanteNome *string `json:"solicitanteNome"`
+	// Origem da solicitação que gerou a OS: 'solicitante' (fila do Gestor),
+	// 'direta' (Gestor/Administrador abriu sem fila) ou 'preventiva' (o job). É o que
+	// as telas usam para marcar a OS de preventiva, que nasce sem pessoa.
+	Origem                  string  `json:"origem"`
 	Urgencia                string  `json:"urgencia,omitempty"`
 	TecnicoId               int64   `json:"tecnicoId,omitempty"`
 	TecnicoNome             *string `json:"tecnicoNome,omitempty"`
@@ -339,6 +343,7 @@ func MontarOrdemServico(
 		LojaId:                     os.LojaID,
 		LojaNome:                   os.LojaNome,
 		SolicitanteNome:            os.SolicitanteNome,
+		Origem:                     string(os.Origem),
 		Urgencia:                   string(os.Urgencia),
 		TecnicoId:                  os.TecnicoID,
 		TecnicoNome:                &os.TecnicoNome,
@@ -489,6 +494,7 @@ func MontarOrdemServicoDaAbertura(os repository.CriarOrdemServicoDeSolicitacaoRo
 		LojaId:          s.LojaID,
 		LojaNome:        s.LojaNome,
 		SolicitanteNome: s.SolicitanteNome,
+		Origem:          string(s.Origem),
 		Urgencia:        urgencia,
 		TecnicoId:       tecnicoId,
 		StatusExecucao:  string(repository.StatusOsAberta),

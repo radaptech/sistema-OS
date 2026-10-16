@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -471,6 +469,17 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 		return helper.TraduzErroPostgres(err)
 	}
 
+	// Sem autor: ninguém abriu, foi o calendário (ck_os_evento_usuario só
+	// deixa o `aberta` ficar sem usuário).
+	if err := registrarEvento(ctx, repo, prev.TenantID, ordem.ID, repository.TipoEventoOsAberta,
+		nil, nil, statusPtr(repository.StatusOsAberta), map[string]any{
+			"origem":    "preventiva",
+			"tecnicoId": *prev.TecnicoID,
+			"urgencia":  "Baixa",
+		}); err != nil {
+		return err
+	}
+
 	// A query soma o intervalo a partir da proxima_data vencida, não de hoje --
 	// senão um ciclo processado com atraso arrastaria todos os seguintes.
 	if _, err := repo.AvancarProximaData(ctx, repository.AvancarProximaDataParams{
@@ -512,16 +521,12 @@ func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPrevent
 		return
 	}
 
-	go func() {
-		fundo, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		maquina, err := repository.New(s.Pool).ObterMaquinaPorID(fundo, repository.ObterMaquinaPorIDParams{
+	emSegundoPlano("notificar preventiva vencida", func(ctx context.Context) error {
+		maquina, err := repository.New(s.Pool).ObterMaquinaPorID(ctx, repository.ObterMaquinaPorIDParams{
 			ID: p.MaquinaID, TenantID: p.TenantID,
 		})
 		if err != nil {
-			slog.ErrorContext(fundo, "notificar preventiva: obter máquina", "preventiva", p.ID, "maquina", p.MaquinaID, "tenant", p.TenantID, "err", err)
-			return
+			return fmt.Errorf("obter máquina %d: %w", p.MaquinaID, err)
 		}
 
 		dados := DadosNotificacao{
@@ -535,8 +540,6 @@ func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPrevent
 			// diferenciar as origens.
 		}
 
-		if err := s.Notificador.NotificarOSPreventiva(fundo, p.TenantID, tecnicoId, dados); err != nil {
-			slog.ErrorContext(fundo, "notificar preventiva", "preventiva", p.ID, "tenant", p.TenantID, "err", err)
-		}
-	}()
+		return s.Notificador.NotificarOSPreventiva(ctx, p.TenantID, tecnicoId, dados)
+	}, "preventiva", p.ID, "tenant", p.TenantID)
 }

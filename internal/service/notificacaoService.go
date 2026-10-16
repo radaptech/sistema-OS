@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -91,6 +93,33 @@ func NewRepoNotificacao(pool *pgxpool.Pool) *NotificacaoService {
 	return &NotificacaoService{
 		Pool: pool,
 	}
+}
+
+// NewNotificacaoDoAmbiente monta o NotificacaoService já com o Web Push das
+// variáveis de ambiente (VAPID_*). É o ÚNICO lugar que faz esse wiring: a API
+// (router.go) e o job de preventivas (cli_preventivas_vencidas.go) são dois
+// processos diferentes, e quando só a API montava isto o job abria a OS e o
+// técnico nunca era avisado -- o Notificador do job ficava nil.
+//
+// Sem as chaves (gere com `make chaves-vapid`) o push fica desligado e a
+// notificação só aparece no sininho -- mesmo degrade do Resend sem
+// RESEND_API_KEY. O `if` não é enfeite: atribuir um *WebPush nil à interface a
+// deixaria não-nil, e entregar() tentaria mandar.
+func NewNotificacaoDoAmbiente(pool *pgxpool.Pool) *NotificacaoService {
+
+	notificacao := NewRepoNotificacao(pool)
+
+	if enviador := NewWebPush(
+		os.Getenv("VAPID_PUBLIC_KEY"),
+		os.Getenv("VAPID_PRIVATE_KEY"),
+		os.Getenv("VAPID_SUBJECT"),
+	); enviador != nil {
+		notificacao.Push = enviador
+	} else {
+		slog.Warn("Web Push desligado: VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY ausentes")
+	}
+
+	return notificacao
 }
 
 // novaNotificacao é o que um evento produz, antes de saber pra quem vai.
@@ -443,13 +472,30 @@ func montarOSConcluida(d DadosNotificacao) novaNotificacao {
 	}
 }
 
+// avisosEmCurso conta os avisos de emSegundoPlano ainda em andamento.
+var avisosEmCurso sync.WaitGroup
+
+// AguardarAvisos bloqueia até todo aviso em segundo plano terminar (cada um tem o
+// próprio prazo de 15s). Para comandos que encerram o processo logo depois de
+// disparar avisos; a API não precisa chamar.
+func AguardarAvisos() {
+	avisosEmCurso.Wait()
+}
+
 // emSegundoPlano roda um aviso fora da request: depois do commit, em
 // goroutine própria e com context.Background() + timeout (nunca o ctx da
 // request, que morre quando a resposta é escrita). Falha só vai pro log --
 // notificação é best-effort e nunca derruba nem atrasa a ação que a gerou.
+//
+// Cada aviso entra em avisosEmCurso: a API é um processo longo e ignora isso, mas
+// o job de preventivas é um comando que SAI depois de abrir as OS -- sem esperar
+// (AguardarAvisos), o processo morria antes de a goroutine gravar a notificação.
 func emSegundoPlano(rotulo string, aviso func(ctx context.Context) error, atributos ...any) {
 
+	avisosEmCurso.Add(1)
 	go func() {
+		defer avisosEmCurso.Done()
+
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 

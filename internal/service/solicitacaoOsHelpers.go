@@ -115,6 +115,15 @@ func criarOrdemServico(ctx context.Context, repo *repository.Queries, tenantId, 
 		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
 	}
 
+	if err := registrarEvento(ctx, repo, tenantId, os.ID, repository.TipoEventoOsAberta,
+		&atorId, nil, statusPtr(repository.StatusOsAberta), map[string]any{
+			"origem":    string(sol.Origem),
+			"tecnicoId": payload.TecnicoId,
+			"urgencia":  string(urgencia),
+		}); err != nil {
+		return model.OrdemServico{}, err
+	}
+
 	aberta := model.MontarOrdemServicoDaAbertura(os, sol, string(urgencia), payload.TecnicoId, afetaProducao)
 	// O técnico já foi lido acima pra validar -- de graça, sem JOIN. É o nome
 	// que o aviso ao Solicitante usa ("virou OS com Fulano").

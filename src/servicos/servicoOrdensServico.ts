@@ -19,6 +19,10 @@ export interface ParametrosListagemOrdensServico {
   // Recorta pelo setor da solicitação de origem (a OS não tem setor próprio). Como todo
   // filtro do cliente, só estreita: setor fora do escopo do usuário devolve lista vazia.
   setorId?: number
+  // Nível de máquina das OS Finalizadas do Gestor: a máquina da solicitação, ou
+  // `reparo: true` para os pequenos reparos do setor (que não têm máquina).
+  maquinaId?: number
+  reparo?: boolean
   tecnicoId?: number
   busca?: string
   // Abas de Custos Pendentes: o Administrador já conferiu o custo (custo.revisadoEm).
@@ -34,14 +38,18 @@ export interface ParametrosListagemOrdensServico {
   valorMaximo?: number
 }
 
-// Uma linha de GET /ordens-servico/resumo: quantas OS há num setor (e a loja dele) para os
-// filtros pedidos. É o que monta os cards de loja e setor quando a lista é paginada no
-// servidor — a soma das linhas é o `total` da listagem com os mesmos filtros.
+// Uma linha de GET /ordens-servico/resumo: quantas OS há numa máquina de um setor (e a loja
+// dele) para os filtros pedidos. É o que monta os cards de loja, setor e máquina quando a
+// lista é paginada no servidor — a soma das linhas é o `total` da listagem com os mesmos
+// filtros. Os pequenos reparos do setor vêm numa linha só, com `maquina*` nulos.
 export interface ResumoOrdensServicoSetor {
   lojaId: number
   lojaNome: string
   setorId: number
   setorNome: string
+  maquinaId: number | null
+  maquinaNome: string | null
+  maquinaCodigo: string | null
   quantidade: number
   afetamProducao: number
 }
@@ -67,7 +75,7 @@ export const servicoOrdensServico = {
   // de baixar a lista inteira só para achar uma.
   obterPorId: (id: number) => api.get<OrdemServico>(`/ordens-servico/${id}`),
 
-  // Contagem por loja/setor para os mesmos filtros de `listar`.
+  // Contagem por loja/setor/máquina para os mesmos filtros de `listar`.
   resumoPorSetor: (parametros: ParametrosListagemOrdensServico = {}) =>
     api.get<ResumoOrdensServicoSetor[]>(`/ordens-servico/resumo${montarQuery(parametros)}`),
 

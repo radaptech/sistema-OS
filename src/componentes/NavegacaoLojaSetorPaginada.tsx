@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from 'react'
-import { ClipboardList, Inbox, Store, Tag, type LucideIcon } from 'lucide-react'
+import { ClipboardList, Cog, Inbox, Store, Tag, type LucideIcon } from 'lucide-react'
 import { EsqueletoCardOS, EsqueletoLista } from './Esqueleto'
 import { ListaNavegacao, TrilhaNavegacao, type PassoTrilha } from './NavegacaoNiveis'
 import { Paginacao } from './Paginacao'
 import { useNavegacaoNiveis } from '../hooks/useNavegacaoNiveis'
 import { useLojas } from '../hooks/useLojas'
+import { useMaquinas } from '../hooks/useMaquinas'
 import { useOrdensServicoPaginadas } from '../hooks/useOrdensServicoPaginadas'
 import { useResumoOrdensServico } from '../hooks/useResumoOrdensServico'
 import { useSetores } from '../hooks/useSetores'
@@ -20,8 +21,16 @@ interface NavegacaoLojaSetorPaginadaProps {
   mensagemVazio: string
   IconeVazio?: LucideIcon
   rotuloNavegacao: string
+  // Desce mais um nível, Setor → Máquina, antes da lista (OS Finalizadas do Gestor, OS
+  // Concluídas do Técnico). Os pequenos reparos do setor, que não têm máquina, viram um card
+  // próprio no fim.
+  porMaquina?: boolean
   renderItem: (ordem: OrdemServico) => ReactNode
 }
+
+// Id do card de pequenos reparos no nível de máquina (?maquina=0 na URL): nenhuma máquina
+// tem id 0, e a lista dele vai ao servidor como `reparo=true`, não como `maquinaId`.
+const ID_REPAROS = 0
 
 function rotuloOS(quantidade: number) {
   return quantidade === 1 ? '1 OS' : `${quantidade} OS`
@@ -32,13 +41,14 @@ function rotuloOS(quantidade: number) {
 // Os cards de loja e setor saem de um resumo (GET /ordens-servico/resumo) e só o setor aberto
 // busca a página atual (GET /ordens-servico?setorId=&pagina=). A soma do resumo é o total da
 // lista com os mesmos filtros, então o card e a página nunca discordam. Nível e página moram:
-// o nível na URL (?loja=&setor=), a página em estado, que volta para 1 ao trocar de setor ou de
-// filtro. Irmão de NavegacaoLojaSetor, que recebe a lista inteira pronta.
+// o nível na URL (?loja=&setor=&maquina=), a página em estado, que volta para 1 ao trocar de
+// setor/máquina ou de filtro. Irmão de NavegacaoLojaSetor, que recebe a lista inteira pronta.
 export function NavegacaoLojaSetorPaginada({
   filtros,
   mensagemVazio,
   IconeVazio = Inbox,
   rotuloNavegacao,
+  porMaquina = false,
   renderItem,
 }: NavegacaoLojaSetorPaginadaProps) {
   const { parametros: urlParametros, navegar } = useNavegacaoNiveis()
@@ -54,9 +64,28 @@ export function NavegacaoLojaSetorPaginada({
     : []
   const setor = acharNivel(itensSetor, urlParametros.get('setor'))
 
-  // Página volta para 1 ao entrar em outro setor ou mudar um filtro — ajuste durante a
-  // renderização, mesmo padrão das listagens do Administrador.
-  const chave = `${setor?.id ?? ''}|${JSON.stringify(filtros)}`
+  // A foto da máquina não vem no resumo: sai do cadastro do setor aberto, só no nível de
+  // máquina. Máquina desativada não está lá e o card cai no ícone.
+  const { data: maquinasDoSetor = [] } = useMaquinas(
+    { setorId: setor?.id },
+    porMaquina && Boolean(setor),
+  )
+  const itensMaquina =
+    porMaquina && setor
+      ? montarItensMaquina(resumo, setor.id, (id) => maquinasDoSetor.find((m) => m.id === id)?.fotoUrl)
+      : []
+  const maquina = acharNivel(itensMaquina, urlParametros.get('maquina'))
+  // O nível que abre a lista: a máquina, ou o próprio setor quando não há nível de máquina.
+  const nivelFinal = porMaquina ? maquina : setor
+  const filtroMaquina: ParametrosListagemOrdensServico = !maquina
+    ? {}
+    : maquina.id === ID_REPAROS
+      ? { reparo: true }
+      : { maquinaId: maquina.id }
+
+  // Página volta para 1 ao entrar em outro setor/máquina ou mudar um filtro — ajuste durante
+  // a renderização, mesmo padrão das listagens do Administrador.
+  const chave = `${setor?.id ?? ''}|${maquina?.id ?? ''}|${JSON.stringify(filtros)}`
   const [pagina, setPagina] = useState(1)
   const [chaveDaPagina, setChaveDaPagina] = useState(chave)
   if (chave !== chaveDaPagina) {
@@ -65,8 +94,8 @@ export function NavegacaoLojaSetorPaginada({
   }
 
   const { data: dadosPagina, isLoading: carregandoPagina } = useOrdensServicoPaginadas(
-    { ...filtros, setorId: setor?.id, pagina },
-    Boolean(setor),
+    { ...filtros, setorId: setor?.id, ...filtroMaquina, pagina },
+    Boolean(nivelFinal),
   )
   const totalPaginas = Math.max(1, dadosPagina?.totalPaginas ?? 1)
   // A lista pode encolher (filtro, OS que saiu): uma página além da última voltaria vazia.
@@ -98,6 +127,12 @@ export function NavegacaoLojaSetorPaginada({
   if (loja && setor) {
     trilha.push({ rotulo: setor.nome, destino: { loja: loja.id, setor: setor.id } })
   }
+  if (loja && setor && maquina) {
+    trilha.push({
+      rotulo: maquina.detalhe ? `${maquina.nome} · ${maquina.detalhe}` : maquina.nome,
+      destino: { loja: loja.id, setor: setor.id, maquina: maquina.id },
+    })
+  }
 
   const ordens = dadosPagina?.dados ?? []
 
@@ -122,16 +157,27 @@ export function NavegacaoLojaSetorPaginada({
           Icone={Tag}
           itens={itensSetor}
           rotuloQuantidade={rotuloOS}
+          rotuloFilhos={porMaquina ? (n) => (n === 1 ? '1 máquina' : `${n} máquinas`) : undefined}
           aoEntrar={(item) => navegar({ loja: loja.id, setor: item.id })}
         />
       )}
 
-      {loja && setor && (
+      {loja && setor && porMaquina && !maquina && (
+        <ListaNavegacao
+          titulo="Escolha a máquina"
+          Icone={Cog}
+          itens={itensMaquina}
+          rotuloQuantidade={rotuloOS}
+          aoEntrar={(item) => navegar({ loja: loja.id, setor: setor.id, maquina: item.id })}
+        />
+      )}
+
+      {loja && setor && nivelFinal && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 border-b border-slate-200/60 pb-2">
             <ClipboardList size={16} className="text-marca-600" />
             <h2 className="font-display text-sm font-bold tracking-widest text-slate-800 uppercase">
-              {setor.nome} · {rotuloOS(setor.quantidade)}
+              {nivelFinal.nome} · {rotuloOS(nivelFinal.quantidade)}
             </h2>
           </div>
           {carregandoPagina && (
@@ -153,27 +199,47 @@ export function NavegacaoLojaSetorPaginada({
   )
 }
 
-// Os cards saem das linhas do resumo (uma por setor), em ordem alfabética como os de
-// `montarItensNavegacao` — o servidor já agrupou, aqui só se soma por loja.
+// Os cards saem das linhas do resumo (uma por máquina de cada setor, mais uma dos reparos):
+// loja e setor somam as linhas, `filhos` conta os setores da loja e as máquinas do setor. Ordem
+// alfabética como a de `montarItensNavegacao` — o servidor já agrupou, aqui só se soma.
+function somarPor(
+  linhas: ResumoOrdensServicoSetor[],
+  obterId: (linha: ResumoOrdensServicoSetor) => number,
+  obterNome: (linha: ResumoOrdensServicoSetor) => string,
+  obterIdFilho: (linha: ResumoOrdensServicoSetor) => string,
+  obterFoto: (id: number) => string | undefined,
+): ItemNavegacao[] {
+  const grupos = new Map<number, ItemNavegacao & { idsFilhos: Set<string> }>()
+  for (const linha of linhas) {
+    const id = obterId(linha)
+    const atual = grupos.get(id) ?? {
+      id,
+      nome: obterNome(linha),
+      quantidade: 0,
+      destaques: 0,
+      idsFilhos: new Set<string>(),
+      fotoUrl: obterFoto(id),
+    }
+    atual.quantidade += linha.quantidade
+    atual.idsFilhos.add(obterIdFilho(linha))
+    grupos.set(id, atual)
+  }
+  return [...grupos.values()]
+    .map(({ idsFilhos, ...grupo }) => ({ ...grupo, filhos: idsFilhos.size }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+}
+
 function montarItensLoja(
   resumo: ResumoOrdensServicoSetor[],
   obterFoto: (lojaId: number) => string | undefined,
 ): ItemNavegacao[] {
-  const lojas = new Map<number, ItemNavegacao>()
-  for (const linha of resumo) {
-    const atual = lojas.get(linha.lojaId) ?? {
-      id: linha.lojaId,
-      nome: linha.lojaNome,
-      quantidade: 0,
-      destaques: 0,
-      filhos: 0,
-      fotoUrl: obterFoto(linha.lojaId),
-    }
-    atual.quantidade += linha.quantidade
-    atual.filhos = (atual.filhos ?? 0) + 1
-    lojas.set(linha.lojaId, atual)
-  }
-  return [...lojas.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  return somarPor(
+    resumo,
+    (linha) => linha.lojaId,
+    (linha) => linha.lojaNome,
+    (linha) => String(linha.setorId),
+    obterFoto,
+  )
 }
 
 function montarItensSetor(
@@ -181,14 +247,47 @@ function montarItensSetor(
   lojaId: number,
   obterFoto: (setorId: number) => string | undefined,
 ): ItemNavegacao[] {
-  return resumo
-    .filter((linha) => linha.lojaId === lojaId)
+  return somarPor(
+    resumo.filter((linha) => linha.lojaId === lojaId),
+    (linha) => linha.setorId,
+    (linha) => linha.setorNome,
+    (linha) => String(linha.maquinaId ?? ID_REPAROS),
+    obterFoto,
+  )
+}
+
+// Uma linha do resumo já é uma máquina. Máquinas iguais têm o mesmo nome, então o patrimônio
+// vai na linha de detalhe e desempata a ordem; o card de reparos fica por último.
+function montarItensMaquina(
+  resumo: ResumoOrdensServicoSetor[],
+  setorId: number,
+  obterFoto: (maquinaId: number) => string | undefined,
+): ItemNavegacao[] {
+  const linhas = resumo.filter((linha) => linha.setorId === setorId)
+  const maquinas: ItemNavegacao[] = linhas
+    .filter((linha) => linha.maquinaId !== null)
     .map((linha) => ({
-      id: linha.setorId,
-      nome: linha.setorNome,
+      id: linha.maquinaId as number,
+      nome: linha.maquinaNome ?? 'Máquina',
+      detalhe: linha.maquinaCodigo ? `Patrimônio ${linha.maquinaCodigo}` : undefined,
       quantidade: linha.quantidade,
       destaques: 0,
-      fotoUrl: obterFoto(linha.setorId),
+      fotoUrl: obterFoto(linha.maquinaId as number),
     }))
-    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+    .sort(
+      (a, b) =>
+        a.nome.localeCompare(b.nome, 'pt-BR') ||
+        (a.detalhe ?? '').localeCompare(b.detalhe ?? '', 'pt-BR', { numeric: true }),
+    )
+  const reparos = linhas.find((linha) => linha.maquinaId === null)
+  if (reparos) {
+    maquinas.push({
+      id: ID_REPAROS,
+      nome: 'Pequenos reparos',
+      detalhe: 'Itens sem máquina cadastrada',
+      quantidade: reparos.quantidade,
+      destaques: 0,
+    })
+  }
+  return maquinas
 }

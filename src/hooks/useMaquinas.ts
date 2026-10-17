@@ -7,9 +7,10 @@ interface ParametrosUseMaquinas {
   ativa?: false
 }
 
-export function useMaquinas({ setorId, lojaId, ativa }: ParametrosUseMaquinas = {}) {
+export function useMaquinas({ setorId, lojaId, ativa }: ParametrosUseMaquinas = {}, habilitado = true) {
   return useQuery({
     queryKey: ['maquinas', { setorId, lojaId, ativa }],
     queryFn: () => servicoMaquinas.listar({ setorId, lojaId, ativa }),
+    enabled: habilitado,
   })
 }

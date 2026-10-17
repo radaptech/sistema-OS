@@ -159,17 +159,18 @@ WHERE os.tenant_id = $1
   AND m.ativa
   AND ($3::bigint IS NULL OR m.setor_id = $3)
   AND ($4::bigint IS NULL OR m.id = $4)
+  AND ($5::boolean IS NULL OR (s.origem = 'preventiva') = $5)
   AND (
-    $5::text IS NULL
-    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $5
+    $6::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $6
   )
   AND (
-    $6::bigint IS NULL
+    $7::bigint IS NULL
     OR EXISTS (
       SELECT 1
       FROM usuario_escopo ue
       LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
-      WHERE ue.usuario_id = $6
+      WHERE ue.usuario_id = $7
         AND ue.loja_id = st.loja_id
         AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
     )
@@ -181,6 +182,7 @@ type ContarOrdensMaquinarioEncerradasDaLojaParams struct {
 	LojaID          int64
 	SetorID         *int64
 	MaquinaID       *int64
+	Preventiva      *bool
 	Mes             *string
 	EscopoUsuarioID *int64
 }
@@ -192,6 +194,7 @@ func (q *Queries) ContarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, ar
 		arg.LojaID,
 		arg.SetorID,
 		arg.MaquinaID,
+		arg.Preventiva,
 		arg.Mes,
 		arg.EscopoUsuarioID,
 	)
@@ -954,7 +957,8 @@ type ListarHistoricoOsDaMaquinaRow struct {
 // programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
 // (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
 // o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
-// resumir/mtbf (model/indicadorMaquina.go). Custo e horas continuam contando.
+// resumir/mtbf (model/indicadorMaquina.go). Custo e quantidade da preventiva saem
+// à parte do maquinário (quantidadePreventivas/custoPreventivas), como os reparos.
 // Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
 // ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
 func (q *Queries) ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHistoricoOsDaMaquinaParams) ([]ListarHistoricoOsDaMaquinaRow, error) {
@@ -1100,23 +1104,24 @@ WHERE os.tenant_id = $1
   AND m.ativa
   AND ($3::bigint IS NULL OR m.setor_id = $3)
   AND ($4::bigint IS NULL OR m.id = $4)
+  AND ($5::boolean IS NULL OR (s.origem = 'preventiva') = $5)
   AND (
-    $5::text IS NULL
-    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $5
+    $6::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $6
   )
   AND (
-    $6::bigint IS NULL
+    $7::bigint IS NULL
     OR EXISTS (
       SELECT 1
       FROM usuario_escopo ue
       LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
-      WHERE ue.usuario_id = $6
+      WHERE ue.usuario_id = $7
         AND ue.loja_id = st.loja_id
         AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
     )
   )
 ORDER BY e.data_fim DESC, os.id DESC
-LIMIT $8 OFFSET $7
+LIMIT $9 OFFSET $8
 `
 
 type ListarOrdensMaquinarioEncerradasDaLojaParams struct {
@@ -1124,6 +1129,7 @@ type ListarOrdensMaquinarioEncerradasDaLojaParams struct {
 	LojaID          int64
 	SetorID         *int64
 	MaquinaID       *int64
+	Preventiva      *bool
 	Mes             *string
 	EscopoUsuarioID *int64
 	Deslocamento    int32
@@ -1147,13 +1153,16 @@ type ListarOrdensMaquinarioEncerradasDaLojaRow struct {
 
 // A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
 // máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
-// ListarReparosEncerradosDaLoja, que cobre o outro grupo.
+// ListarReparosEncerradosDaLoja, que cobre os reparos. Serve também à faixa de
+// manutenções preventivas: `preventiva` separa os dois grupos pela origem da solicitação,
+// o mesmo critério de `preventiva` em resumir (model/indicadorMaquina.go) -- false é o
+// card do maquinário, true é a faixa das preventivas.
 //
 // ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
 // MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
 // desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
-// transferida leva o histórico), escopo no WHERE. Entram TODAS as OS de máquina, inclusive as
-// de preventiva (origem) e as terceirizadas -- o custo delas está no card, e a lista explica.
+// transferida leva o histórico), escopo no WHERE. Entram as terceirizadas também -- o custo delas
+// está no card, e a lista explica.
 // Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
 // Mais novo primeiro, paginada.
 // ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
@@ -1163,6 +1172,7 @@ func (q *Queries) ListarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, ar
 		arg.LojaID,
 		arg.SetorID,
 		arg.MaquinaID,
+		arg.Preventiva,
 		arg.Mes,
 		arg.EscopoUsuarioID,
 		arg.Deslocamento,

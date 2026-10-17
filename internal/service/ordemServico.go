@@ -1025,7 +1025,7 @@ func lojaNoEscopo(ctx context.Context, repo *repository.Queries, tenantId, lojaI
 }
 
 // FiltrosOrdensDoPainel são os recortes que a tela do painel da loja está mostrando: o setor
-// escolhido, a máquina (só no grupo maquinário) e o mês de ENCERRAMENTO (YYYY-MM) clicado no
+// escolhido, a máquina (maquinário e preventivas; reparo não tem) e o mês de ENCERRAMENTO (YYYY-MM) clicado no
 // gráfico. Todos nulos = a loja inteira, o histórico inteiro.
 type FiltrosOrdensDoPainel struct {
 	SetorId   *int64
@@ -1035,8 +1035,9 @@ type FiltrosOrdensDoPainel struct {
 
 // ListarOrdensDoPainelDaLoja é GET /indicadores/lojas/:id/ordens -- a lista por trás de um card de
 // custo do painel da loja, paginada. `grupo` é "maquinario" (as OS de máquina que compõem
-// quantidadeOs/custoTotal) ou "reparos" (os pequenos reparos, que compõem quantidadeReparos/
-// custoReparos e ficam SEPARADOS do maquinário). Mesmo escopo e mesma definição do painel, então a
+// quantidadeOs/custoTotal), "reparos" (os pequenos reparos, que compõem quantidadeReparos/
+// custoReparos) ou "preventivas" (as OS de preventiva, que compõem quantidadePreventivas/
+// custoPreventivas) -- os dois últimos SEPARADOS do maquinário. Mesmo escopo e mesma definição do painel, então a
 // soma dos itens é o número do card. O controller só passa um grupo válido.
 func (s *OrdemServicoService) ListarOrdensDoPainelDaLoja(ctx context.Context, tenantId, lojaId, usuarioId int64, perfil, grupo string, filtros FiltrosOrdensDoPainel, pagina int32) (model.RespostaPaginada[model.OrdemDoPainel], error) {
 
@@ -1060,17 +1061,20 @@ func (s *OrdemServicoService) ListarOrdensDoPainelDaLoja(ctx context.Context, te
 	var dados []model.OrdemDoPainel
 
 	switch grupo {
-	case model.GrupoMaquinario:
+	case model.GrupoMaquinario, model.GrupoPreventivas:
+		// A mesma query para os dois: o que separa é a origem (a OS de preventiva sai do
+		// maquinário e vai para a faixa dela, como em resumir).
+		preventiva := grupo == model.GrupoPreventivas
 		total, err = repo.ContarOrdensMaquinarioEncerradasDaLoja(ctx, repository.ContarOrdensMaquinarioEncerradasDaLojaParams{
 			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId, MaquinaID: filtros.MaquinaId,
-			Mes: filtros.Mes, EscopoUsuarioID: escopo,
+			Preventiva: &preventiva, Mes: filtros.Mes, EscopoUsuarioID: escopo,
 		})
 		if err != nil {
 			return vazio, helper.TraduzErroPostgres(err)
 		}
 		linhas, err := repo.ListarOrdensMaquinarioEncerradasDaLoja(ctx, repository.ListarOrdensMaquinarioEncerradasDaLojaParams{
 			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId, MaquinaID: filtros.MaquinaId,
-			Mes: filtros.Mes, EscopoUsuarioID: escopo, Limite: limite, Deslocamento: deslocamento,
+			Preventiva: &preventiva, Mes: filtros.Mes, EscopoUsuarioID: escopo, Limite: limite, Deslocamento: deslocamento,
 		})
 		if err != nil {
 			return vazio, helper.TraduzErroPostgres(err)

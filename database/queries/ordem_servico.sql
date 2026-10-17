@@ -494,7 +494,8 @@ ORDER BY ordem_servico_id, pausada_em;
 -- programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
 -- (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
 -- o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
--- resumir/mtbf (model/indicadorMaquina.go). Custo e horas continuam contando.
+-- resumir/mtbf (model/indicadorMaquina.go). Custo e quantidade da preventiva saem
+-- à parte do maquinário (quantidadePreventivas/custoPreventivas), como os reparos.
 SELECT
     os.aberta_em,
     s.origem,
@@ -965,13 +966,16 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
 -- name: ListarOrdensMaquinarioEncerradasDaLoja :many
 -- A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
 -- máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
--- ListarReparosEncerradosDaLoja, que cobre o outro grupo.
+-- ListarReparosEncerradosDaLoja, que cobre os reparos. Serve também à faixa de
+-- manutenções preventivas: `preventiva` separa os dois grupos pela origem da solicitação,
+-- o mesmo critério de `preventiva` em resumir (model/indicadorMaquina.go) -- false é o
+-- card do maquinário, true é a faixa das preventivas.
 --
 -- ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
 -- MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
 -- desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
--- transferida leva o histórico), escopo no WHERE. Entram TODAS as OS de máquina, inclusive as
--- de preventiva (origem) e as terceirizadas -- o custo delas está no card, e a lista explica.
+-- transferida leva o histórico), escopo no WHERE. Entram as terceirizadas também -- o custo delas
+-- está no card, e a lista explica.
 -- Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
 -- Mais novo primeiro, paginada.
 -- ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
@@ -1001,6 +1005,7 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
   AND m.ativa
   AND (sqlc.narg(setor_id)::bigint IS NULL OR m.setor_id = sqlc.narg(setor_id))
   AND (sqlc.narg(maquina_id)::bigint IS NULL OR m.id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(preventiva)::boolean IS NULL OR (s.origem = 'preventiva') = sqlc.narg(preventiva))
   AND (
     sqlc.narg(mes)::text IS NULL
     OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)
@@ -1033,6 +1038,7 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
   AND m.ativa
   AND (sqlc.narg(setor_id)::bigint IS NULL OR m.setor_id = sqlc.narg(setor_id))
   AND (sqlc.narg(maquina_id)::bigint IS NULL OR m.id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(preventiva)::boolean IS NULL OR (s.origem = 'preventiva') = sqlc.narg(preventiva))
   AND (
     sqlc.narg(mes)::text IS NULL
     OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)

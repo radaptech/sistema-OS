@@ -146,6 +146,18 @@ func filtrosDeQuery(ctx *gin.Context) (service.FiltrosOrdemServico, bool) {
 		return service.FiltrosOrdemServico{}, false
 	}
 
+	// Nível de máquina: a máquina da solicitação ou, com ?reparo=true, os
+	// pequenos reparos (sem máquina). Os dois juntos nunca casam nada.
+	maquinaId, ok := idDeQuery(ctx, "maquinaId")
+	if !ok {
+		return service.FiltrosOrdemServico{}, false
+	}
+
+	reparo, ok := boolDeQuery(ctx, "reparo")
+	if !ok {
+		return service.FiltrosOrdemServico{}, false
+	}
+
 	tecnicoId, ok := idDeQuery(ctx, "tecnicoId")
 	if !ok {
 		return service.FiltrosOrdemServico{}, false
@@ -193,6 +205,8 @@ func filtrosDeQuery(ctx *gin.Context) (service.FiltrosOrdemServico, bool) {
 		Revisado:    revisado,
 		LojaId:      lojaId,
 		SetorId:     setorId,
+		MaquinaId:   maquinaId,
+		Reparo:      reparo,
 		TecnicoId:   tecnicoId,
 		Busca:       busca,
 		Maquina:     maquina,

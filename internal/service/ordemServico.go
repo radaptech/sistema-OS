@@ -58,7 +58,12 @@ type FiltrosOrdemServico struct {
 	// SetorId recorta pelo setor da SOLICITAÇÃO de origem -- a OS não tem setor
 	// próprio (ver a nota da query). Continua sendo filtro do cliente, então
 	// só estreita: setor fora do escopo de quem chama devolve vazio.
-	SetorId   *int64
+	SetorId *int64
+	// MaquinaId e Reparo são o nível de máquina da navegação das OS
+	// Finalizadas: a máquina da solicitação, ou (Reparo=true) os pequenos
+	// reparos do setor, que não têm máquina.
+	MaquinaId *int64
+	Reparo    *bool
 	TecnicoId *int64
 	Busca     *string
 	// Filtros avançados do Painel do Gestor (ModalFiltrosOS), antes aplicados no
@@ -102,6 +107,8 @@ func (s *OrdemServicoService) ListarOrdensServico(ctx context.Context, tenantId,
 		Revisado:        filtros.Revisado,
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
 		TecnicoID:       filtros.TecnicoId,
 		Busca:           filtros.Busca,
 		Maquina:         filtros.Maquina,
@@ -133,6 +140,8 @@ func (s *OrdemServicoService) ResumoOrdensServicoPorSetor(ctx context.Context, t
 		Tipo:            (*repository.TipoOs)(filtros.Tipo),
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
 		TecnicoID:       filtros.TecnicoId,
 		Busca:           filtros.Busca,
 		Maquina:         filtros.Maquina,
@@ -153,6 +162,9 @@ func (s *OrdemServicoService) ResumoOrdensServicoPorSetor(ctx context.Context, t
 			LojaNome:       l.LojaNome,
 			SetorId:        l.SetorID,
 			SetorNome:      l.SetorNome,
+			MaquinaId:      l.MaquinaID,
+			MaquinaNome:    l.MaquinaNome,
+			MaquinaCodigo:  l.MaquinaCodigo,
 			Quantidade:     l.Quantidade,
 			AfetamProducao: l.AfetamProducao,
 		})
@@ -237,6 +249,8 @@ func (s *OrdemServicoService) listarPaginada(ctx context.Context, tenantId, usua
 		Tipo:            (*repository.TipoOs)(filtros.Tipo),
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
 		TecnicoID:       filtros.TecnicoId,
 		Busca:           filtros.Busca,
 		Maquina:         filtros.Maquina,
@@ -261,6 +275,8 @@ func (s *OrdemServicoService) listarPaginada(ctx context.Context, tenantId, usua
 		Revisado:        filtros.Revisado,
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
 		TecnicoID:       filtros.TecnicoId,
 		Busca:           filtros.Busca,
 		Maquina:         filtros.Maquina,

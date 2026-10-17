@@ -1294,6 +1294,10 @@ type Querier interface {
 	// `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
 	// finalizadas não usam, mas a query serve às abas em andamento no dia em que
 	// elas também paginarem.
+	//
+	// Uma linha por MÁQUINA dentro do setor (o front soma por setor e por loja):
+	// é o que monta o terceiro nível da navegação. Os pequenos reparos do setor
+	// (s.maquina_id NULL) caem juntos numa linha só, com maquina_* nulos.
 	ResumoOrdensServicoPorSetor(ctx context.Context, arg ResumoOrdensServicoPorSetorParams) ([]ResumoOrdensServicoPorSetorRow, error)
 	// POST /ordens-servico/:id/retomar -- Pausada -> status_anterior da pausa
 	// que acabou de fechar ('Aberta' ou 'Em Andamento', nunca um valor fixo

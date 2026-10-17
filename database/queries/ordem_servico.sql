@@ -381,6 +381,12 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
   -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
   -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
   AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
   AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
   AND (
     sqlc.narg(busca)::text IS NULL
@@ -691,6 +697,12 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
   -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
   -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
   AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
   AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
   AND (
     sqlc.narg(busca)::text IS NULL
@@ -748,11 +760,18 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
 -- `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
 -- finalizadas não usam, mas a query serve às abas em andamento no dia em que
 -- elas também paginarem.
+--
+-- Uma linha por MÁQUINA dentro do setor (o front soma por setor e por loja):
+-- é o que monta o terceiro nível da navegação. Os pequenos reparos do setor
+-- (s.maquina_id NULL) caem juntos numa linha só, com maquina_* nulos.
 SELECT
     sc.loja_id,
     l.nome AS loja_nome,
     s.setor_id,
     sc.nome AS setor_nome,
+    s.maquina_id,
+    m.nome AS maquina_nome,
+    m.numero_patrimonio AS maquina_codigo,
     count(*)::bigint AS quantidade,
     (count(*) FILTER (WHERE os.afeta_producao))::bigint AS afetam_producao
 FROM ordem_servico os
@@ -774,6 +793,12 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
   AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
   AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
   AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
   AND (
     sqlc.narg(busca)::text IS NULL
@@ -809,8 +834,8 @@ WHERE os.tenant_id = sqlc.arg(tenant_id)
         AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
     )
   )
-GROUP BY sc.loja_id, l.nome, s.setor_id, sc.nome
-ORDER BY l.nome, sc.nome;
+GROUP BY sc.loja_id, l.nome, s.setor_id, sc.nome, s.maquina_id, m.nome, m.numero_patrimonio
+ORDER BY l.nome, sc.nome, m.nome, m.numero_patrimonio;
 
 -- name: ListarHistoricoReparosDaLoja :many
 -- Os PEQUENOS REPAROS encerrados da loja, para o custo separado do Painel de

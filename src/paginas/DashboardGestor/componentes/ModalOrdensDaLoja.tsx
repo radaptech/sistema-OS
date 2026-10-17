@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Hammer, Inbox, Wrench, XCircle } from 'lucide-react'
+import { CalendarCheck, Hammer, Inbox, Wrench, XCircle } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { Botao } from '../../../componentes/Botao'
 import { Esqueleto } from '../../../componentes/Esqueleto'
@@ -16,13 +16,18 @@ import type { OrdemServico } from '../../../tipos/ordemServico'
 import { fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import { ModalDetalhesOS } from '../../ModalDetalhesOS/ModalDetalhesOS'
 
-// Cada card tem o seu texto: o maquinário e os pequenos reparos (que ficam à parte) explicam de onde
-// vem o número de um jeito diferente.
+// Cada card tem o seu texto: o maquinário, as preventivas e os pequenos reparos (os dois últimos à
+// parte) explicam de onde vem o número de um jeito diferente.
 const TEXTOS: Record<GrupoOrdensDoPainel, { titulo: string; vazio: string; unidade: [string, string] }> = {
   maquinario: {
     titulo: 'OS de Maquinário',
     vazio: 'Nenhuma OS de máquina encerrada neste recorte.',
     unidade: ['OS', 'OS'],
+  },
+  preventivas: {
+    titulo: 'Manutenções Preventivas',
+    vazio: 'Nenhuma manutenção preventiva encerrada neste recorte.',
+    unidade: ['preventiva', 'preventivas'],
   },
   reparos: {
     titulo: 'Pequenos Reparos',
@@ -33,7 +38,7 @@ const TEXTOS: Record<GrupoOrdensDoPainel, { titulo: string; vazio: string; unida
 
 interface ModalOrdensDaLojaProps {
   lojaId: number
-  // Qual card: o maquinário ou os pequenos reparos.
+  // Qual card: o maquinário, as preventivas ou os pequenos reparos.
   grupo: GrupoOrdensDoPainel
   // Os recortes que o painel está mostrando, para a lista bater com o número do card.
   setorId?: number
@@ -44,7 +49,7 @@ interface ModalOrdensDaLojaProps {
   aoFechar: () => void
 }
 
-// A lista por trás de um card de custo do painel da loja (maquinário ou pequenos reparos): cada OS
+// A lista por trás de um card de custo do painel da loja (maquinário, preventivas ou pequenos reparos): cada OS
 // encerrada que compõe o número, mais nova primeiro, 12 por página. Clicar num item abre o detalhe da OS (o
 // mesmo das OS finalizadas, com o histórico) POR CIMA da lista, e fechar volta a ela.
 export function ModalOrdensDaLoja({
@@ -125,7 +130,13 @@ export function ModalOrdensDaLoja({
                       grupo === 'reparos' ? 'bg-orange-500' : fundoDoNumeroOS(ordem.origem)
                     }`}
                   >
-                    {grupo === 'reparos' ? <Hammer size={16} /> : <Wrench size={16} />}
+                    {grupo === 'reparos' ? (
+                      <Hammer size={16} />
+                    ) : grupo === 'preventivas' ? (
+                      <CalendarCheck size={16} />
+                    ) : (
+                      <Wrench size={16} />
+                    )}
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-bold text-slate-800">

@@ -1,4 +1,4 @@
-import { ChevronRight, Hammer, Tag, Wrench } from 'lucide-react'
+import { CalendarCheck, ChevronRight, Hammer, Tag, Wrench } from 'lucide-react'
 import { Esqueleto } from '../../../componentes/Esqueleto'
 import { ImagemProgressiva } from '../../../componentes/ImagemProgressiva'
 import { formatarHoras } from '../../../utilitarios/formatarHoras'
@@ -23,6 +23,8 @@ interface SecaoSetorProps {
   aoSelecionarMaquina: (maquina: Maquina) => void
   // Abre a lista dos pequenos reparos deste setor (a linha laranja vira clicável).
   aoVerReparos?: () => void
+  // Abre a lista das manutenções preventivas deste setor (a linha âmbar vira clicável).
+  aoVerPreventivas?: () => void
   // Abre a lista das OS de máquina deste setor (as que formam o "Custo Maquinário" acima).
   aoVerMaquinario?: () => void
 }
@@ -40,6 +42,7 @@ export function SecaoSetor({
   atraso,
   aoSelecionarMaquina,
   aoVerReparos,
+  aoVerPreventivas,
   aoVerMaquinario,
 }: SecaoSetorProps) {
   return (
@@ -103,6 +106,25 @@ export function SecaoSetor({
         >
           Ver as {resumoSetor.quantidadeOs} {resumoSetor.quantidadeOs === 1 ? 'OS de máquina' : 'OS de máquina'}
           <ChevronRight size={12} />
+        </button>
+      )}
+
+      {/* Manutenção preventiva é revisão programada, não quebra: o custo dela fica à parte do
+          maquinário acima, como o dos reparos. Só aparece quando o setor teve alguma no período. */}
+      {mostrarResumo && resumoSetor && resumoSetor.quantidadePreventivas > 0 && (
+        <button
+          type="button"
+          onClick={aoVerPreventivas}
+          disabled={!aoVerPreventivas}
+          title="Ver as manutenções preventivas deste setor"
+          className="flex items-center gap-2 rounded-xl border-l-4 border-amber-400 bg-slate-50/50 px-3 py-2 text-left font-mono text-[11px] text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
+        >
+          <CalendarCheck size={12} className="shrink-0 text-amber-500" />
+          <span className="font-semibold">Preventivas</span>
+          {resumoSetor.quantidadePreventivas}{' '}
+          {resumoSetor.quantidadePreventivas === 1 ? 'preventiva' : 'preventivas'} ·{' '}
+          {formatarMoeda(resumoSetor.custoPreventivas)}
+          {aoVerPreventivas && <ChevronRight size={12} className="ml-auto shrink-0 text-slate-300" />}
         </button>
       )}
 
@@ -239,8 +261,13 @@ function CardMaquina({
           <Esqueleto className="h-3 w-40" />
         ) : (
           <p className="truncate font-mono text-[11px] text-slate-500">
-            {resumo && resumo.quantidadeOs > 0
-              ? `${formatarHoras(resumo.horasParadaTotal)} parada · ${formatarMoeda(resumo.custoTotal)}`
+            {resumo && resumo.quantidadeOs + resumo.quantidadePreventivas > 0
+              ? `${formatarHoras(resumo.horasParadaTotal)} parada · ${formatarMoeda(resumo.custoTotal)}${
+                  // A preventiva vem à parte, como no painel: nunca somada ao custo da máquina.
+                  resumo.quantidadePreventivas > 0
+                    ? ` · prev. ${formatarMoeda(resumo.custoPreventivas)}`
+                    : ''
+                }`
               : 'Sem OS encerrada no período'}
           </p>
         )}

@@ -15,6 +15,8 @@ export const RESUMO_ZERADO: ResumoIndicadores = {
   custoTotal: 0,
   quantidadeReparos: 0,
   custoReparos: 0,
+  quantidadePreventivas: 0,
+  custoPreventivas: 0,
   porTipoDefeito: tiposDefeito.map((tipoDefeito) => ({
     tipoDefeito,
     horasParada: 0,
@@ -38,6 +40,7 @@ export function resumoDoPeriodo(
 export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
   const custoPorMes = new Map(porMes.map((item) => [item.mes, item.custoTotal]))
   const reparosPorMes = new Map(porMes.map((item) => [item.mes, item.custoReparos]))
+  const preventivasPorMes = new Map(porMes.map((item) => [item.mes, item.custoPreventivas]))
   const hoje = new Date()
 
   return Array.from({ length: 12 }, (_, indice) => {
@@ -46,6 +49,7 @@ export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
     const chave = `${mes}/${data.getFullYear()}`
     const custo = custoPorMes.get(chave) ?? 0
     const reparos = reparosPorMes.get(chave) ?? 0
+    const preventivas = preventivasPorMes.get(chave) ?? 0
 
     return {
       chave,
@@ -55,6 +59,8 @@ export function montarBarrasMensais(porMes: IndicadorMensal[]): BarraMensal[] {
       valorFormatado: formatarMoeda(custo),
       valorReparos: reparos,
       valorReparosFormatado: formatarMoeda(reparos),
+      valorPreventivas: preventivas,
+      valorPreventivasFormatado: formatarMoeda(preventivas),
     }
   })
 }

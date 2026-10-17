@@ -3,8 +3,10 @@ export interface BarraMensal {
   rotulo: string
   valor: number
   valorFormatado: string
-  // Custo dos pequenos reparos no mês, empilhado sobre o do maquinário: duas séries, nunca
-  // um número só.
+  // Custo das manutenções preventivas e dos pequenos reparos no mês, empilhados sobre o do
+  // maquinário: três séries, nunca um número só.
+  valorPreventivas?: number
+  valorPreventivasFormatado?: string
   valorReparos?: number
   valorReparosFormatado?: string
 }
@@ -16,9 +18,15 @@ interface GraficoBarrasProps {
   aoSelecionar: (chave: string) => void
 }
 
-const COR_BARRA = '#2a78d6'
-// Laranja contra o azul: distingue mesmo sem a legenda, que repete o nome em texto.
-const COR_REPAROS = '#e8871e'
+// Ordem fixa de baixo para cima (a mesma da legenda). Cores conferidas no validador da skill de
+// dataviz, no tema claro e no escuro: o âmbar da preventiva (o mesmo tom do selo de origem) ao
+// lado do laranja antigo dos reparos (#e8871e) não se distinguia nem com visão normal, por isso o
+// laranja escureceu. A legenda repete o nome em texto, então a série não depende só da cor.
+const SERIES = [
+  { nome: 'Maquinário', cor: '#2a78d6', valor: (item: BarraMensal) => item.valor },
+  { nome: 'Preventivas', cor: '#b98a06', valor: (item: BarraMensal) => item.valorPreventivas ?? 0 },
+  { nome: 'Pequenos reparos', cor: '#c2410c', valor: (item: BarraMensal) => item.valorReparos ?? 0 },
+] as const
 
 export function GraficoBarras({
   titulo,
@@ -26,10 +34,15 @@ export function GraficoBarras({
   selecionada,
   aoSelecionar,
 }: GraficoBarrasProps) {
-  // A altura é a do total empilhado (maquinário + reparos), para as duas séries caberem.
-  const valorMaximo = Math.max(...dados.map((item) => item.valor + (item.valorReparos ?? 0)), 1)
-  // Só mostra a série e a legenda de reparos quando existe algum reparo no período.
-  const temReparos = dados.some((item) => (item.valorReparos ?? 0) > 0)
+  // A altura é a do total empilhado, para as três séries caberem.
+  const valorMaximo = Math.max(
+    ...dados.map((item) => SERIES.reduce((soma, serie) => soma + serie.valor(item), 0)),
+    1,
+  )
+  // A legenda só aparece quando há mais de uma série no período; com só o maquinário, o título
+  // já diz o que é.
+  const seriesComValor = SERIES.filter((serie) => dados.some((item) => serie.valor(item) > 0))
+  const mostrarLegenda = seriesComValor.some((serie) => serie !== SERIES[0])
 
   return (
     <div className="shadow-card rounded-2xl bg-white p-4">
@@ -37,32 +50,35 @@ export function GraficoBarras({
         {titulo}
       </h3>
 
-      {temReparos && (
+      {mostrarLegenda && (
         <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-slate-500">
-          <li className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: COR_BARRA }} />
-            Maquinário
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: COR_REPAROS }} />
-            Pequenos reparos
-          </li>
+          {seriesComValor.map((serie) => (
+            <li key={serie.nome} className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: serie.cor }} />
+              {serie.nome}
+            </li>
+          ))}
         </ul>
       )}
 
       <div className="mt-4 flex h-36 items-end gap-1 sm:gap-2">
         {dados.map((item, indice) => {
-          // Mês sem custo fica sem barra; o mínimo de 3% só mantém visível um valor baixo.
+          const preventivas = item.valorPreventivas ?? 0
           const reparos = item.valorReparos ?? 0
-          const alturaPercentual =
-            item.valor > 0 ? Math.max((item.valor / valorMaximo) * 100, 3) : 0
-          const alturaReparos =
-            reparos > 0 ? Math.max((reparos / valorMaximo) * 100, 3) : 0
+          // Só os segmentos com valor; o de cima leva o canto arredondado.
+          const segmentos = SERIES.map((serie) => ({ ...serie, quantia: serie.valor(item) })).filter(
+            (segmento) => segmento.quantia > 0,
+          )
 
           const ativa = item.chave === selecionada
           // Com um mês escolhido, os outros recuam: fica claro de qual mês são os
           // números dos cards e da rosca.
           const esmaecida = selecionada !== null && !ativa
+
+          const extras = [
+            preventivas > 0 && `preventivas ${item.valorPreventivasFormatado}`,
+            reparos > 0 && `reparos ${item.valorReparosFormatado}`,
+          ].filter(Boolean)
 
           return (
             // A coluna inteira é o botão, para dar para clicar num mês sem custo
@@ -72,7 +88,7 @@ export function GraficoBarras({
               key={item.chave}
               onClick={() => aoSelecionar(item.chave)}
               aria-pressed={ativa}
-              aria-label={`${item.chave}: ${item.valorFormatado}${reparos > 0 ? `, pequenos reparos ${item.valorReparosFormatado}` : ''}`}
+              aria-label={`${item.chave}: ${item.valorFormatado}${extras.length ? `, ${extras.join(', ')}` : ''}`}
               className="group relative flex h-full min-w-0 flex-1 cursor-pointer flex-col items-center rounded-md"
             >
               <div
@@ -80,26 +96,21 @@ export function GraficoBarras({
                 role="tooltip"
               >
                 {item.valorFormatado}
-                {reparos > 0 && ` · reparos ${item.valorReparosFormatado}`}
+                {extras.map((extra) => ` · ${extra}`)}
               </div>
 
               <div className="flex min-h-0 w-full flex-1 flex-col-reverse items-stretch justify-start">
-                <div
-                  className={`w-full transition-opacity ${reparos > 0 ? '' : 'rounded-t-[4px]'} ${esmaecida ? 'opacity-35 group-hover:opacity-60' : 'group-hover:opacity-80'}`}
-                  style={{
-                    height: `${alturaPercentual}%`,
-                    backgroundColor: COR_BARRA,
-                  }}
-                />
-                {reparos > 0 && (
+                {segmentos.map((segmento, posicao) => (
                   <div
-                    className={`w-full rounded-t-[4px] transition-opacity ${esmaecida ? 'opacity-35 group-hover:opacity-60' : 'group-hover:opacity-80'}`}
+                    key={segmento.nome}
+                    className={`w-full transition-opacity ${posicao === segmentos.length - 1 ? 'rounded-t-[4px]' : ''} ${esmaecida ? 'opacity-35 group-hover:opacity-60' : 'group-hover:opacity-80'}`}
                     style={{
-                      height: `${alturaReparos}%`,
-                      backgroundColor: COR_REPAROS,
+                      // Mês sem custo fica sem barra; o mínimo de 3% só mantém visível um valor baixo.
+                      height: `${Math.max((segmento.quantia / valorMaximo) * 100, 3)}%`,
+                      backgroundColor: segmento.cor,
                     }}
                   />
-                )}
+                ))}
               </div>
 
               {/* No celular 12 rótulos "MM/AA" encostam uns nos outros: mostra um sim, um não

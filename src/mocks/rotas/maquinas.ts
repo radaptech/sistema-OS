@@ -26,23 +26,33 @@ import {
   type Rota,
 } from '../utilidadesMock'
 
+// Mesma regra do servidor (sincronizarPreventivas): a que volta com id é atualizada no
+// lugar, a sem id é nova e a que não veio sai. Recriar todas trocaria o id e o histórico
+// da preventiva sumiria a cada edição da máquina.
 function gravarPreventivas(maquinaId: number, itens: NovaMaquinaPayload['preventivas']): void {
+  const manter = new Set(itens.map((item) => item.id).filter((id) => id !== undefined))
   for (let indice = preventivas.length - 1; indice >= 0; indice -= 1) {
-    if (preventivas[indice].maquinaId === maquinaId) {
+    if (preventivas[indice].maquinaId === maquinaId && !manter.has(preventivas[indice].id)) {
       preventivas.splice(indice, 1)
     }
   }
 
   for (const item of itens) {
-    const nova: PreventivaInterna = {
-      id: gerarId(preventivas),
-      maquinaId,
+    const existente = preventivas.find(
+      (preventiva) => preventiva.id === item.id && preventiva.maquinaId === maquinaId,
+    )
+    const dados = {
       tecnicoId: item.tecnicoId,
       descricao: item.descricao,
       intervaloDias: item.intervaloDias,
       proximaData: item.proximaData,
       ativa: item.ativa,
     }
+    if (existente) {
+      Object.assign(existente, dados)
+      continue
+    }
+    const nova: PreventivaInterna = { id: gerarId(preventivas), maquinaId, ...dados }
     preventivas.push(nova)
   }
 }

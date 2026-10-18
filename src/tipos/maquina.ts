@@ -38,6 +38,9 @@ export interface HistoricoMaquina {
 }
 
 export interface PreventivaManutencao {
+  // Só na edição da máquina: a preventiva que já existia volta com o id e o servidor a
+  // atualiza no lugar, mantendo o histórico de ciclos. Sem id, é preventiva nova.
+  id?: number
   maquinaId: number
   // Quem recebe a OS quando esta preventiva vencer. A preventiva não passa mais pela fila
   // do Gestor: ao vencer, o servidor abre a OS já atribuída a este técnico. Por isso o

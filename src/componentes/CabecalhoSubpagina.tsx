@@ -1,6 +1,7 @@
 import { ArrowLeft, type LucideIcon } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { AlternadorTema } from './AlternadorTema'
+import { useAlturaCabecalho } from '../hooks/useAlturaCabecalho'
 
 interface CabecalhoSubpaginaProps {
   contexto: string
@@ -13,10 +14,14 @@ export function CabecalhoSubpagina({
   titulo,
   Icone,
 }: CabecalhoSubpaginaProps) {
+  const referenciaCabecalho = useAlturaCabecalho<HTMLElement>()
   const navegar = useNavigate()
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg">
+    <header
+      ref={referenciaCabecalho}
+      className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg"
+    >
       <div className="flex w-full items-center gap-2.5 px-4 py-3 sm:px-8">
         <button
           type="button"

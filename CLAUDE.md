@@ -132,6 +132,24 @@ desfeito por engano.
 
 ## Pegadinhas transversais (já corrigidas — não reintroduza)
 
+- ⚠️ **Modal que chama o servidor espera a resposta antes de fechar.** `aoSalvar` é
+  `(dados) => Promise<void>`, o modal faz `await` e só chama `fechar()` se deu certo; no erro
+  fica aberto com o que foi digitado (o toast do `api.ts` já explica) e o botão mostra
+  "Salvando…" pelo `isSubmitting` do React Hook Form. Antes os seis modais de escrita (encerrar,
+  pausar, acionar terceiro, abrir OS, rejeitar, lançar custo) faziam `aoSalvar(dados); fechar()`:
+  com sinal fraco o técnico perdia o encerramento inteiro, e a promessa rejeitada virava exceção
+  solta no console. Os testes E2E (`../sistema-os-infra/e2e`) cortam a rede e conferem.
+- **Todo modal usa `useDialogo`** (`hooks/useDialogo.ts`): espalhe `propsDialogo` no cartão
+  (`role="dialog"`, `aria-modal`, `aria-labelledby`) e ponha `idTitulo` no título. Ele também
+  fecha com Esc — só o modal de cima, numa pilha, e nunca enquanto salva (`podeFechar`).
+- **`CampoTexto`/`CampoTextoArea`/`CampoSelecao` geram o `id` com `useId`**, não só com o
+  `name`: dois formulários na mesma tela (a máquina e o modal de preventiva, ambos com
+  `descricao`) repetiam o id e o rótulo de um apontava para o campo do outro; campo sem `name`
+  (os de custo, o select de área do técnico) ficava sem rótulo nenhum para o leitor de tela.
+- **O toast nasce abaixo do cabeçalho** (`hooks/useAlturaCabecalho.ts` publica a altura em
+  `--altura-cabecalho`, que o `index.css` soma ao topo do react-toastify). No topo da tela ele
+  cobria o sino, o tema e o Sair por 4s depois de cada ação. Cabeçalho novo usa o hook.
+
 - ⚠️ **Custo `0` é válido em todos os campos de valor** (serviço sem peça, conserto em garantia). Toda soma e exibição de custo usa `??`, **nunca `||`** — `custoTotal` em `PainelGestor`, `CardOSFinalizada` e `AdministradorOSFinalizadas`, e os cards desta tela comparam com `!== undefined`. Trocar por `||` faria R$ 0,00 sumir e virar `—`. Nos esquemas Zod é `nonnegative()`, e no back `binding:"gte=0"` — nunca `required`, que rejeita zero em campo numérico.
 
 - ⚠️ **Achado que só apareceu rodando a API de verdade:** nota repetida devolvia **500**. O
@@ -295,6 +313,11 @@ não oferece nada), `POST /push/inscricoes` (o `subscription.toJSON()` direto, 2
   `instalar` (iPhone fora do app instalado: passo a passo Compartilhar → Adicionar à Tela de
   Início — no Safari comum o `PushManager` nem existe) e `indisponivel` (navegador sem push ou
   servidor sem chave — não mostra nada).
+  ⚠️ **"Ativado" exige o servidor ter gravado a inscrição.** Se o `POST /push/inscricoes` falhar
+  (servidor recusou, rede caiu), `ativar` desfaz a inscrição no navegador e volta para
+  `desativado` — antes ele olhava só o navegador e mostrava "Avisos ativos" sem o servidor ter
+  para onde mandar. Se é o **navegador** que recusa o `subscribe` (aba anônima do Chrome, que não
+  tem Push API), `falhaNavegador` mostra uma linha explicando em vez de voltar calado.
 - **Navegador (`utilitarios/pushNavegador.ts`):** permissão, `subscribe`, número no ícone
   (`setAppBadge`), limpar a bandeja. Inscrição feita com **outra chave VAPID** (o servidor trocou
   o par) é desfeita e refeita — senão o serviço de push recusaria tudo o que o servidor assina.

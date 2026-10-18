@@ -12,11 +12,13 @@ import {
   type DadosAbrirOrdemServico,
 } from './esquemaAbrirOrdemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../hooks/useDialogo'
 
 interface ModalAbrirOrdemServicoProps {
   solicitacao: SolicitacaoOS
   aoFechar: () => void
-  aoSalvar: (dados: DadosAbrirOrdemServico) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosAbrirOrdemServico) => Promise<void>
 }
 
 export function ModalAbrirOrdemServico({
@@ -32,7 +34,7 @@ export function ModalAbrirOrdemServico({
   const {
     handleSubmit,
     control,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosAbrirOrdemServico>({
     resolver: zodResolver(esquemaAbrirOrdemServico),
     defaultValues: {
@@ -41,16 +43,25 @@ export function ModalAbrirOrdemServico({
     },
   })
 
-  function aoSalvarFormulario(dados: DadosAbrirOrdemServico) {
-    aoSalvar(dados)
+  async function aoSalvarFormulario(dados: DadosAbrirOrdemServico) {
+    try {
+      await aoSalvar(dados)
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
+
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
 
   return createPortal(
     <div
       className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}
     >
       <div
+        {...propsDialogo}
         className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}
       >
         <div className="bg-marca-600 flex items-start justify-between px-6 py-4">
@@ -58,7 +69,7 @@ export function ModalAbrirOrdemServico({
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Gestor
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Abrir OS · #{solicitacao.id}
             </p>
             <p className="text-xs text-white/80">{solicitacao.maquinaNome}</p>
@@ -67,6 +78,7 @@ export function ModalAbrirOrdemServico({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -126,13 +138,15 @@ export function ModalAbrirOrdemServico({
 
           <div className="mt-1 flex gap-3">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
+                rotuloCarregando="Abrindo..."
                 className="flex items-center justify-center gap-2"
               >
                 <CheckCircle2 size={16} />

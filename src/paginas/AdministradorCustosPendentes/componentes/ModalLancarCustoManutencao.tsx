@@ -17,11 +17,13 @@ import {
   type DadosLancarCustoManutencao,
 } from '../esquemaLancarCustoManutencao'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalLancarCustoManutencaoProps {
   ordemServico: OrdemServico
   aoFechar: () => void
-  aoSalvar: (dados: DadosLancarCustoManutencao) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosLancarCustoManutencao) => Promise<void>
 }
 
 export function ModalLancarCustoManutencao({
@@ -37,7 +39,7 @@ export function ModalLancarCustoManutencao({
     register,
     control,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosLancarCustoManutencao>({
     resolver: zodResolver(esquemaLancarCustoManutencao),
     defaultValues: {
@@ -74,20 +76,28 @@ export function ModalLancarCustoManutencao({
   // A lista de notas desmonta quando o alternador desliga, mas o React Hook Form guarda o
   // que foi digitado: sem esvaziar aqui, desmarcar e salvar mandaria as notas junto de
   // temNotaFiscal:false e o servidor recusaria (trg_nota_fiscal_declarada, 400).
-  function aoSalvarFormulario(dados: DadosLancarCustoManutencao) {
-    aoSalvar(dados.temNotaFiscal ? dados : { ...dados, notasFiscais: [] })
+  async function aoSalvarFormulario(dados: DadosLancarCustoManutencao) {
+    try {
+      await aoSalvar(dados.temNotaFiscal ? dados : { ...dados, notasFiscais: [] })
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Administrador
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Lançar Custos · OS #{ordemServico.id}
             </p>
             <p className="text-xs text-white/80">
@@ -98,6 +108,7 @@ export function ModalLancarCustoManutencao({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -239,13 +250,14 @@ export function ModalLancarCustoManutencao({
               cobrir a largura toda, senão o conteúdo aparece por baixo nas bordas. */}
           <div className="sticky bottom-0 -mx-6 mt-1 flex gap-3 border-t border-slate-100 bg-white px-6 pt-4 pb-6">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
                 className="flex items-center justify-center gap-2"
               >
                 <CheckCircle2 size={16} />

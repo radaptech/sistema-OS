@@ -7,6 +7,7 @@ import { CampoTexto } from '../../../componentes/CampoTexto'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
 import { servicoMaquinas } from '../../../servicos/servicoMaquinas'
 import type { Maquina } from '../../../tipos/maquina'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalExcluirMaquinaDefinitivoProps {
   maquina: Maquina
@@ -39,13 +40,15 @@ export function ModalExcluirMaquinaDefinitivo({
   const patrimonio = maquina.numeroPatrimonio ?? ''
   const liberado = confirmacao.trim() === patrimonio && senha.length > 0
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !confirmando })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between bg-red-600 px-6 py-4">
           <div className="flex items-center gap-2">
             <AlertTriangle className="text-white" size={20} />
-            <p className="font-display text-lg font-bold text-white">Excluir definitivamente</p>
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">Excluir definitivamente</p>
           </div>
           <button
             type="button"

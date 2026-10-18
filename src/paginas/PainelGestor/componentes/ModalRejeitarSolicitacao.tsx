@@ -11,11 +11,13 @@ import {
   type DadosRejeitarSolicitacao,
 } from '../esquemaRejeitarSolicitacao'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalRejeitarSolicitacaoProps {
   solicitacao: SolicitacaoOS
   aoFechar: () => void
-  aoSalvar: (dados: DadosRejeitarSolicitacao) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosRejeitarSolicitacao) => Promise<void>
 }
 
 export function ModalRejeitarSolicitacao({
@@ -28,26 +30,34 @@ export function ModalRejeitarSolicitacao({
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosRejeitarSolicitacao>({
     resolver: zodResolver(esquemaRejeitarSolicitacao),
     defaultValues: { motivo: '' },
   })
 
-  function aoSalvarFormulario(dados: DadosRejeitarSolicitacao) {
-    aoSalvar(dados)
+  async function aoSalvarFormulario(dados: DadosRejeitarSolicitacao) {
+    try {
+      await aoSalvar(dados)
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
         <div className="flex items-start justify-between bg-red-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Gestor
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Rejeitar Solicitação · #{solicitacao.id}
             </p>
             <p className="text-xs text-white/80">
@@ -58,6 +68,7 @@ export function ModalRejeitarSolicitacao({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -89,13 +100,15 @@ export function ModalRejeitarSolicitacao({
 
           <div className="mt-1 flex gap-3">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
+                rotuloCarregando="Rejeitando..."
                 className="flex items-center justify-center gap-2 bg-red-600"
               >
                 <Ban size={16} />

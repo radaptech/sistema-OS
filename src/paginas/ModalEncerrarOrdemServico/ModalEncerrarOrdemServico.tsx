@@ -17,6 +17,7 @@ import {
   type DadosEncerrarOrdemServico,
 } from './esquemaEncerrarOrdemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../hooks/useDialogo'
 
 interface DadosConfirmarEncerramento extends DadosEncerrarOrdemServico {
   dataInicio: string
@@ -27,7 +28,8 @@ interface DadosConfirmarEncerramento extends DadosEncerrarOrdemServico {
 interface ModalEncerrarOrdemServicoProps {
   ordemServico: OrdemServico
   aoFechar: () => void
-  aoSalvar: (dados: DadosConfirmarEncerramento) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosConfirmarEncerramento) => Promise<void>
 }
 
 export function ModalEncerrarOrdemServico({
@@ -54,7 +56,7 @@ export function ModalEncerrarOrdemServico({
     register,
     control,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosEncerrarOrdemServico>({
     resolver: zodResolver(esquemaEncerrarOrdemServico),
     defaultValues: {
@@ -73,25 +75,33 @@ export function ModalEncerrarOrdemServico({
     },
   })
 
-  function aoSalvarFormulario(dados: DadosEncerrarOrdemServico) {
-    aoSalvar({
-      ...dados,
-      dataInicio,
-      dataFim: agora,
-      horasTrabalhadas,
-    })
+  async function aoSalvarFormulario(dados: DadosEncerrarOrdemServico) {
+    try {
+      await aoSalvar({
+        ...dados,
+        dataInicio,
+        dataFim: agora,
+        horasTrabalhadas,
+      })
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Técnico
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Encerrar OS · #{ordemServico.id}
             </p>
             <p className="text-xs text-white/80">{ordemServico.maquinaNome}</p>
@@ -100,6 +110,7 @@ export function ModalEncerrarOrdemServico({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -244,13 +255,15 @@ export function ModalEncerrarOrdemServico({
               cobrir a largura toda, senão o conteúdo aparece por baixo nas bordas. */}
           <div className="sticky bottom-0 -mx-6 mt-1 flex gap-3 border-t border-slate-100 bg-white px-6 pt-4 pb-6">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
+                rotuloCarregando="Encerrando..."
                 className="flex items-center justify-center gap-2"
               >
                 <CheckCircle2 size={16} />

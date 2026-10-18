@@ -1,8 +1,9 @@
-import { useEffect, useId, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Cog, Layers, X } from 'lucide-react'
 import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 import type { MaquinaDasMinhasSolicitacoes } from '../../../tipos/maquina'
 
 interface FolhaMaquinasProps {
@@ -21,20 +22,10 @@ export function FolhaMaquinas({
   aoSelecionar,
   aoFechar,
 }: FolhaMaquinasProps) {
-  const idTitulo = useId()
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar, {
     variante: 'folha',
   })
-
-  useEffect(() => {
-    function aoTeclar(evento: KeyboardEvent) {
-      if (evento.key === 'Escape') {
-        fechar()
-      }
-    }
-    document.addEventListener('keydown', aoTeclar)
-    return () => document.removeEventListener('keydown', aoTeclar)
-  }, [fechar])
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
 
   function escolher(maquinaId: number | undefined) {
     aoSelecionar(maquinaId)
@@ -47,9 +38,7 @@ export function FolhaMaquinas({
       className={`${classeFundo} fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4`}
     >
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={idTitulo}
+        {...propsDialogo}
         onClick={(evento) => evento.stopPropagation()}
         className={`${classeCartao} shadow-pop flex max-h-[80svh] w-full max-w-md flex-col rounded-t-3xl bg-white sm:rounded-3xl`}
       >

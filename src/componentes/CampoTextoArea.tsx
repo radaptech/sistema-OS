@@ -1,4 +1,4 @@
-import { forwardRef, type TextareaHTMLAttributes } from 'react'
+import { forwardRef, useId, type TextareaHTMLAttributes } from 'react'
 
 interface CampoTextoAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   rotulo: string
@@ -7,7 +7,11 @@ interface CampoTextoAreaProps extends TextareaHTMLAttributes<HTMLTextAreaElement
 
 export const CampoTextoArea = forwardRef<HTMLTextAreaElement, CampoTextoAreaProps>(
   ({ rotulo, mensagemErro, id, className = '', name, ...props }, ref) => {
-    const textareaId = id ?? name
+    // Sufixo do useId: com só o name, dois formulários na mesma tela (a máquina e o
+    // modal de preventiva, ambos com "descricao") repetiam o id, e o rótulo de um
+    // apontava para o campo do outro.
+    const idGerado = useId()
+    const textareaId = id ?? (name ? `${name}-${idGerado}` : idGerado)
 
     return (
       <div className="flex flex-col gap-1.5">

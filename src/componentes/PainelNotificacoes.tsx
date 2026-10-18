@@ -93,6 +93,7 @@ export function PainelNotificacoes({
       <AvisoAtivarPush
         estado={push.estado}
         processando={push.processando}
+        falhaNavegador={push.falhaNavegador}
         aoAtivar={push.ativar}
       />
 

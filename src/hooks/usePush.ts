@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { servicoPush } from '../servicos/servicoPush'
+import type { InscricaoPush } from '../tipos/push'
 import {
   desinscreverNoNavegador,
   inscreverNoNavegador,
@@ -50,6 +51,7 @@ export function usePush() {
     suportado ? Notification.permission : null,
   )
   const [processando, setProcessando] = useState(false)
+  const [falhaNavegador, setFalhaNavegador] = useState(false)
 
   useEffect(() => {
     if (!suportado || precisaInstalar) {
@@ -64,23 +66,41 @@ export function usePush() {
     }
   }, [suportado, precisaInstalar])
 
-  // Navegador recusou ou o usuário fechou o pedido: a permissão diz qual dos dois.
+  // Duas falhas diferentes, e nenhuma pode terminar em "Avisos ativos":
+  // - o navegador recusou o subscribe (aba anônima do Chrome, serviço de push fora do
+  //   ar): não há toast da API, então a tela explica com `falhaNavegador`;
+  // - o servidor recusou ou a rede caiu: desfaz a inscrição no navegador também.
+  //   ⚠️ Antes o catch olhava só para o navegador, que já estava inscrito, e a tela
+  //   dizia "Avisos ativos neste aparelho" sem o servidor ter para onde mandar.
+  // Navegador que negou a permissão devolve null: a permissão diz o resto.
   const ativar = useCallback(async () => {
     if (!chavePublica) {
       return
     }
     setProcessando(true)
+    setFalhaNavegador(false)
     try {
-      const inscricao = await inscreverNoNavegador(chavePublica)
-      setPermissao(Notification.permission)
-      if (inscricao) {
-        await servicoPush.inscrever(inscricao)
-        setInscrito(true)
+      let inscricao: InscricaoPush | null
+      try {
+        inscricao = await inscreverNoNavegador(chavePublica)
+      } catch {
+        setFalhaNavegador(true)
+        return
+      } finally {
+        setPermissao(Notification.permission)
       }
-    } catch {
-      // O toast de erro da API já apareceu; erro do navegador no subscribe (serviço de
-      // push fora do ar, perfil restrito) cai aqui sem ter o que mostrar além do estado.
-      setInscrito((await obterInscricaoAtual()) !== null)
+      if (!inscricao) {
+        return
+      }
+      try {
+        await servicoPush.inscrever(inscricao)
+      } catch {
+        // O toast de erro da API já apareceu.
+        await desinscreverNoNavegador().catch(() => {})
+        setInscrito(false)
+        return
+      }
+      setInscrito(true)
     } finally {
       setProcessando(false)
     }
@@ -122,5 +142,5 @@ export function usePush() {
     estado = 'desativado'
   }
 
-  return { estado, processando, ativar, desativar }
+  return { estado, processando, falhaNavegador, ativar, desativar }
 }

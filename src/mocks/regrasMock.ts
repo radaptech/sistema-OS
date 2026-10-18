@@ -14,6 +14,7 @@ import type {
 } from '../tipos/ordemServico'
 import type { EscopoAcessoGestor, SessaoUsuario } from '../tipos/autenticacao'
 import type {
+  GrupoOrdensDoPainel,
   IndicadoresLoja,
   IndicadoresMaquina,
   IndicadorMensal,
@@ -291,22 +292,27 @@ function ordenarChaveMes(mes: string): number {
 // Mesma divisão do back (model/indicadorMaquina.go): um resumo do histórico inteiro e
 // um por mês de encerramento, que o painel exibe ao clicar na barra do mês.
 function resumirIndicadores(historicoBruto: OrdemServico[]): ResumoIndicadores {
-  // O pequeno reparo (sem máquina) fica à parte, como no servidor: só o maquinário alimenta
-  // os cards de falha e o custo das máquinas; o reparo soma em quantidadeReparos/custoReparos.
-  const historico = historicoBruto.filter((ordem) => ordem.maquinaId !== null)
+  // O pequeno reparo (sem máquina) e a manutenção preventiva ficam à parte, como no servidor:
+  // só o maquinário alimenta os cards de falha e o custo das máquinas; o reparo soma em
+  // quantidadeReparos/custoReparos e a preventiva em quantidadePreventivas/custoPreventivas.
   const reparos = historicoBruto.filter((ordem) => ordem.maquinaId === null)
-  const custoReparos = arredondar(
-    reparos.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0),
+  const preventivas = historicoBruto.filter(
+    (ordem) => ordem.maquinaId !== null && ordem.origem === 'preventiva',
   )
+  const historico = historicoBruto.filter(
+    (ordem) => ordem.maquinaId !== null && ordem.origem !== 'preventiva',
+  )
+  const somarCusto = (lista: OrdemServico[]) =>
+    arredondar(lista.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0))
+  const custoReparos = somarCusto(reparos)
 
   const horasParadaTotal = arredondar(
     historico.reduce((soma, ordem) => soma + (ordem.horasParada ?? 0), 0),
   )
 
-  // MTBF e MTTR medem FALHA e conserto: a OS de preventiva é revisão programada e fica de
-  // fora dos dois (como no servidor, `preventiva` em model/indicadorMaquina.go). Horas,
-  // custo e contagem seguem contando todas. Sem isso o MTBF encolheria a cada revisão.
-  const falhas = historico.filter((ordem) => ordem.origem !== 'preventiva')
+  // MTBF e MTTR medem FALHA e conserto: a preventiva (revisão programada) já saiu acima,
+  // então o que sobrou são as falhas. Sem isso o MTBF encolheria a cada revisão.
+  const falhas = historico
 
   const horasTrabalhadasValidas = falhas
     .map((ordem) => ordem.horasTrabalhadas)
@@ -338,9 +344,7 @@ function resumirIndicadores(historicoBruto: OrdemServico[]): ResumoIndicadores {
     ? arredondar(intervalos.reduce((soma, horas) => soma + horas, 0) / intervalos.length)
     : 0
 
-  const custoTotal = arredondar(
-    historico.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0),
-  )
+  const custoTotal = somarCusto(historico)
 
   const horasPorTipo = new Map<TipoDefeito, number>()
 
@@ -366,6 +370,8 @@ function resumirIndicadores(historicoBruto: OrdemServico[]): ResumoIndicadores {
     porTipoDefeito,
     quantidadeReparos: reparos.length,
     custoReparos,
+    quantidadePreventivas: preventivas.length,
+    custoPreventivas: somarCusto(preventivas),
   }
 }
 
@@ -458,7 +464,7 @@ export function computarIndicadoresLoja(lojaId: number, usuario: UsuarioInterno)
 export function listarOrdensDoPainelMock(
   lojaId: number,
   usuario: UsuarioInterno,
-  grupo: 'maquinario' | 'reparos',
+  grupo: GrupoOrdensDoPainel,
   setorId: number | null,
   maquinaId: number | null,
   mes: string | null,
@@ -484,10 +490,14 @@ export function listarOrdensDoPainelMock(
     const setorDaOrdem = maquina ? maquina.setorId : ordem.setorId
     const lojaDaOrdem = maquina ? maquina.lojaId : ordem.lojaId
 
+    // Maquinário e preventivas são OS de máquina, separadas pela origem (como no servidor).
     const doGrupo =
       grupo === 'reparos'
         ? ordem.maquinaId === null
-        : ordem.maquinaId !== null && maquina !== undefined && maquina.ativa !== false
+        : ordem.maquinaId !== null &&
+          maquina !== undefined &&
+          maquina.ativa !== false &&
+          (ordem.origem === 'preventiva') === (grupo === 'preventivas')
     if (
       !doGrupo ||
       lojaDaOrdem !== lojaId ||

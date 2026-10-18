@@ -60,8 +60,8 @@ export const rotasIndicadores: Rota[] = [
         return responderErro('Loja não encontrada.', 404)
       }
       const grupo = query.get('grupo')
-      if (grupo !== 'maquinario' && grupo !== 'reparos') {
-        return responderErro('grupo inválido (use maquinario ou reparos)', 400)
+      if (grupo !== 'maquinario' && grupo !== 'reparos' && grupo !== 'preventivas') {
+        return responderErro('grupo inválido (use maquinario, reparos ou preventivas)', 400)
       }
       const setorId = query.get('setorId')
       const maquinaId = query.get('maquinaId')

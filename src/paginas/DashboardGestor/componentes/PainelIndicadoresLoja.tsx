@@ -50,7 +50,7 @@ export function PainelIndicadoresLoja({
   const [mesSelecionado, setMesSelecionado] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
   const [setorFiltro, setSetorFiltro] = useState<number | null>(null)
-  // Lista por trás de um card aberta: de qual (maquinário ou reparos), de qual setor (undefined = o
+  // Lista por trás de um card aberta: de qual (maquinário, preventivas ou reparos), de qual setor (undefined = o
   // recorte do topo da tela) e com que rótulo.
   const [listaAberta, setListaAberta] = useState<{
     grupo: GrupoOrdensDoPainel
@@ -176,6 +176,10 @@ export function PainelIndicadoresLoja({
               aoVerReparos={() =>
                 setListaAberta({ grupo: 'reparos', setorId: setorEscolhido?.setorId, rotulo: tituloTopo })
               }
+              mostrarPreventivas
+              aoVerPreventivas={() =>
+                setListaAberta({ grupo: 'preventivas', setorId: setorEscolhido?.setorId, rotulo: tituloTopo })
+              }
               aoVerMaquinario={() =>
                 setListaAberta({ grupo: 'maquinario', setorId: setorEscolhido?.setorId, rotulo: tituloTopo })
               }
@@ -237,6 +241,9 @@ export function PainelIndicadoresLoja({
             aoSelecionarMaquina={aoSelecionarMaquina}
             aoVerReparos={() =>
               setListaAberta({ grupo: 'reparos', setorId: setor.setorId, rotulo: `Setor ${setor.setorNome}` })
+            }
+            aoVerPreventivas={() =>
+              setListaAberta({ grupo: 'preventivas', setorId: setor.setorId, rotulo: `Setor ${setor.setorNome}` })
             }
             aoVerMaquinario={() =>
               setListaAberta({ grupo: 'maquinario', setorId: setor.setorId, rotulo: `Setor ${setor.setorNome}` })

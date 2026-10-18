@@ -89,6 +89,16 @@ function filtrarOrdens(query: URLSearchParams, usuario: UsuarioInterno): OrdemSe
     lista = lista.filter((ordem) => ordem.setorId === Number(setorId))
   }
 
+  const maquinaId = query.get('maquinaId')
+  if (maquinaId) {
+    lista = lista.filter((ordem) => ordem.maquinaId === Number(maquinaId))
+  }
+
+  const reparo = query.get('reparo')
+  if (reparo) {
+    lista = lista.filter((ordem) => (ordem.maquinaId === null) === (reparo === 'true'))
+  }
+
   const tecnicoId = query.get('tecnicoId')
   if (tecnicoId) {
     lista = lista.filter((ordem) => ordem.tecnicoId === Number(tecnicoId))
@@ -175,25 +185,32 @@ export const rotasOrdensServico: Rota[] = [
         return responderErro('Não autenticado.', 401)
       }
 
-      const porSetor = new Map<number, ResumoOrdensServicoSetor>()
+      // Uma linha por máquina do setor; os reparos do setor (sem máquina) numa só.
+      const porMaquina = new Map<string, ResumoOrdensServicoSetor>()
       for (const ordem of filtrarOrdens(query, usuario)) {
-        const atual = porSetor.get(ordem.setorId) ?? {
+        const chave = `${ordem.setorId}|${ordem.maquinaId ?? ''}`
+        const atual = porMaquina.get(chave) ?? {
           lojaId: ordem.lojaId,
           lojaNome: ordem.lojaNome,
           setorId: ordem.setorId,
           setorNome: ordem.setorNome,
+          maquinaId: ordem.maquinaId,
+          maquinaNome: ordem.maquinaNome,
+          maquinaCodigo: ordem.maquinaCodigo,
           quantidade: 0,
           afetamProducao: 0,
         }
         atual.quantidade += 1
         atual.afetamProducao += ordem.afetaProducao ? 1 : 0
-        porSetor.set(ordem.setorId, atual)
+        porMaquina.set(chave, atual)
       }
 
       return responderJson(
-        [...porSetor.values()].sort(
+        [...porMaquina.values()].sort(
           (a, b) =>
-            a.lojaNome.localeCompare(b.lojaNome, 'pt-BR') || a.setorNome.localeCompare(b.setorNome, 'pt-BR'),
+            a.lojaNome.localeCompare(b.lojaNome, 'pt-BR') ||
+            a.setorNome.localeCompare(b.setorNome, 'pt-BR') ||
+            (a.maquinaNome ?? '').localeCompare(b.maquinaNome ?? '', 'pt-BR'),
         ),
       )
     },

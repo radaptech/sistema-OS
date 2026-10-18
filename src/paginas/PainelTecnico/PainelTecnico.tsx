@@ -283,12 +283,14 @@ export function PainelTecnico() {
           // Histórico que só cresce: paginado no servidor (resumo + uma página por vez). Só
           // aparece aqui depois que o custo foi lançado — a mesma regra de "OS Finalizada" do
           // Gestor e do Administrador (item 9/13). Concluída sem custo fica invisível até lá.
-          // Sem selo de máquina parada: a OS já foi encerrada e o selo enganaria.
+          // Sem selo de máquina parada: a OS já foi encerrada e o selo enganaria. Desce até a
+          // máquina, como as OS Finalizadas do Gestor: o histórico do setor junta muitas.
           <NavegacaoLojaSetorPaginada
             filtros={{ tecnicoId: tecnicoId ?? undefined, finalizada: true }}
             mensagemVazio={mensagemVazia}
             IconeVazio={IconeVazio}
             rotuloNavegacao="Navegação das ordens de serviço"
+            porMaquina
             renderItem={renderizarCard}
           />
         ) : (

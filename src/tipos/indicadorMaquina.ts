@@ -21,6 +21,12 @@ export interface ResumoIndicadores {
   // máquinas vêm zerados.
   quantidadeReparos: number
   custoReparos: number
+  // Manutenções preventivas, SEPARADAS do maquinário do mesmo jeito: a OS aberta pelo job de
+  // preventiva soma só aqui, nunca em quantidadeOs/custoTotal/horas/rosca/MTBF/MTTR (o
+  // maquinário fica sendo o que quebrou). Diferente do reparo, a preventiva tem máquina, então
+  // vem preenchido também na máquina.
+  quantidadePreventivas: number
+  custoPreventivas: number
 }
 
 export interface IndicadorMensal extends ResumoIndicadores {
@@ -56,9 +62,9 @@ export interface IndicadoresLoja extends ResumoIndicadores {
   porMaquina: IndicadorMaquinaResumo[]
 }
 
-// Os dois cards de custo do painel da loja, cada um com a sua lista: o maquinário e os pequenos
-// reparos (que não têm máquina e ficam SEPARADOS dele).
-export type GrupoOrdensDoPainel = 'maquinario' | 'reparos'
+// Os três grupos de custo do painel, cada um com a sua lista: o maquinário, os pequenos reparos
+// (que não têm máquina) e as manutenções preventivas — os dois últimos SEPARADOS do primeiro.
+export type GrupoOrdensDoPainel = 'maquinario' | 'reparos' | 'preventivas'
 
 // Uma linha da lista por trás de um card de custo (GET /indicadores/lojas/:id/ordens): uma OS
 // encerrada que compõe o número do card. `id` é o da OS — o detalhe abre a partir dele, e a soma

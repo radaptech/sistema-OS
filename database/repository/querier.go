@@ -91,6 +91,10 @@ type Querier interface {
 	// empresa, mudou de área), e não desfaz nada -- as OS já abertas guardam o
 	// técnico delas em ordem_servico.tecnico_id, não olham mais para cá.
 	AtualizarPreventiva(ctx context.Context, arg AtualizarPreventivaParams) (Preventiva, error)
+	// A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+	// WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+	// não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+	AtualizarPreventivaDaMaquina(ctx context.Context, arg AtualizarPreventivaDaMaquinaParams) (int64, error)
 	AtualizarSenhaUsuario(ctx context.Context, arg AtualizarSenhaUsuarioParams) error
 	// Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 	// OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
@@ -564,14 +568,18 @@ type Querier interface {
 	// contagem de linhas, desativar um id inexistente (ou de outro tenant)
 	// responderia sucesso igual a desativar um de verdade.
 	DesativarPreventiva(ctx context.Context, arg DesativarPreventivaParams) (int64, error)
-	// PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
-	// incremental): o service desativa todas as da máquina e insere as novas, na
-	// mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+	// PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+	// as que já existiam voltam com id. Desativa só as que saíram do formulário.
 	//
-	// Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
-	// um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
-	// tivesse vencido uma vez.
-	DesativarPreventivasDaMaquina(ctx context.Context, arg DesativarPreventivasDaMaquinaParams) error
+	// ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+	// edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+	// que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+	// via "0 de 0 feitos" depois de qualquer "Salvar".
+	//
+	// Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+	// quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+	// Lista vazia (só preventivas novas) desativa todas as atuais.
+	DesativarPreventivasForaDaLista(ctx context.Context, arg DesativarPreventivasForaDaListaParams) error
 	// :execrows pelo mesmo motivo de DesativarLoja: distinguir "desativei" de
 	// "esse id não existe neste tenant".
 	DesativarSetor(ctx context.Context, arg DesativarSetorParams) (int64, error)

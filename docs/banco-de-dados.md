@@ -80,8 +80,8 @@ O modelo de dados em si (o porquê de cada constraint) está em
   histórico de OS e o escopo de quem tem acesso a ele. Setor na loja errada se resolve
   desativando e criando na certa. O front manda `lojaId` no PUT; o service ignora.
 - **Escopo de acesso (`usuario_escopo` + `usuario_escopo_setor`, ver
-  `docs/modelagem-banco-dados.md` 3.8) edita substituindo o conjunto inteiro**, mesmo
-  padrão de preventivas em `CadastrarMaquina`: o service apaga tudo do usuário
+  `docs/modelagem-banco-dados.md` 3.8) edita substituindo o conjunto inteiro**: o
+  service apaga tudo do usuário
   (`DeletarSetoresDosEscoposPorUsuario` **antes de** `DeletarEscoposPorUsuario` — não há
   `ON DELETE CASCADE` entre as duas) e recria numa transação. Não existe
   `AtualizarEscopo` de propósito.

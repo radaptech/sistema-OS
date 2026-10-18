@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/radaptech/sistema-OSm--Back-end/config"
 
 	"github.com/radaptech/sistema-OSm--Back-end/internal/helper"
@@ -183,6 +184,123 @@ func TestMaquinarioCrud(t *testing.T) {
 		}
 		if relida.Nome != "Forno Novo" {
 			t.Errorf("atualização não persistiu: %+v", relida)
+		}
+	})
+
+	// O bug que estes subtestes trancam: editar a máquina desativava todas as
+	// preventivas e recriava, e cada "Salvar" dava id novo a elas -- o histórico
+	// de ciclos ficava no id antigo. Somado à data de coluna `date` saindo um dia
+	// antes, cada edição ainda atrasava a preventiva em um dia.
+	preventivasDa := func(t *testing.T, maquinaID int64) map[int64]struct {
+		ativa bool
+		data  time.Time
+	} {
+		t.Helper()
+		linhas, err := pool.Query(ctx, `SELECT id, ativa, proxima_data FROM preventiva WHERE tenant_id = $1 AND maquina_id = $2`, tenantID, maquinaID)
+		if err != nil {
+			t.Fatalf("erro ao ler preventivas: %v", err)
+		}
+		defer linhas.Close()
+		lidas := map[int64]struct {
+			ativa bool
+			data  time.Time
+		}{}
+		for linhas.Next() {
+			var id int64
+			var ativa bool
+			var data time.Time
+			if err := linhas.Scan(&id, &ativa, &data); err != nil {
+				t.Fatalf("erro ao ler linha: %v", err)
+			}
+			lidas[id] = struct {
+				ativa bool
+				data  time.Time
+			}{ativa, data}
+		}
+		return lidas
+	}
+
+	t.Run("editar mantém o id da preventiva que voltou, cria a nova e desativa a removida", func(t *testing.T) {
+		payload := novaMaquina("P8", "Masseira")
+		payload.Preventivas = append(payload.Preventivas, model.PreventivaPayload{
+			TecnicoId: tecnicoPrev, Descricao: "Esticar correia", IntervaloDias: 60,
+			ProximaData: config.NewDataBrPtr(time.Date(2026, 10, 17, 0, 0, 0, 0, config.Brasilia)), Ativa: true,
+		})
+		criada, err := svc.CadastrarMaquina(ctx, tenantID, payload)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar: %v", err)
+		}
+		var mantida, removida int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM preventiva WHERE maquina_id = $1 AND descricao = 'Esticar correia'`, criada.Id).Scan(&mantida); err != nil {
+			t.Fatalf("preventiva mantida não encontrada: %v", err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT id FROM preventiva WHERE maquina_id = $1 AND descricao = 'Trocar filtro'`, criada.Id).Scan(&removida); err != nil {
+			t.Fatalf("preventiva removida não encontrada: %v", err)
+		}
+
+		// O que o formulário de edição manda: a que ficou volta com id e com a
+		// data que ele LEU da API (NewDataBrDeDate), a removida não vem, e há uma nova.
+		lidaDaApi := config.NewDataBrDeDate(pgtype.Date{Time: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), Valid: true})
+		_, err = svc.AtualizarMaquina(ctx, tenantID, criada.Id, model.AtualizarMaquina{
+			SetorID: setor.Id, Criticidade: "Alta", NumeroPatrimonio: "P8", Nome: "Masseira",
+			Preventivas: []model.PreventivaPayload{
+				{Id: &mantida, TecnicoId: tecnicoPrev, Descricao: "Esticar correia", IntervaloDias: 60, ProximaData: lidaDaApi, Ativa: true},
+				{TecnicoId: tecnicoPrev, Descricao: "Limpar cuba", IntervaloDias: 7, ProximaData: config.NewDataBrPtr(time.Now()), Ativa: true},
+			},
+		})
+		if err != nil {
+			t.Fatalf("erro ao atualizar: %v", err)
+		}
+
+		depois := preventivasDa(t, criada.Id)
+		if len(depois) != 3 {
+			t.Fatalf("esperado 3 linhas (mantida, removida, nova), veio %d: %+v", len(depois), depois)
+		}
+		if !depois[mantida].ativa {
+			t.Error("a preventiva que voltou com id foi desativada -- o histórico dela se perde")
+		}
+		if d := depois[mantida].data; d.Year() != 2026 || d.Month() != 10 || d.Day() != 17 {
+			t.Errorf("a data da preventiva mantida andou: %s, esperado 2026-10-17", d.Format("2006-01-02"))
+		}
+		if depois[removida].ativa {
+			t.Error("a preventiva removida do formulário continua ativa")
+		}
+	})
+
+	t.Run("id de preventiva de outra máquina é recusado e nada muda", func(t *testing.T) {
+		outra, err := svc.CadastrarMaquina(ctx, tenantID, novaMaquina("P9", "Cilindro"))
+		if err != nil {
+			t.Fatalf("erro ao cadastrar: %v", err)
+		}
+		alvo, err := svc.CadastrarMaquina(ctx, tenantID, novaMaquina("P10", "Divisora"))
+		if err != nil {
+			t.Fatalf("erro ao cadastrar: %v", err)
+		}
+		var daOutra int64
+		if err := pool.QueryRow(ctx, `SELECT id FROM preventiva WHERE maquina_id = $1`, outra.Id).Scan(&daOutra); err != nil {
+			t.Fatalf("erro ao ler preventiva: %v", err)
+		}
+		antes := preventivasDa(t, alvo.Id)
+
+		_, err = svc.AtualizarMaquina(ctx, tenantID, alvo.Id, model.AtualizarMaquina{
+			SetorID: setor.Id, Criticidade: "Alta", NumeroPatrimonio: "P10", Nome: "Divisora",
+			Preventivas: []model.PreventivaPayload{{
+				Id: &daOutra, TecnicoId: tecnicoPrev, Descricao: "Sequestro", IntervaloDias: 1,
+				ProximaData: config.NewDataBrPtr(time.Now()), Ativa: true,
+			}},
+		})
+		if !errors.Is(err, helper.ErrValidacao) {
+			t.Fatalf("esperado ErrValidacao, veio %v", err)
+		}
+		// A desativação roda antes do item recusado: a transação tem que desfazê-la.
+		for id, p := range preventivasDa(t, alvo.Id) {
+			if p.ativa != antes[id].ativa {
+				t.Errorf("preventiva %d mudou apesar do erro -- transação não voltou", id)
+			}
+		}
+		var descricao string
+		if err := pool.QueryRow(ctx, `SELECT descricao FROM preventiva WHERE id = $1`, daOutra).Scan(&descricao); err != nil || descricao != "Trocar filtro" {
+			t.Errorf("a preventiva da outra máquina foi alterada: %q, %v", descricao, err)
 		}
 	})
 

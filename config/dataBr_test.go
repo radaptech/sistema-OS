@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // O bug que este teste tranca: o pgx decodifica timestamptz no fuso LOCAL do
@@ -61,5 +63,43 @@ func TestDataBrSemHoraMantemODia(t *testing.T) {
 	}
 	if string(bruto) != `"01/09/2026 00:00:00"` {
 		t.Errorf("data = %s, esperado \"01/09/2026 00:00:00\"", bruto)
+	}
+}
+
+// Coluna `date` não é instante: o pgx entrega meia-noite UTC, e converter isso para
+// Brasília dava o dia anterior ("16/10/2026 21:00:00" para uma preventiva de 17/10).
+func TestNewDataBrDeDateMantemODiaDoBanco(t *testing.T) {
+
+	doPgx := pgtype.Date{Time: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), Valid: true}
+
+	bruto, err := json.Marshal(NewDataBrDeDate(doPgx))
+	if err != nil {
+		t.Fatalf("erro ao serializar: %v", err)
+	}
+	if string(bruto) != `"17/10/2026 00:00:00"` {
+		t.Errorf("data = %s, esperado \"17/10/2026 00:00:00\"", bruto)
+	}
+
+	if NewDataBrDeDate(pgtype.Date{}) != nil {
+		t.Error("date nula deveria virar nil")
+	}
+}
+
+// O que fazia a preventiva andar para trás: o formulário regrava a data que leu. Ler,
+// mandar de volta e ler de novo tem que dar o mesmo dia.
+func TestNewDataBrDeDateIdaEVoltaNaoMudaODia(t *testing.T) {
+
+	lida := NewDataBrDeDate(pgtype.Date{Time: time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), Valid: true})
+	bruto, _ := json.Marshal(lida)
+
+	var devolvida DataBr
+	if err := devolvida.UnmarshalJSON(bruto); err != nil {
+		t.Fatalf("erro ao desserializar %s: %v", bruto, err)
+	}
+	// É o que preventivaService grava: pgtype.Date com o time que veio do cliente.
+	regravada := pgtype.Date{Time: devolvida.Time(), Valid: true}
+
+	if ano, mes, dia := regravada.Time.Date(); ano != 2026 || mes != 10 || dia != 17 {
+		t.Errorf("regravada = %04d-%02d-%02d, esperado 2026-10-17", ano, mes, dia)
 	}
 }

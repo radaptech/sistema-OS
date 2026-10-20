@@ -172,18 +172,9 @@ func (m *MaquinarioService) AtualizarMaquina(ctx context.Context, tenantId, id i
 		return model.Maquinario{}, traduzErroMaquina(err)
 	}
 
-	// Substitui o conjunto inteiro, sem merge incremental: desativa as atuais e
-	// insere as novas na mesma transação -- espelho do que AtualizarUsuario faz
-	// com o escopo de acesso. Desativa em vez de deletar por causa da FK das
-	// solicitações já geradas (ver preventiva.sql).
-	if err := repo.DesativarPreventivasDaMaquina(ctx, repository.DesativarPreventivasDaMaquinaParams{
-		TenantID:  tenantId,
-		MaquinaID: id,
-	}); err != nil {
-		return model.Maquinario{}, helper.TraduzErroPostgres(err)
-	}
-
-	if err := gravarPreventivas(ctx, repo, tenantId, id, payload.Preventivas); err != nil {
+	// A lista é o conjunto inteiro, mas a preventiva que volta com id é
+	// atualizada no lugar -- ver sincronizarPreventivas.
+	if err := sincronizarPreventivas(ctx, repo, tenantId, id, payload.Preventivas); err != nil {
 		return model.Maquinario{}, err
 	}
 

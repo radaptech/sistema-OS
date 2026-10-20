@@ -66,6 +66,47 @@ func (q *Queries) AtualizarPreventiva(ctx context.Context, arg AtualizarPreventi
 	return i, err
 }
 
+const atualizarPreventivaDaMaquina = `-- name: AtualizarPreventivaDaMaquina :execrows
+UPDATE preventiva
+SET descricao = $4,
+    intervalo_dias = $5,
+    proxima_data = $6,
+    ativa = $7,
+    tecnico_id = $8::bigint
+WHERE id = $1 AND tenant_id = $2 AND maquina_id = $3 AND ativa
+`
+
+type AtualizarPreventivaDaMaquinaParams struct {
+	ID            int64
+	TenantID      int64
+	MaquinaID     int64
+	Descricao     string
+	IntervaloDias int32
+	ProximaData   pgtype.Date
+	Ativa         bool
+	TecnicoID     *int64
+}
+
+// A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+// WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+// não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+func (q *Queries) AtualizarPreventivaDaMaquina(ctx context.Context, arg AtualizarPreventivaDaMaquinaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, atualizarPreventivaDaMaquina,
+		arg.ID,
+		arg.TenantID,
+		arg.MaquinaID,
+		arg.Descricao,
+		arg.IntervaloDias,
+		arg.ProximaData,
+		arg.Ativa,
+		arg.TecnicoID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const avancarProximaData = `-- name: AvancarProximaData :one
 UPDATE preventiva
 SET proxima_data = proxima_data + (intervalo_dias * INTERVAL '1 day')
@@ -191,26 +232,34 @@ func (q *Queries) DesativarPreventiva(ctx context.Context, arg DesativarPreventi
 	return result.RowsAffected(), nil
 }
 
-const desativarPreventivasDaMaquina = `-- name: DesativarPreventivasDaMaquina :exec
+const desativarPreventivasForaDaLista = `-- name: DesativarPreventivasForaDaLista :exec
 UPDATE preventiva
 SET ativa = false
-WHERE tenant_id = $1 AND maquina_id = $2
+WHERE tenant_id = $1
+  AND maquina_id = $2
+  AND ativa
+  AND NOT (id = ANY($3::bigint[]))
 `
 
-type DesativarPreventivasDaMaquinaParams struct {
+type DesativarPreventivasForaDaListaParams struct {
 	TenantID  int64
 	MaquinaID int64
+	Manter    []int64
 }
 
-// PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
-// incremental): o service desativa todas as da máquina e insere as novas, na
-// mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+// PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+// as que já existiam voltam com id. Desativa só as que saíram do formulário.
 //
-// Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
-// um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
-// tivesse vencido uma vez.
-func (q *Queries) DesativarPreventivasDaMaquina(ctx context.Context, arg DesativarPreventivasDaMaquinaParams) error {
-	_, err := q.db.Exec(ctx, desativarPreventivasDaMaquina, arg.TenantID, arg.MaquinaID)
+// ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+// edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+// que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+// via "0 de 0 feitos" depois de qualquer "Salvar".
+//
+// Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+// quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+// Lista vazia (só preventivas novas) desativa todas as atuais.
+func (q *Queries) DesativarPreventivasForaDaLista(ctx context.Context, arg DesativarPreventivasForaDaListaParams) error {
+	_, err := q.db.Exec(ctx, desativarPreventivasForaDaLista, arg.TenantID, arg.MaquinaID, arg.Manter)
 	return err
 }
 

@@ -227,9 +227,13 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
     atomicidade. Mesmo padrão de `gravarEscopo`. **A regra "máquina exige ao menos uma
     preventiva" é validada aqui, no servidor**: o `min(1)` do Zod é só do navegador, e sem
     o cheque um POST direto criaria máquina sem preventiva nenhuma.
-    `AtualizarMaquina` substitui o conjunto inteiro (`DesativarPreventivasDaMaquina` antes
-    de `gravarPreventivas`, sem merge incremental) — mesmo padrão do escopo em
-    `AtualizarUsuario`.
+    `AtualizarMaquina` chama `sincronizarPreventivas`, **não** `gravarPreventivas`: a
+    lista é o conjunto inteiro, mas a preventiva que volta com `id` é atualizada no lugar
+    (`AtualizarPreventivaDaMaquina`, com `maquina_id` e `ativa` no `WHERE` para não
+    aceitar id de outra máquina), a sem `id` é criada e só as que não vieram são
+    desativadas (`DesativarPreventivasForaDaLista`). ⚠️ Já foi "desativa todas e
+    recria", e cada edição da máquina dava id novo às preventivas — o histórico de ciclos
+    (que segue `solicitacao_os.preventiva_id`) ficava no id antigo.
     Mora aqui também o **job de preventiva vencida**:
     `AbrirSolicitacoesDePreventivasVencidas` (percorre as vencidas, devolve quantas abriu
     e as falhas num `errors.Join`) e `abrirSolicitacaoDaPreventiva` (a transação de uma

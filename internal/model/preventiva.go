@@ -25,6 +25,10 @@ import (
 // validador em vez de "escolha o técnico responsável". Mesmo critério do
 // maquinaId no POST /preventivas, que também é cheque do controller.
 type PreventivaPayload struct {
+	// Id só no PUT /maquinas/:id: a preventiva que já existia volta com ele e é
+	// atualizada no lugar, mantendo o histórico. Sem Id é preventiva nova. No
+	// cadastro da máquina e no POST /preventivas avulso é ignorado.
+	Id            *int64         `json:"id,omitempty"`
 	MaquinaId     int64          `json:"maquinaId"`
 	TecnicoId     int64          `json:"tecnicoId"`
 	Descricao     string         `json:"descricao" binding:"required"`
@@ -80,7 +84,7 @@ func MontarPreventiva(p repository.ListarPreventivasRow) Preventiva {
 		MaquinaFotoUrl:    p.MaquinaFotoChave,
 		Descricao:         p.Descricao,
 		IntervaloDias:     p.IntervaloDias,
-		ProximaData:       config.NewDataBrPtr(p.ProximaData.Time),
+		ProximaData:       config.NewDataBrDeDate(p.ProximaData),
 		Ativa:             p.Ativa,
 		TecnicoId:         p.TecnicoID,
 		TecnicoNome:       p.TecnicoNome,

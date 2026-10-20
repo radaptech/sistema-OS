@@ -162,17 +162,36 @@ UPDATE preventiva
 SET ativa = false
 WHERE id = $1 AND tenant_id = $2;
 
--- name: DesativarPreventivasDaMaquina :exec
--- PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
--- incremental): o service desativa todas as da máquina e insere as novas, na
--- mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+-- name: DesativarPreventivasForaDaLista :exec
+-- PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+-- as que já existiam voltam com id. Desativa só as que saíram do formulário.
 --
--- Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
--- um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
--- tivesse vencido uma vez.
+-- ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+-- edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+-- que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+-- via "0 de 0 feitos" depois de qualquer "Salvar".
+--
+-- Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+-- quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+-- Lista vazia (só preventivas novas) desativa todas as atuais.
 UPDATE preventiva
 SET ativa = false
-WHERE tenant_id = $1 AND maquina_id = $2;
+WHERE tenant_id = $1
+  AND maquina_id = $2
+  AND ativa
+  AND NOT (id = ANY(sqlc.arg(manter)::bigint[]));
+
+-- name: AtualizarPreventivaDaMaquina :execrows
+-- A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+-- WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+-- não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+UPDATE preventiva
+SET descricao = $4,
+    intervalo_dias = $5,
+    proxima_data = $6,
+    ativa = $7,
+    tecnico_id = sqlc.narg(tecnico_id)::bigint
+WHERE id = $1 AND tenant_id = $2 AND maquina_id = $3 AND ativa;
 
 -- name: ListarPreventivasVencidas :many
 -- Alimenta o job de abertura automática de solicitação (subcomando de CLI

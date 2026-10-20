@@ -3,30 +3,24 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CircleDollarSign } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
-import { BadgeTipoOS } from '../../componentes/BadgeTipoOS'
 import { CampoBusca } from '../../componentes/CampoBusca'
-import { CampoSelecao } from '../../componentes/CampoSelecao'
 import { FiltroTipoOS } from '../../componentes/FiltroTipoOS'
-import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
-import { Paginacao } from '../../componentes/Paginacao'
-import { useLojas } from '../../hooks/useLojas'
-import { useOrdensServicoPaginadas } from '../../hooks/useOrdensServicoPaginadas'
-import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
-import { obterNomeAlvo } from '../../utilitarios/alvoOS'
-import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
-import { formatarDataHora } from '../../utilitarios/formatarData'
-import { formatarMoeda } from '../../utilitarios/formatarMoeda'
-import { rotulosCustoOS } from '../../utilitarios/rotulosCustoOS'
+import { NavegacaoLojaSetorPaginada } from '../../componentes/NavegacaoLojaSetorPaginada'
+import { useResumoOrdensServico } from '../../hooks/useResumoOrdensServico'
+import {
+  servicoOrdensServico,
+  type ParametrosListagemOrdensServico,
+} from '../../servicos/servicoOrdensServico'
 import type { OrdemServico, TipoOS } from '../../tipos/ordemServico'
 import { ModalLancarCustoManutencao } from './componentes/ModalLancarCustoManutencao'
 import type { DadosLancarCustoManutencao } from './esquemaLancarCustoManutencao'
 import { FiltroRevisaoCusto } from './componentes/FiltroRevisaoCusto'
 import type { AbaRevisaoCusto } from './componentes/FiltroRevisaoCusto'
+import { CardCustoOS } from './componentes/CardCustoOS'
 
 export function AdministradorCustosPendentes() {
   const queryClient = useQueryClient()
   const [busca, setBusca] = useState('')
-  const [filtroLoja, setFiltroLoja] = useState('')
   const [filtroTipo, setFiltroTipo] = useState<TipoOS | ''>('')
   const [ordemParaLancarCusto, setOrdemParaLancarCusto] =
     useState<OrdemServico | null>(null)
@@ -36,64 +30,30 @@ export function AdministradorCustosPendentes() {
   // encerramento e o Administrador só corrige se quiser — inclusive nas OS que foram
   // executadas por empresa externa, que também passam pelo Técnico.
   //
-  // Uma consulta paginada por aba (12 por página, `?revisado=` no servidor): "Revisadas" é
-  // histórico e só cresce, então não dá mais para trazer tudo e separar no cliente. As
-  // duas rodam juntas porque as pílulas mostram a contagem das duas — o `total` de cada
-  // página. Cada aba guarda a própria página.
-  const [paginaPendentes, setPaginaPendentes] = useState(1)
-  const [paginaRevisadas, setPaginaRevisadas] = useState(1)
-  const filtros = {
-    status: ['Concluída' as const],
+  // Navegada Loja → Setor (NavegacaoLojaSetorPaginada, a mesma das OS Finalizadas do Gestor):
+  // os cards saem do resumo e só o setor aberto busca a página, 12 por vez, com `?revisado=`
+  // no servidor — "Revisadas" é histórico e só cresce. Loja e setor são a própria navegação,
+  // então saíram dos filtros; o nível mora na URL e continua ao trocar de aba.
+  const filtros: ParametrosListagemOrdensServico = {
+    status: ['Concluída'],
     busca: busca.trim() || undefined,
-    lojaId: filtroLoja ? Number(filtroLoja) : undefined,
     tipo: filtroTipo || undefined,
   }
-  const consultaPendentes = useOrdensServicoPaginadas({
-    ...filtros,
-    revisado: false,
-    pagina: paginaPendentes,
-  })
-  const consultaRevisadas = useOrdensServicoPaginadas({
-    ...filtros,
-    revisado: true,
-    pagina: paginaRevisadas,
-  })
+  const filtrosPendentes = { ...filtros, revisado: false }
+  const filtrosRevisadas = { ...filtros, revisado: true }
 
-  // Filtro novo começa da página 1 nas duas abas — ajuste durante a renderização, mesmo
-  // padrão das outras listagens do Administrador.
-  const chaveFiltros = `${busca}|${filtroLoja}|${filtroTipo}`
-  const [chaveFiltrosAnterior, setChaveFiltrosAnterior] = useState(chaveFiltros)
-  if (chaveFiltros !== chaveFiltrosAnterior) {
-    setChaveFiltrosAnterior(chaveFiltros)
-    setPaginaPendentes(1)
-    setPaginaRevisadas(1)
-  }
-
-  const consulta = aba === 'pendentes' ? consultaPendentes : consultaRevisadas
-  const pagina = aba === 'pendentes' ? paginaPendentes : paginaRevisadas
-  const setPagina = aba === 'pendentes' ? setPaginaPendentes : setPaginaRevisadas
-  const isLoading = consulta.isLoading
-  const totalPaginas = Math.max(1, consulta.data?.totalPaginas ?? 1)
-  // Revisar a última OS de uma página a tira de "Pendentes": a página encolhe e, se era a
-  // última, deixaria de existir. O servidor não segura no total — volta para a última.
-  if (consulta.data && pagina > totalPaginas) {
-    setPagina(totalPaginas)
-  }
-  const { data: lojas = [] } = useLojas()
+  // As pílulas mostram as duas contagens: a soma do resumo de cada aba. A da aba aberta é a
+  // mesma chave que a navegação usa, então o React Query não busca duas vezes.
+  const { data: resumoPendentes = [] } = useResumoOrdensServico(filtrosPendentes)
+  const { data: resumoRevisadas = [] } = useResumoOrdensServico(filtrosRevisadas)
+  const somar = (linhas: { quantidade: number }[]) =>
+    linhas.reduce((total, linha) => total + linha.quantidade, 0)
 
   const { mutateAsync: lancarCusto } = useMutation({
     mutationFn: servicoOrdensServico.lancarCustoManutencao,
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ['ordens-servico-todas'] }),
   })
-
-  // Lista TODA OS Concluída (não só as com custoManutencao ainda vazio): o Técnico já
-  // grava os dois custos no encerramento (item 11 do CLAUDE.md), então eles chegam aqui
-  // pré-preenchidos e o Administrador só edita se precisar conferir contra a nota. A
-  // aba sai de custo.revisadoEm, gravado pelo servidor no POST /custo e filtrado lá
-  // (`?revisado=`): "Pendentes" é o que ninguém conferiu ainda, "Revisadas" é o histórico
-  // do que já foi conferido — por qualquer Administrador, em qualquer aparelho.
-  const ordensConcluidas = consulta.data?.dados ?? []
 
   async function aoSalvarCusto(dados: DadosLancarCustoManutencao) {
     if (!ordemParaLancarCusto) {
@@ -102,7 +62,7 @@ export function AdministradorCustosPendentes() {
 
     await lancarCusto({ ordemServicoId: ordemParaLancarCusto.id, ...dados })
     // Sem marcar nada aqui: o POST /custo grava custo.revisadoEm no servidor e o
-    // onSuccess da mutation invalida a lista — a OS reaparece já em "Revisadas".
+    // onSuccess da mutation invalida lista e resumo — a OS reaparece já em "Revisadas".
     toast.success(`Custos atualizados para a OS #${ordemParaLancarCusto.id}.`)
     setOrdemParaLancarCusto(null)
   }
@@ -128,8 +88,8 @@ export function AdministradorCustosPendentes() {
           valor={aba}
           aoMudar={setAba}
           contagens={{
-            pendentes: consultaPendentes.data?.total ?? 0,
-            revisadas: consultaRevisadas.data?.total ?? 0,
+            pendentes: somar(resumoPendentes),
+            revisadas: somar(resumoRevisadas),
           }}
         />
 
@@ -141,137 +101,24 @@ export function AdministradorCustosPendentes() {
           />
 
           <div className="sm:w-56 sm:shrink-0">
-            <CampoSelecao
-              rotulo="Loja"
-              value={filtroLoja}
-              onChange={(evento) => setFiltroLoja(evento.target.value)}
-            >
-              <option value="">Todas as lojas</option>
-              {lojas.map((loja) => (
-                <option key={loja.id} value={loja.id}>
-                  {loja.nome}
-                </option>
-              ))}
-            </CampoSelecao>
-          </div>
-
-          <div className="sm:w-56 sm:shrink-0">
             <FiltroTipoOS valor={filtroTipo} aoMudar={setFiltroTipo} />
           </div>
         </div>
 
-        {/* Sem items-start os cards da mesma linha esticam para a altura do mais alto —
-            os que têm menos informação (sem Nota Fiscal, sem Custo Hora) param de deixar
-            um degrau na grade. */}
-        <div className="flex flex-1 flex-col gap-3 lg:grid lg:grid-cols-2 2xl:grid-cols-3 lg:content-start lg:gap-4">
-          {isLoading && (
-            <EsqueletoLista quantidade={4}>
-              <EsqueletoCardOS />
-            </EsqueletoLista>
+        <NavegacaoLojaSetorPaginada
+          filtros={aba === 'pendentes' ? filtrosPendentes : filtrosRevisadas}
+          IconeVazio={CircleDollarSign}
+          mensagemVazio={
+            aba === 'pendentes'
+              ? 'Nenhuma OS concluída esperando conferência para esses filtros.'
+              : 'Nenhuma OS revisada para esses filtros.'
+          }
+          rotuloNavegacao="Navegação dos custos"
+          emGrade
+          renderItem={(ordem) => (
+            <CardCustoOS ordem={ordem} aoEditarCustos={setOrdemParaLancarCusto} />
           )}
-
-          {!isLoading && ordensConcluidas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
-              <CircleDollarSign size={28} />
-              <p className="text-sm">
-                {aba === 'pendentes'
-                  ? 'Nenhuma OS concluída encontrada para esses filtros.'
-                  : 'Nenhuma OS revisada ainda.'}
-              </p>
-            </div>
-          )}
-
-          {ordensConcluidas.map((ordem, indice) => (
-            <div
-              key={ordem.id}
-              style={atrasoEntrada(indice)}
-              className="animate-surgir shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200 sm:flex-row sm:items-start sm:justify-between"
-            >
-              <div className="min-w-0 flex-1">
-                {/* Uma linha só: sem flex-wrap o badge nunca cai para a linha de baixo,
-                      então todo card tem a mesma altura de cabeçalho e a coluna alinha. */}
-                <div className="flex items-center gap-2">
-                  <span className="bg-marca-600 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white">
-                    #{ordem.id}
-                  </span>
-                  <span className="truncate font-semibold text-slate-800">
-                    {obterNomeAlvo(ordem)}
-                  </span>
-                  {ordem.maquinaCodigo && (
-                    <span className="shrink-0 font-mono text-sm text-slate-400">
-                      · {ordem.maquinaCodigo}
-                    </span>
-                  )}
-                  <BadgeTipoOS tipo={ordem.tipo} />
-                </div>
-                <p className="mt-1 truncate text-xs text-slate-400">
-                  {lojas.find((loja) => loja.id === ordem.lojaId)?.nome ??
-                    ordem.lojaId}{' '}
-                  · {ordem.setorNome} · Encerrada em{' '}
-                  {ordem.dataFim ? formatarDataHora(ordem.dataFim) : '—'}
-                </p>
-
-                <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
-                  <p className="text-slate-400">
-                    {rotulosCustoOS.custoMaoDeObra}{' '}
-                    <span className="font-mono font-semibold text-slate-600">
-                      {ordem.custo?.custoHoraTecnico != null
-                        ? formatarMoeda(ordem.custo.custoHoraTecnico)
-                        : '—'}
-                    </span>
-                  </p>
-                  <p className="text-slate-400">
-                    {rotulosCustoOS.custoMaterial}{' '}
-                    <span className="font-mono font-semibold text-slate-600">
-                      {ordem.custo?.custoManutencao !== undefined
-                        ? formatarMoeda(ordem.custo.custoManutencao)
-                        : '—'}
-                    </span>
-                  </p>
-                </div>
-                {/* A linha só existe quando o Técnico declarou nota no encerramento —
-                      OS de mão de obra pura não tem o que informar. Com a declaração, o
-                      âmbar deixa de ser alarme falso e vira pendência de verdade: alguém
-                      disse que há um documento e ele ainda não foi registrado. */}
-                {ordem.custo?.temNotaFiscal && (
-                  <p className="mt-1 text-xs text-slate-400">
-                    {ordem.custo.notasFiscais.length > 1
-                      ? 'Notas Fiscais'
-                      : 'Nota Fiscal'}{' '}
-                    {ordem.custo.notasFiscais.length > 0 ? (
-                      <span className="font-mono font-semibold text-slate-600">
-                        {ordem.custo.notasFiscais
-                          .map((nota) =>
-                            nota.serie
-                              ? `${nota.numero} / série ${nota.serie}`
-                              : nota.numero,
-                          )
-                          .join(' · ')}
-                      </span>
-                    ) : (
-                      <span className="font-semibold text-amber-600">
-                        ainda não informada
-                      </span>
-                    )}
-                  </p>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setOrdemParaLancarCusto(ordem)}
-                className="bg-marca-600 font-display shadow-card hover:shadow-card-hover focus:ring-marca-500 hover:bg-marca-800 flex shrink-0 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 focus:ring-2 focus:outline-none active:scale-[0.98]"
-              >
-                <CircleDollarSign size={14} />
-                Editar Custos
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {totalPaginas > 1 && (
-          <Paginacao pagina={pagina} totalPaginas={totalPaginas} aoMudarPagina={setPagina} />
-        )}
+        />
       </main>
 
       {ordemParaLancarCusto && (

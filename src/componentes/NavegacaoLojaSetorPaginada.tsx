@@ -25,6 +25,10 @@ interface NavegacaoLojaSetorPaginadaProps {
   // Concluídas do Técnico). Os pequenos reparos do setor, que não têm máquina, viram um card
   // próprio no fim.
   porMaquina?: boolean
+  // Cards da lista em grade a partir do `lg` (2 colunas, 3 no `2xl`): as telas do Administrador
+  // são largas, e um card só por linha esticava até o fim da tela. Os painéis do Gestor e do
+  // Técnico ficam em largura de leitura e seguem em coluna.
+  emGrade?: boolean
   renderItem: (ordem: OrdemServico) => ReactNode
 }
 
@@ -49,6 +53,7 @@ export function NavegacaoLojaSetorPaginada({
   IconeVazio = Inbox,
   rotuloNavegacao,
   porMaquina = false,
+  emGrade = false,
   renderItem,
 }: NavegacaoLojaSetorPaginadaProps) {
   const { parametros: urlParametros, navegar } = useNavegacaoNiveis()
@@ -185,11 +190,19 @@ export function NavegacaoLojaSetorPaginada({
               <EsqueletoCardOS />
             </EsqueletoLista>
           )}
-          {ordens.map((ordem, indice) => (
-            <div key={ordem.id} style={atrasoEntrada(indice)} className="animate-surgir">
-              {renderItem(ordem)}
-            </div>
-          ))}
+          <div
+            className={
+              emGrade
+                ? 'flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:content-start lg:gap-4 2xl:grid-cols-3'
+                : 'flex flex-col gap-3'
+            }
+          >
+            {ordens.map((ordem, indice) => (
+              <div key={ordem.id} style={atrasoEntrada(indice)} className="animate-surgir">
+                {renderItem(ordem)}
+              </div>
+            ))}
+          </div>
           {totalPaginas > 1 && (
             <Paginacao pagina={pagina} totalPaginas={totalPaginas} aoMudarPagina={setPagina} />
           )}

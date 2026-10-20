@@ -9,6 +9,7 @@ import { FILTROS_AVANCADOS_OS_VAZIOS, type FiltrosAvancadosOS } from '../filtros
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
 import { useMaquinas } from '../../../hooks/useMaquinas'
 import { CampoMaquinaFiltro } from './CampoMaquinaFiltro'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalFiltrosOSProps {
   lojas: Loja[]
@@ -66,15 +67,17 @@ export function ModalFiltrosOS({
     aoAplicar(rascunho)
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} w-full max-w-md rounded-2xl bg-white shadow-pop`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md rounded-2xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between rounded-t-2xl bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Gestor
             </p>
-            <p className="font-display text-lg font-bold text-white">Filtrar OS</p>
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">Filtrar OS</p>
             <p className="text-xs text-white/80">Loja, máquina, período e valores</p>
           </div>
           <button

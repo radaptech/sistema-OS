@@ -4,6 +4,9 @@ import type { EstadoPush } from '../hooks/usePush'
 interface AvisoAtivarPushProps {
   estado: EstadoPush
   processando: boolean
+  // O navegador recusou a inscrição (não a permissão): sem a linha de explicação, o
+  // clique em "Ativar" voltava para "Ativar" sem dizer nada.
+  falhaNavegador?: boolean
   aoAtivar: () => void
 }
 
@@ -14,6 +17,7 @@ interface AvisoAtivarPushProps {
 export function AvisoAtivarPush({
   estado,
   processando,
+  falhaNavegador = false,
   aoAtivar,
 }: AvisoAtivarPushProps) {
   if (estado === 'desativado') {
@@ -27,6 +31,12 @@ export function AvisoAtivarPush({
             Receber avisos neste aparelho
           </p>
           <p className="text-xs text-slate-500">Mesmo com o app fechado.</p>
+          {falhaNavegador && (
+            <p role="alert" className="mt-1 text-xs text-red-600">
+              Este navegador não deixou ativar. Em aba anônima não funciona: abra no
+              navegador normal ou no app instalado e tente de novo.
+            </p>
+          )}
         </div>
         <button
           type="button"

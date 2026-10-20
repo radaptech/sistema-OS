@@ -1,4 +1,4 @@
-import { forwardRef, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { forwardRef, useId, type ReactNode, type SelectHTMLAttributes } from 'react'
 
 interface CampoSelecaoProps extends SelectHTMLAttributes<HTMLSelectElement> {
   rotulo: string
@@ -8,7 +8,11 @@ interface CampoSelecaoProps extends SelectHTMLAttributes<HTMLSelectElement> {
 
 export const CampoSelecao = forwardRef<HTMLSelectElement, CampoSelecaoProps>(
   ({ rotulo, mensagemErro, id, className = '', name, children, ...props }, ref) => {
-    const selectId = id ?? name
+    // Sufixo do useId: com só o name, dois formulários na mesma tela (a máquina e o
+    // modal de preventiva, ambos com "descricao") repetiam o id, e o rótulo de um
+    // apontava para o campo do outro.
+    const idGerado = useId()
+    const selectId = id ?? (name ? `${name}-${idGerado}` : idGerado)
 
     return (
       <div className="flex flex-col gap-1.5">

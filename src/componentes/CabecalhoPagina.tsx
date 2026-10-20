@@ -3,17 +3,22 @@ import { useNavigate } from 'react-router-dom'
 import { useSair } from '../hooks/useSair'
 import { AlternadorTema } from './AlternadorTema'
 import { SinoNotificacoes } from './SinoNotificacoes'
+import { useAlturaCabecalho } from '../hooks/useAlturaCabecalho'
 
 interface CabecalhoPaginaProps {
   titulo: string
 }
 
 export function CabecalhoPagina({ titulo }: CabecalhoPaginaProps) {
+  const referenciaCabecalho = useAlturaCabecalho<HTMLElement>()
   const navegar = useNavigate()
   const aoSair = useSair()
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg">
+    <header
+      ref={referenciaCabecalho}
+      className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg"
+    >
       <div className="flex w-full items-center justify-between px-4 py-3 sm:px-8">
         <div className="flex items-center gap-2.5">
           <button

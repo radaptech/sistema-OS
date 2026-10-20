@@ -91,6 +91,9 @@ export function CadastrarMaquina() {
       lojaId: maquinaExistente.lojaId,
       setorId: maquinaExistente.setorId,
       preventivas: preventivasExistentes.map((preventiva) => ({
+        // Sem o id o servidor trataria como preventiva nova e a de antes, com o
+        // histórico, seria desativada.
+        id: preventiva.id,
         maquinaId: preventiva.maquinaId,
         // Preventiva cadastrada antes de o técnico virar obrigatório volta sem ele: cai
         // em 0, o Zod recusa e o Administrador é obrigado a escolher um ao salvar.

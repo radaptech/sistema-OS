@@ -203,3 +203,21 @@ body {
       0 24px 60px -24px rgba(0, 0, 0, 0.8);
   }
 }
+
+/* Toast logo abaixo do cabeçalho, que é sticky: no topo da tela ele cobria o sino, o tema
+   e o Sair por 4s depois de cada ação. --altura-cabecalho vem de useAlturaCabecalho (0
+   sem cabeçalho, como no login). O :root na frente é para ganhar do CSS que o
+   react-toastify 11 injeta pelo JS, DEPOIS deste arquivo; a regra do celular repete a
+   dele, que no mesmo breakpoint cola o toast em env(safe-area-inset-top). */
+:root .Toastify__toast-container--top-left,
+:root .Toastify__toast-container--top-center,
+:root .Toastify__toast-container--top-right {
+  top: calc(var(--altura-cabecalho, 0px) + var(--toastify-toast-top));
+}
+@media only screen and (max-width: 480px) {
+  :root .Toastify__toast-container--top-left,
+  :root .Toastify__toast-container--top-center,
+  :root .Toastify__toast-container--top-right {
+    top: calc(var(--altura-cabecalho, 0px) + env(safe-area-inset-top));
+  }
+}

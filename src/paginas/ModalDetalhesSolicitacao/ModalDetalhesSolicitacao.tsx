@@ -9,6 +9,7 @@ import { obterNomeAlvo, obterCodigoAlvo } from '../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import type { SolicitacaoOS } from '../../tipos/ordemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../hooks/useDialogo'
 
 interface ModalDetalhesSolicitacaoProps {
   solicitacao: SolicitacaoOS
@@ -30,11 +31,14 @@ export function ModalDetalhesSolicitacao({
     (anexo) => anexo.tipo === 'video',
   )
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
+
   return createPortal(
     <div
       className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}
     >
       <div
+        {...propsDialogo}
         className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}
       >
         <div className="bg-marca-600 flex items-start justify-between px-6 py-4">
@@ -42,7 +46,7 @@ export function ModalDetalhesSolicitacao({
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               {contexto}
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Solicitação #{solicitacao.id}
             </p>
           </div>

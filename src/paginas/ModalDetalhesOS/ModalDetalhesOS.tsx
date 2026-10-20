@@ -15,6 +15,7 @@ import { formatarMoeda } from '../../utilitarios/formatarMoeda'
 import { rotulosCustoOS } from '../../utilitarios/rotulosCustoOS'
 import type { OrdemServico } from '../../tipos/ordemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../hooks/useDialogo'
 
 interface ModalDetalhesOSProps {
   ordemServico: OrdemServico
@@ -52,15 +53,17 @@ export function ModalDetalhesOS({
   // Na impressão o modal deixa de ser `fixed` (o navegador repete elemento fixo em toda página
   // impressa) e vira bloco normal, sem fundo, sombra, corte nem largura máxima. Ver o
   // `@media print` de index.css.
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-lg overflow-hidden rounded-2xl bg-white print:max-w-none print:overflow-visible print:rounded-none print:shadow-none`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-lg overflow-hidden rounded-2xl bg-white print:max-w-none print:overflow-visible print:rounded-none print:shadow-none`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4 print:hidden">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               {contexto}
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               OS #{ordemServico.id} · Detalhes
             </p>
           </div>

@@ -15,6 +15,7 @@ import type { GrupoOrdensDoPainel } from '../../../tipos/indicadorMaquina'
 import type { OrdemServico } from '../../../tipos/ordemServico'
 import { fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import { ModalDetalhesOS } from '../../ModalDetalhesOS/ModalDetalhesOS'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 // Cada card tem o seu texto: o maquinário, as preventivas e os pequenos reparos (os dois últimos à
 // parte) explicam de onde vem o número de um jeito diferente.
@@ -79,17 +80,19 @@ export function ModalOrdensDaLoja({
     }
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
+
   return (
     <>
       {createPortal(
         <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-          <div className={`${classeCartao} shadow-pop flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white`}>
+          <div {...propsDialogo} className={`${classeCartao} shadow-pop flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white`}>
             <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
               <div>
                 <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
                   {escopoRotulo}{mes ? ` · ${mes}` : ''}
                 </p>
-                <p className="font-display text-lg font-bold text-white">{textos.titulo}</p>
+                <p id={idTitulo} className="font-display text-lg font-bold text-white">{textos.titulo}</p>
               </div>
               <button
                 type="button"

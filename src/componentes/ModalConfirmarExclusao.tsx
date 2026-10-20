@@ -2,6 +2,7 @@ import { createPortal } from 'react-dom'
 import { AlertTriangle, Trash2, XCircle } from 'lucide-react'
 import { Botao } from './Botao'
 import { useSaidaAnimada } from '../hooks/useSaidaAnimada'
+import { useDialogo } from '../hooks/useDialogo'
 
 interface ModalConfirmarExclusaoProps {
   titulo: string
@@ -20,13 +21,15 @@ export function ModalConfirmarExclusao({
 }: ModalConfirmarExclusaoProps) {
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar)
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !confirmando })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-pop`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between bg-red-600 px-6 py-4">
           <div className="flex items-center gap-2">
             <AlertTriangle className="text-white" size={20} />
-            <p className="font-display text-lg font-bold text-white">{titulo}</p>
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">{titulo}</p>
           </div>
           <button
             type="button"

@@ -62,9 +62,10 @@ func (s *SetorService) CadastrarSetor(ctx context.Context, tenantID int64, paylo
 	}
 
 	setor, err := repo.CriarSetor(ctx, repository.CriarSetorParams{
-		TenantID: tenantID,
-		LojaID:   payload.LojaId,
-		Nome:     nome,
+		TenantID:  tenantID,
+		LojaID:    payload.LojaId,
+		Nome:      nome,
+		FotoChave: payload.FotoChave,
 	})
 	if err != nil {
 		return model.Setor{}, helper.TraduzErroPostgres(err)
@@ -81,10 +82,11 @@ func (s *SetorService) CadastrarSetor(ctx context.Context, tenantID int64, paylo
 // motivo de montarLoja/montarUsuario.
 func montarSetor(s repository.Setor) model.Setor {
 	return model.Setor{
-		Id:     s.ID,
-		Nome:   s.Nome,
-		LojaId: s.LojaID,
-		Ativo:  s.Ativo,
+		Id:      s.ID,
+		Nome:    s.Nome,
+		LojaId:  s.LojaID,
+		Ativo:   s.Ativo,
+		FotoUrl: s.FotoChave,
 	}
 }
 func (s *SetorService) ListarSetores(ctx context.Context, tenantID int64, idLoja *int64) ([]model.Setor, error) {
@@ -139,9 +141,10 @@ func (s *SetorService) AtualizarSetor(ctx context.Context, tenantId, id int64, p
 
 	repo := repository.New(s.Pool)
 	setor, err := repo.AtualizarSetor(ctx, repository.AtualizarSetorParams{
-		ID:       id,
-		TenantID: tenantId,
-		Nome:     nome,
+		ID:        id,
+		TenantID:  tenantId,
+		Nome:      nome,
+		FotoChave: payload.FotoChave,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

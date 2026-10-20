@@ -3,8 +3,8 @@
 -- vinculado ao usuário (solicitante/técnico/gestor).
 
 -- name: CriarUsuario :one
-INSERT INTO usuario (tenant_id, perfil, area_tecnico_id, nome, email, senha_hash, telefone)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO usuario (tenant_id, perfil, area_tecnico_id, nome, email, senha_hash, telefone, valor_hora)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ObterUsuarioPorID :one
@@ -73,7 +73,8 @@ SET perfil = $3,
     area_tecnico_id = $4,
     nome = $5,
     email = $6,
-    telefone = $7
+    telefone = $7,
+    valor_hora = $8
 WHERE id = $1 AND tenant_id = $2
 RETURNING *;
 
@@ -92,9 +93,10 @@ SET token_recuperacao_hash = sqlc.arg(token_hash)::text,
 WHERE tenant_id = sqlc.arg(tenant_id) AND email = sqlc.arg(email) AND ativo
 RETURNING email;
 
--- name: RedefinirSenhaPorToken :execrows
+-- name: RedefinirSenhaPorToken :one
 -- Troca a senha e queima o token no mesmo UPDATE: dois cliques no mesmo link não passam os dois.
--- 0 linhas = token inexistente, expirado, de outro tenant ou de usuário desativado -- o cliente não distingue.
+-- Sem linha (pgx.ErrNoRows) = token inexistente, expirado, de outro tenant ou de usuário
+-- desativado -- o cliente não distingue. Devolve o id para o service derrubar as sessões dele.
 UPDATE usuario
 SET senha_hash = sqlc.arg(senha_hash),
     token_recuperacao_hash = NULL,
@@ -102,7 +104,8 @@ SET senha_hash = sqlc.arg(senha_hash),
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND token_recuperacao_hash = sqlc.arg(token_hash)::text
   AND token_recuperacao_expira_em > now()
-  AND ativo;
+  AND ativo
+RETURNING id;
 
 -- name: RegistrarUltimoAcesso :exec
 UPDATE usuario
@@ -157,6 +160,7 @@ SELECT
     u.nome,
     u.email,
     u.telefone,
+    u.valor_hora,
     a.nome AS area,
     COALESCE(
         array_agg(ue.loja_id) FILTER (WHERE ue.loja_id IS NOT NULL),
@@ -187,13 +191,13 @@ WHERE u.tenant_id = $1
         )
     )
   )
-GROUP BY u.id, u.nome, u.email, u.telefone, a.nome
+GROUP BY u.id, u.nome, u.email, u.telefone, u.valor_hora, a.nome
 ORDER BY u.nome;
 
 -- name: ObterGestoresDoSetor :many
--- Quem recebe a notificação de WhatsApp quando uma Solicitação nasce naquele
--- setor (ver CLAUDE.md, "Notificação de solicitação por WhatsApp"): todo
--- gestor cujo escopo alcança o setor, mesmo critério de "alcança" do EXISTS
+-- Quem recebe a notificação quando uma Solicitação nasce naquele setor (ver
+-- "Notificações" em docs/fluxo-de-negocio.md): todo gestor cujo escopo
+-- alcança o setor, mesmo critério de "alcança" do EXISTS
 -- em ListarSolicitacoes/ListarMaquinas -- a loja bate E, dentro dela, acesso
 -- total OU o setor específico marcado.
 --
@@ -203,23 +207,21 @@ ORDER BY u.nome;
 -- notificação de solicitação é só pro Gestor por ora (ver CLAUDE.md);
 -- Técnico entra quando a fase 2 existir, com sua própria query.
 --
--- Sem telefone cadastrado, o gestor não aparece -- não é erro, é degrade
--- silencioso: quem chama (NotificacaoService) não teria pra onde mandar de
--- qualquer forma. Ativo também filtra: gestor desativado não deve saber de
--- solicitação nova.
+-- Ativo filtra: gestor desativado não deve saber de solicitação nova.
+-- Telefone NÃO filtra mais -- era o critério do WhatsApp; a notificação agora
+-- mora no próprio sistema e todo gestor tem pra onde receber.
 --
 -- EXISTS e não JOIN, mesmo motivo de ListarUsuarios/ListarTecnicos: com JOIN
 -- o gestor apareceria uma vez por linha de usuario_escopo_setor que casasse
 -- (e com acesso_total_setores, a linha de usuario_escopo não tem setor
 -- nenhum atrelado -- LEFT JOIN duplicaria por engano se fosse feito fora do
 -- EXISTS).
-SELECT u.id, u.nome, u.telefone
+SELECT u.id, u.nome
 FROM usuario u
 JOIN setor s ON s.tenant_id = u.tenant_id AND s.id = sqlc.arg(setor_id)
 WHERE u.tenant_id = sqlc.arg(tenant_id)
   AND u.perfil = 'gestor'
   AND u.ativo
-  AND u.telefone IS NOT NULL
   AND EXISTS (
     SELECT 1
     FROM usuario_escopo ue

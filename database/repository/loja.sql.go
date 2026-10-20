@@ -11,19 +11,29 @@ import (
 
 const atualizarLoja = `-- name: AtualizarLoja :one
 UPDATE loja
-SET nome = $3
+SET nome = $3,
+    foto_chave = COALESCE($4, foto_chave)
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, nome, ativa, criado_em
+RETURNING id, tenant_id, nome, ativa, criado_em, foto_chave
 `
 
 type AtualizarLojaParams struct {
-	ID       int64
-	TenantID int64
-	Nome     string
+	ID        int64
+	TenantID  int64
+	Nome      string
+	FotoChave *string
 }
 
+// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+// AtualizarMaquina). A antiga fica órfã no R2.
 func (q *Queries) AtualizarLoja(ctx context.Context, arg AtualizarLojaParams) (Loja, error) {
-	row := q.db.QueryRow(ctx, atualizarLoja, arg.ID, arg.TenantID, arg.Nome)
+	row := q.db.QueryRow(ctx, atualizarLoja,
+		arg.ID,
+		arg.TenantID,
+		arg.Nome,
+		arg.FotoChave,
+	)
 	var i Loja
 	err := row.Scan(
 		&i.ID,
@@ -31,6 +41,7 @@ func (q *Queries) AtualizarLoja(ctx context.Context, arg AtualizarLojaParams) (L
 		&i.Nome,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
@@ -58,14 +69,15 @@ func (q *Queries) ContarSetoresAtivosDaLoja(ctx context.Context, arg ContarSetor
 
 const criarLoja = `-- name: CriarLoja :one
 
-INSERT INTO loja (tenant_id, nome)
-VALUES ($1, $2)
-RETURNING id, tenant_id, nome, ativa, criado_em
+INSERT INTO loja (tenant_id, nome, foto_chave)
+VALUES ($1, $2, $3)
+RETURNING id, tenant_id, nome, ativa, criado_em, foto_chave
 `
 
 type CriarLojaParams struct {
-	TenantID int64
-	Nome     string
+	TenantID  int64
+	Nome      string
+	FotoChave *string
 }
 
 // Loja é a unidade/filial dentro do tenant. Exclusão é sempre soft delete
@@ -76,8 +88,9 @@ type CriarLojaParams struct {
 // ⚠️ A coluna é `ativa` (feminino) na loja e `ativo` no setor/usuário.
 // Nome é único por tenant (uq_loja_tenant_nome): duplicado volta 23505 e
 // vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
+// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_LOJAS), opcional.
 func (q *Queries) CriarLoja(ctx context.Context, arg CriarLojaParams) (Loja, error) {
-	row := q.db.QueryRow(ctx, criarLoja, arg.TenantID, arg.Nome)
+	row := q.db.QueryRow(ctx, criarLoja, arg.TenantID, arg.Nome, arg.FotoChave)
 	var i Loja
 	err := row.Scan(
 		&i.ID,
@@ -85,6 +98,7 @@ func (q *Queries) CriarLoja(ctx context.Context, arg CriarLojaParams) (Loja, err
 		&i.Nome,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
@@ -112,7 +126,7 @@ func (q *Queries) DesativarLoja(ctx context.Context, arg DesativarLojaParams) (i
 }
 
 const listarLojas = `-- name: ListarLojas :many
-SELECT id, tenant_id, nome, ativa, criado_em FROM loja
+SELECT id, tenant_id, nome, ativa, criado_em, foto_chave FROM loja
 WHERE tenant_id = $1
   AND ativa
 ORDER BY nome
@@ -136,6 +150,7 @@ func (q *Queries) ListarLojas(ctx context.Context, tenantID int64) ([]Loja, erro
 			&i.Nome,
 			&i.Ativa,
 			&i.CriadoEm,
+			&i.FotoChave,
 		); err != nil {
 			return nil, err
 		}
@@ -148,7 +163,7 @@ func (q *Queries) ListarLojas(ctx context.Context, tenantID int64) ([]Loja, erro
 }
 
 const obterLojaParaEscrita = `-- name: ObterLojaParaEscrita :one
-SELECT id, tenant_id, nome, ativa, criado_em FROM loja
+SELECT id, tenant_id, nome, ativa, criado_em, foto_chave FROM loja
 WHERE id = $1 AND tenant_id = $2
 FOR SHARE
 `
@@ -171,12 +186,13 @@ func (q *Queries) ObterLojaParaEscrita(ctx context.Context, arg ObterLojaParaEsc
 		&i.Nome,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
 
 const obterLojaPorID = `-- name: ObterLojaPorID :one
-SELECT id, tenant_id, nome, ativa, criado_em FROM loja
+SELECT id, tenant_id, nome, ativa, criado_em, foto_chave FROM loja
 WHERE id = $1 AND tenant_id = $2
 `
 
@@ -197,6 +213,7 @@ func (q *Queries) ObterLojaPorID(ctx context.Context, arg ObterLojaPorIDParams) 
 		&i.Nome,
 		&i.Ativa,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }

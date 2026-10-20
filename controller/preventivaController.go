@@ -15,19 +15,31 @@ type PreventivaServiceInterface interface {
 	CadastrarPreventiva(ctx context.Context, tenantID int64, payload model.PreventivaPayload) (model.Preventiva, error)
 	ListarPreventivas(ctx context.Context, tenantID, usuarioID int64, perfil string, maquinaID *int64) ([]model.Preventiva, error)
 	ObterPreventiva(ctx context.Context, tenantID, id int64) (model.Preventiva, error)
+	HistoricoPreventiva(ctx context.Context, tenantID, usuarioID int64, perfil string, id int64) ([]model.CicloPreventiva, error)
 	AtualizarPreventiva(ctx context.Context, tenantID, id int64, payload model.PreventivaPayload) (model.Preventiva, error)
 	DesativarPreventiva(ctx context.Context, tenantID, id int64) error
 }
 
+// PreventivaController guarda o bucket das fotos de máquina para assinar
+// Preventiva.MaquinaFotoUrl -- o mesmo de MaquinaController, resolvido aqui
+// de novo porque a preventiva denormaliza a foto da máquina na resposta.
 type PreventivaController struct {
-	service PreventivaServiceInterface
+	service        PreventivaServiceInterface
+	bucketMaquinas string
 }
 
-func NewPreventivaController(service PreventivaServiceInterface) *PreventivaController {
+func NewPreventivaController(service PreventivaServiceInterface, bucketMaquinas string) *PreventivaController {
 
 	return &PreventivaController{
-		service: service,
+		service:        service,
+		bucketMaquinas: bucketMaquinas,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 da foto da máquina pela URL
+// assinada de leitura (assinarFoto, controller/foto.go).
+func (p *PreventivaController) resolverFoto(ctx context.Context, preventiva *model.Preventiva) {
+	preventiva.MaquinaFotoUrl = assinarFoto(ctx, p.bucketMaquinas, preventiva.MaquinaFotoUrl, "preventiva", preventiva.Id)
 }
 
 // Cadastrar é POST /preventivas -- a preventiva avulsa do
@@ -77,6 +89,7 @@ func (p *PreventivaController) Cadastrar() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusCreated, preventiva)
 	}
 }
@@ -114,6 +127,10 @@ func (p *PreventivaController) Listar() gin.HandlerFunc {
 			return
 		}
 
+		for i := range preventivas {
+			p.resolverFoto(ctx.Request.Context(), &preventivas[i])
+		}
+
 		ctx.JSON(http.StatusOK, preventivas)
 	}
 }
@@ -146,7 +163,47 @@ func (p *PreventivaController) Obter() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusOK, preventiva)
+	}
+}
+
+// Historico é GET /preventivas/:id/historico: os ciclos (OS) que a preventiva
+// já gerou. Aberto a todo perfil autenticado, com o mesmo recorte de escopo de
+// Listar -- é o Gestor quem acompanha, na aba "Manutenção Prev.".
+func (p *PreventivaController) Historico() gin.HandlerFunc {
+
+	return func(ctx *gin.Context) {
+
+		id, ok := idDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		tenantId, ok := tenantDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		usuarioId, perfil, ok := atorDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		ciclos, err := p.service.HistoricoPreventiva(ctx.Request.Context(), tenantId, usuarioId, perfil, id)
+		if err != nil {
+
+			switch {
+			case errors.Is(err, helper.ErrNaoEncontrado):
+				ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			default:
+				slog.ErrorContext(ctx.Request.Context(), "histórico da preventiva", "id", id, "tenant", tenantId, "err", err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter histórico da preventiva"})
+			}
+			return
+		}
+
+		ctx.JSON(http.StatusOK, ciclos)
 	}
 }
 
@@ -191,6 +248,7 @@ func (p *PreventivaController) Atualizar() gin.HandlerFunc {
 			return
 		}
 
+		p.resolverFoto(ctx.Request.Context(), &preventiva)
 		ctx.JSON(http.StatusOK, preventiva)
 	}
 }

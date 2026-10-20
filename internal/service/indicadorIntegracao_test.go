@@ -15,7 +15,7 @@ import (
 // Postgres de verdade: a query (quem entra no histórico e quem fica fora), o
 // escopo virando 404 e o mês em America/Sao_Paulo.
 //
-// A matemática em si (MTTR, MTBF, corte de 6 meses) é testada sem banco em
+// A matemática em si (MTTR, MTBF, corte de 12 meses) é testada sem banco em
 // internal/model/indicadorMaquina_test.go -- aqui o que se prova é que os
 // números que chegam ao model são os certos.
 func TestObterIndicadoresDaMaquina(t *testing.T) {
@@ -199,12 +199,15 @@ func TestObterIndicadoresDaMaquina(t *testing.T) {
 			}
 		}
 
-		esperadoMes := []model.IndicadorMensal{{Mes: "06/2026", CustoTotal: 300}, {Mes: "07/2026", CustoTotal: 50}}
+		esperadoMes := []model.IndicadorMensal{
+			{Mes: "06/2026", ResumoIndicadores: model.ResumoIndicadores{CustoTotal: 300}},
+			{Mes: "07/2026", ResumoIndicadores: model.ResumoIndicadores{CustoTotal: 50}},
+		}
 		if len(ind.PorMes) != 2 {
 			t.Fatalf("porMes = %+v, esperado 2 meses", ind.PorMes)
 		}
 		for i, e := range esperadoMes {
-			if ind.PorMes[i] != e {
+			if ind.PorMes[i].Mes != e.Mes || ind.PorMes[i].CustoTotal != e.CustoTotal {
 				t.Errorf("porMes[%d] = %+v, esperado %+v", i, ind.PorMes[i], e)
 			}
 		}
@@ -260,6 +263,81 @@ func TestObterIndicadoresDaMaquina(t *testing.T) {
 
 	t.Run("máquina inexistente é 404", func(t *testing.T) {
 		_, err := svc.ObterIndicadoresDaMaquina(ctx, tenantID, 999999, admin.Id, "administrador")
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Errorf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	// GET /indicadores/lojas/:id. Um segundo setor na Loja A, com uma OS
+	// encerrada, e um gestor que só alcança a Padaria: o agregado da loja tem
+	// que ser recortado pelos setores do escopo, não só pela loja.
+	var setorAcougue int64
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Açougue') RETURNING id`, tenantID, lojaA).Scan(&setorAcougue); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+	serra := maquina("Serra", setorAcougue)
+	solAcougue := cadastrar("Fábio", "fabio@ind.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, SetoresIds: []int64{setorAcougue},
+	})
+	encerrar(abrir(solAcougue, serra.Id, "Serra sem corte"),
+		"2026-07-01 08:00:00-03", "2026-07-01 09:00:00-03", "2026-07-01 10:00:00-03", "2026-07-01 11:00:00-03",
+		"Corretiva", nil, 40.00)
+	gestorPadaria := cadastrar("Gil", "gil@ind.com", "gestor", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, SetoresIds: []int64{setorA},
+	})
+
+	t.Run("loja agrega setores e máquinas do escopo", func(t *testing.T) {
+		ind, err := svc.ObterIndicadoresDaLoja(ctx, tenantID, lojaA, gestor.Id, "gestor")
+		if err != nil {
+			t.Fatalf("erro inesperado: %v", err)
+		}
+		// Forno 350 + Prensa 70 + Serra 40. A OS do Forno ainda aberta não entra.
+		if ind.CustoTotal != 460 || ind.QuantidadeOs != 4 {
+			t.Errorf("total = %+v, esperado custo 460 em 4 OS", ind.ResumoIndicadores)
+		}
+		if len(ind.PorSetor) != 2 {
+			t.Fatalf("porSetor = %+v, esperado Padaria e Açougue", ind.PorSetor)
+		}
+		for _, setor := range ind.PorSetor {
+			if setor.SetorId == setorA && (setor.QuantidadeMaquinas != 3 || setor.CustoTotal != 420) {
+				t.Errorf("Padaria = %+v, esperado 3 máquinas e custo 420", setor)
+			}
+		}
+		// A Nova (sem histórico) também ganha card -- zerado.
+		if len(ind.PorMaquina) != 4 {
+			t.Errorf("porMaquina = %d itens, esperado as 4 máquinas da loja", len(ind.PorMaquina))
+		}
+	})
+
+	t.Run("gestor de setor vê a loja recortada pelo setor", func(t *testing.T) {
+		ind, err := svc.ObterIndicadoresDaLoja(ctx, tenantID, lojaA, gestorPadaria.Id, "gestor")
+		if err != nil {
+			t.Fatalf("erro inesperado: %v", err)
+		}
+		if ind.CustoTotal != 420 || len(ind.PorSetor) != 1 || ind.PorSetor[0].SetorId != setorA {
+			t.Errorf("veio custo %v e setores %+v, esperado só a Padaria (420)", ind.CustoTotal, ind.PorSetor)
+		}
+	})
+
+	t.Run("loja fora do escopo é 404", func(t *testing.T) {
+		_, err := svc.ObterIndicadoresDaLoja(ctx, tenantID, lojaB, gestor.Id, "gestor")
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Errorf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("administrador enxerga qualquer loja do tenant", func(t *testing.T) {
+		ind, err := svc.ObterIndicadoresDaLoja(ctx, tenantID, lojaB, admin.Id, "administrador")
+		if err != nil {
+			t.Fatalf("erro inesperado: %v", err)
+		}
+		if ind.CustoTotal != 10 {
+			t.Errorf("custoTotal = %v, esperado 10", ind.CustoTotal)
+		}
+	})
+
+	t.Run("loja inexistente é 404", func(t *testing.T) {
+		_, err := svc.ObterIndicadoresDaLoja(ctx, tenantID, 999999, admin.Id, "administrador")
 		if !errors.Is(err, helper.ErrNaoEncontrado) {
 			t.Errorf("erro = %v, esperado ErrNaoEncontrado", err)
 		}

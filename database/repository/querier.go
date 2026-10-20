@@ -29,6 +29,14 @@ type Querier interface {
 	// ErrConflitoIntegridade via TraduzErroPostgres, mesmo caminho de
 	// CriarOrdemServicoDeSolicitacao com tecnico_id inexistente.
 	AcionarTerceiro(ctx context.Context, arg AcionarTerceiroParams) (OrdemServico, error)
+	// Logout: derruba só a sessão deste aparelho.
+	ApagarSessao(ctx context.Context, tokenHash []byte) error
+	// Todas as sessões de um usuário, em todos os aparelhos: desativação e troca
+	// de senha (a de recuperação e a que o Administrador faz na edição).
+	ApagarSessoesDoUsuario(ctx context.Context, arg ApagarSessoesDoUsuarioParams) error
+	// Limpeza das que passaram de um dos dois prazos, chamada no login (de
+	// qualquer usuário: a tabela é pequena e sem isso ela só cresceria).
+	ApagarSessoesVencidas(ctx context.Context, arg ApagarSessoesVencidasParams) error
 	// POST /ordens-servico/:id/custo -- a correção prometida no comentário de
 	// CriarCusto acima. lancado_por_id passa a ser o Administrador que corrige,
 	// não mais o Técnico do encerramento; lancado_em anda junto (é "a última vez
@@ -61,7 +69,13 @@ type Querier interface {
 	// Todos os campos editáveis de uma vez (o front manda o objeto inteiro no PUT).
 	// `ativa` fica de fora: reativar não existe pela API, e desativar tem rota
 	// própria -- ver DesativarEmpresaTerceirizada.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarEmpresaTerceirizada(ctx context.Context, arg AtualizarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarLoja(ctx context.Context, arg AtualizarLojaParams) (Loja, error)
 	// setor_id entra no SET (diferente de AtualizarSetor, que ignora loja_id):
 	// mover uma máquina de setor não arrasta setor/loja de ninguém, só o próprio
@@ -77,10 +91,17 @@ type Querier interface {
 	// empresa, mudou de área), e não desfaz nada -- as OS já abertas guardam o
 	// técnico delas em ordem_servico.tecnico_id, não olham mais para cá.
 	AtualizarPreventiva(ctx context.Context, arg AtualizarPreventivaParams) (Preventiva, error)
+	// A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+	// WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+	// não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+	AtualizarPreventivaDaMaquina(ctx context.Context, arg AtualizarPreventivaDaMaquinaParams) (int64, error)
 	AtualizarSenhaUsuario(ctx context.Context, arg AtualizarSenhaUsuarioParams) error
 	// Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 	// OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
 	// loja errada se resolve desativando e criando na certa.
+	// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+	// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+	// AtualizarMaquina). A antiga fica órfã no R2.
 	AtualizarSetor(ctx context.Context, arg AtualizarSetorParams) (Setor, error)
 	// Sem senha_hash -- troca de senha tem query própria (AtualizarSenhaUsuario),
 	// porque na edição ela é opcional (ver CadastrarUsuario: senha omitida mantém
@@ -94,6 +115,23 @@ type Querier interface {
 	// pedir a senha. `em_aberto` é o que bloqueia DesativarMaquina: solicitação
 	// ainda na fila do Gestor ou OS que não chegou a 'Concluída'.
 	ContarHistoricoDaMaquina(ctx context.Context, arg ContarHistoricoDaMaquinaParams) (ContarHistoricoDaMaquinaRow, error)
+	// O número do badge de cada destinatário de um push, numa ida só -- cada um
+	// tem a sua contagem. Usuário sem nenhuma não lida não volta linha (é zero).
+	ContarNaoLidasDosUsuarios(ctx context.Context, arg ContarNaoLidasDosUsuariosParams) ([]ContarNaoLidasDosUsuariosRow, error)
+	// Mesmo WHERE de ListarNotificacoesDoUsuario -- divergir dá total que não bate
+	// com a página.
+	ContarNotificacoesDoUsuario(ctx context.Context, arg ContarNotificacoesDoUsuarioParams) (int64, error)
+	// O número do sininho e do badge do ícone (idx_notificacao_nao_lida).
+	ContarNotificacoesNaoLidas(ctx context.Context, arg ContarNotificacoesNaoLidasParams) (int64, error)
+	// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+	ContarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ContarOrdensMaquinarioEncerradasDaLojaParams) (int64, error)
+	// O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+	// tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+	// aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+	// solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+	ContarOrdensServico(ctx context.Context, arg ContarOrdensServicoParams) (int64, error)
+	// O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+	ContarReparosEncerradosDaLoja(ctx context.Context, arg ContarReparosEncerradosDaLojaParams) (int64, error)
 	// Loja não é desativada por baixo dos setores: o escopo de acesso aponta pro
 	// setor (usuario_escopo_setor), então setor ativo pendurado em loja inativa
 	// continua dando acesso a uma loja que sumiu das listagens. Quem chama decide
@@ -120,9 +158,9 @@ type Querier interface {
 	// `false` aqui, ck_custo_nota_fiscal exige os dois campos NULL, que é
 	// exatamente o que este INSERT deixa.
 	//
-	// custo_hora_tecnico é quem o service decide se manda ou NULL
-	// (pgtype.Float8{Valid: false}): só existe em 'maquinario'
-	// (ck_custo_por_tipo), reparo e terceiros não cobram hora técnica. Os dois
+	// custo_hora_tecnico é a mão de obra somada das tarefas, gravada
+	// em todo tipo de OS desde a 000017 (antes, reparo e terceiros
+	// ficavam NULL por ck_custo_por_tipo). Os dois
 	// (e custo_manutencao, sempre obrigatório) já saem tipados
 	// `pgtype.Float8` pelos overrides de coluna em sqlc.yaml -- não
 	// `shopspring/decimal`, que sairia como string no JSON contra um front
@@ -148,6 +186,7 @@ type Querier interface {
 	// Nome é único por tenant (uq_empresa_terceirizada_nome): duplicado volta 23505
 	// e vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
 	// especialidade e telefone são opcionais (NULL) -- o front tipa os dois como `?`.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_TERCERIZADOS), opcional.
 	CriarEmpresaTerceirizada(ctx context.Context, arg CriarEmpresaTerceirizadaParams) (EmpresaTerceirizada, error)
 	// Grava o que o Técnico apurou (docs/modelagem, 1.4.3 -- universal pros
 	// três tipos, inclusive terceiros: quem recebe o serviço da empresa
@@ -168,6 +207,17 @@ type Querier interface {
 	// transação -- não há UPDATE de escopo individual aqui de propósito.
 	CriarEscopo(ctx context.Context, arg CriarEscopoParams) (UsuarioEscopo, error)
 	CriarEscopoSetor(ctx context.Context, arg CriarEscopoSetorParams) error
+	// ==========================================================================
+	// Linha do tempo da OS (migration 000021): quem fez cada passo e quando.
+	// Escrita sempre DENTRO da transação do passo que registra -- evento e
+	// mudança de estado commitam juntos ou nenhum dos dois.
+	// ==========================================================================
+	// usuario_id é narg só pela OS de preventiva (ninguém abriu, foi o
+	// calendário); ck_os_evento_usuario recusa NULL em qualquer outro tipo.
+	// status_* são nulos nos eventos que não mudam o estado (terceiro_acionado,
+	// custo_corrigido). detalhes é o JSON do passo (motivo da pausa, estado do
+	// custo...), sempre objeto -- ver ck_os_evento_detalhes.
+	CriarEventoOS(ctx context.Context, arg CriarEventoOSParams) error
 	// Um INSERT por marcador (hoje só existe 'Afeta Produção' -- marcador_impacto
 	// é ENUM de um valor só, associativa porque o contrato já troca uma lista).
 	// Chamada em loop pelo service, na mesma transação da solicitação: sem
@@ -203,6 +253,7 @@ type Querier interface {
 	// ⚠️ A coluna é `ativa` (feminino) na loja e `ativo` no setor/usuário.
 	// Nome é único por tenant (uq_loja_tenant_nome): duplicado volta 23505 e
 	// vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_LOJAS), opcional.
 	CriarLoja(ctx context.Context, arg CriarLojaParams) (Loja, error)
 	// Máquina pertence a um setor (maquina só referencia setor_id -- a loja vem
 	// por join, docs/modelagem-banco-dados.md). Exclusão é soft delete
@@ -254,6 +305,14 @@ type Querier interface {
 	// tem_nota_fiscal. O service confere antes para a mensagem sair nomeando o
 	// campo, mesmo padrão dos CHECKs espelhados em Go.
 	CriarNotaFiscal(ctx context.Context, arg CriarNotaFiscalParams) error
+	// Uma linha por destinatário, numa ida só ao banco (unnest): "solicitação
+	// nova" vai pra todo gestor do setor, e N INSERTs seriam N idas. O texto é o
+	// mesmo pra todos -- quem difere é só o usuario_id. Usuário de outro tenant
+	// não entra: a FK composta (tenant_id, usuario_id) recusa a linha inteira.
+	//
+	// Devolve o id de cada uma: vai no push, pro service worker marcar como lida
+	// a notificação certa quando o usuário toca nela.
+	CriarNotificacoes(ctx context.Context, arg CriarNotificacoesParams) ([]CriarNotificacoesRow, error)
 	// Insere a OS da preventiva vencida, na mesma transação de
 	// CriarSolicitacaoPreventiva e AvancarProximaData. É o irmão automático de
 	// CriarOrdemServicoDeSolicitacao: o mesmo INSERT, sem os campos que só um
@@ -362,6 +421,9 @@ type Querier interface {
 	// no schema para a migration não falhar com dado dentro, mas o service exige
 	// o campo -- preventiva sem técnico não tem para quem abrir OS.
 	CriarPreventiva(ctx context.Context, arg CriarPreventivaParams) (Preventiva, error)
+	// Uma linha por login. token_hash é o SHA-256 do segredo que vai no cookie
+	// (ver a migration 000022): o segredo em si nunca chega ao banco.
+	CriarSessao(ctx context.Context, arg CriarSessaoParams) error
 	// Setor pertence a uma loja. Exclusão é soft delete (ativo = false) -- ver
 	// "Soft delete" em docs/modelagem-banco-dados.md: máquina, solicitação e o
 	// escopo de acesso apontam pro setor.
@@ -374,6 +436,8 @@ type Querier interface {
 	// fk_setor_loja (tenant_id, loja_id) -> loja (tenant_id, id) só fecha com os
 	// dois, e é ela que torna impossível pendurar um setor numa loja de outro
 	// tenant -- o banco recusa, não depende de disciplina no service.
+	//
+	// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_SETORES), opcional.
 	CriarSetor(ctx context.Context, arg CriarSetorParams) (Setor, error)
 	// POST /solicitacoes/direta -- Gestor/Administrador abrindo a OS sem passar
 	// pela fila (migration 000014). `origem` e `status` literais, mesmo motivo de
@@ -504,14 +568,18 @@ type Querier interface {
 	// contagem de linhas, desativar um id inexistente (ou de outro tenant)
 	// responderia sucesso igual a desativar um de verdade.
 	DesativarPreventiva(ctx context.Context, arg DesativarPreventivaParams) (int64, error)
-	// PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
-	// incremental): o service desativa todas as da máquina e insere as novas, na
-	// mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+	// PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+	// as que já existiam voltam com id. Desativa só as que saíram do formulário.
 	//
-	// Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
-	// um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
-	// tivesse vencido uma vez.
-	DesativarPreventivasDaMaquina(ctx context.Context, arg DesativarPreventivasDaMaquinaParams) error
+	// ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+	// edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+	// que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+	// via "0 de 0 feitos" depois de qualquer "Salvar".
+	//
+	// Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+	// quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+	// Lista vazia (só preventivas novas) desativa todas as atuais.
+	DesativarPreventivasForaDaLista(ctx context.Context, arg DesativarPreventivasForaDaListaParams) error
 	// :execrows pelo mesmo motivo de DesativarLoja: distinguir "desativei" de
 	// "esse id não existe neste tenant".
 	DesativarSetor(ctx context.Context, arg DesativarSetorParams) (int64, error)
@@ -523,7 +591,7 @@ type Querier interface {
 	// de verdade. Já desativado conta 1 mesmo assim: o UPDATE casa a linha.
 	DesativarUsuario(ctx context.Context, arg DesativarUsuarioParams) (int64, error)
 	// Usado por ObterSessao: desativar uma empresa precisa derrubar as sessões
-	// abertas dela, senão um token emitido antes continua valendo até expirar (8h).
+	// abertas dela (o middleware também confere, em ValidarSessao).
 	// Query própria em vez de JOIN em ObterUsuarioPorID porque aquela devolve
 	// repository.Usuario, que montarSessao consome inteiro -- virar Row ali
 	// espalharia a mudança por todo o caminho da sessão.
@@ -564,10 +632,18 @@ type Querier interface {
 	// pgx.ErrNoRows quando a corrida perde, e o service traduz isso pra
 	// ErrConflitoIntegridade -- nunca 500.
 	IniciarOrdemServico(ctx context.Context, arg IniciarOrdemServicoParams) (OrdemServico, error)
+	// O caminho inverso de ObterAreaTecnicoPorNome: id -> nome, para devolver
+	// `area` em GET /usuarios(/:id) -- a tela de edição precisa dela para não
+	// abrir o técnico com a área em branco. Lista inteira e não um :one por
+	// usuário: são as poucas áreas do tenant, e a listagem paginada de usuários
+	// faria uma ida ao banco por técnico.
+	ListarAreasTecnico(ctx context.Context, tenantID int64) ([]ListarAreasTecnicoRow, error)
 	// Lido ANTES de ExcluirMaquinaDefinitivo, na mesma transação: depois do
 	// DELETE as chaves somem e os objetos ficariam órfãos no R2 sem ninguém
 	// saber quais eram. Quem apaga do R2 é o controller, depois do commit.
 	ListarChavesAnexosDaMaquina(ctx context.Context, arg ListarChavesAnexosDaMaquinaParams) ([]string, error)
+	// Todos os aparelhos dos destinatários de um evento, numa ida só.
+	ListarDispositivosPushDosUsuarios(ctx context.Context, arg ListarDispositivosPushDosUsuariosParams) ([]ListarDispositivosPushDosUsuariosRow, error)
 	// Só as ativas: a lista alimenta o select do ModalAcionarTerceiro, e oferecer
 	// uma empresa desativada é oferecer o que o Administrador acabou de tirar do ar.
 	//
@@ -575,6 +651,39 @@ type Querier interface {
 	// não manda parâmetro nenhum e a tela do Administrador pagina no cliente
 	// (front-end/CLAUDE.md item 12).
 	ListarEmpresasTerceirizadas(ctx context.Context, tenantID int64) ([]EmpresaTerceirizada, error)
+	// A linha do tempo de UMA OS, do mais antigo para o mais novo (é assim que a
+	// tela conta a história). `id` desempata eventos no mesmo instante: o now()
+	// de uma transação é um só, e aberta+... nunca nascem juntos, mas uma
+	// correção e outra em sequência rápida sim.
+	//
+	// Nome do autor por JOIN (usuario.nome de hoje): quem renomear o usuário
+	// renomeia a história, e isso é o esperado -- é a pessoa, não um carimbo.
+	// Perfil vem junto para a tela dizer "Administrador" ao lado do nome.
+	//
+	// Sem escopo aqui: quem chama (OrdemServicoService.ListarHistorico) já provou
+	// que a OS está ao alcance do ator.
+	ListarEventosDaOS(ctx context.Context, arg ListarEventosDaOSParams) ([]ListarEventosDaOSRow, error)
+	// GET /indicadores/lojas/:id -- a mesma matéria-prima de
+	// ListarHistoricoOsDaMaquina, só que de todas as máquinas da loja que quem
+	// chama alcança. O Painel de Indicadores abre a loja com o total dela, um card
+	// por setor e um por máquina; MontarIndicadoresLoja faz os três recortes sobre
+	// esta lista, em Go, pelo mesmo motivo da query por máquina.
+	//
+	// maquina_id e setor_id vêm na linha porque são as chaves do recorte -- e o
+	// MTBF de um grupo precisa separar as OS por máquina (ver mtbf no model).
+	//
+	// setor_id é o ATUAL da máquina, não o da solicitação: o painel mostra a
+	// máquina onde ela está hoje, e uma máquina transferida de setor leva o
+	// histórico junto.
+	//
+	// Escopo no WHERE, mesmo EXISTS de ListarMaquinas: o Gestor com só alguns
+	// setores da loja vê o agregado desses setores, não da loja inteira. Só
+	// máquina ativa, de novo como ListarMaquinas -- o total da loja tem que bater
+	// com a soma dos cards que a tela desenha.
+	//
+	// ⚠️ horas_* e custo_* CRUAS, mesma nota de ListarHistoricoOsDaMaquina.
+	// Ascendente pelo mesmo motivo da query por máquina: o MTBF percorre em ordem.
+	ListarHistoricoOsDaLoja(ctx context.Context, arg ListarHistoricoOsDaLojaParams) ([]ListarHistoricoOsDaLojaRow, error)
 	// GET /indicadores/maquinas/:id -- a matéria-prima do Painel de Indicadores do
 	// Gestor (front DashboardGestor). Uma linha por OS encerrada da máquina; as
 	// seis grandezas do painel (Horas Parada, MTTR, MTBF, Custo Total, rosca por
@@ -606,9 +715,43 @@ type Querier interface {
 	// `vencida` em preventiva.sql: uma OS encerrada às 22h de 31/08 é agosto pro
 	// Gestor e setembro pro UTC. Formato YYYY-MM porque ordena como texto -- o
 	// 'MM/YYYY' do contrato é montado na hora de responder.
+	// origem: MTBF e MTTR medem FALHA e conserto, e a OS de preventiva é revisão
+	// programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
+	// (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
+	// o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
+	// resumir/mtbf (model/indicadorMaquina.go). Custo e quantidade da preventiva saem
+	// à parte do maquinário (quantidadePreventivas/custoPreventivas), como os reparos.
 	// Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
 	// ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
 	ListarHistoricoOsDaMaquina(ctx context.Context, arg ListarHistoricoOsDaMaquinaParams) ([]ListarHistoricoOsDaMaquinaRow, error)
+	// Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+	// solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+	// transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+	// tabela própria.
+	//
+	// aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+	// (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+	// duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+	//
+	// LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+	// ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+	ListarHistoricoPreventiva(ctx context.Context, arg ListarHistoricoPreventivaParams) ([]ListarHistoricoPreventivaRow, error)
+	// Os PEQUENOS REPAROS encerrados da loja, para o custo separado do Painel de
+	// Indicadores (GET /indicadores/lojas/:id). Reparo não tem máquina
+	// (solicitacao_os.maquina_id é NULL: o Solicitante digita o item), então nunca
+	// entra em ListarHistoricoOsDaLoja nem nos indicadores por máquina -- e, de
+	// propósito, também não nos de falha (MTBF/MTTR) nem nas horas: só no custo e
+	// na contagem, em campos próprios, para o Gestor ver o custo do maquinário e o
+	// dos reparos SEPARADOS e nunca somados num número só.
+	//
+	// O reparo é identificado pela SOLICITAÇÃO (maquina_id IS NULL), não por
+	// ordem_servico.tipo: o Técnico pode promover a OS a 'terceiros' no meio, e um
+	// reparo terceirizado continua sendo reparo.
+	//
+	// O setor é o da SOLICITAÇÃO (s.setor_id, NOT NULL): é a única âncora que o
+	// reparo tem. Escopo no WHERE, mesmo EXISTS das outras queries de histórico.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarHistoricoReparosDaLoja(ctx context.Context, arg ListarHistoricoReparosDaLojaParams) ([]ListarHistoricoReparosDaLojaRow, error)
 	// Sem paginação nem filtro de busca de propósito: /lojas devolve array simples
 	// e o front pagina/filtra no cliente (front-end/CLAUDE.md item 12). Só
 	// /usuarios e /solicitacoes/minhas paginam no servidor.
@@ -628,6 +771,32 @@ type Querier interface {
 	//
 	// Array simples, sem paginação: o front pagina no cliente.
 	ListarMaquinas(ctx context.Context, arg ListarMaquinasParams) ([]ListarMaquinasRow, error)
+	// As opções do filtro "de qual máquina" de Minhas Solicitações: as máquinas
+	// que aparecem nas solicitações do PRÓPRIO solicitante, e não as do setor dele
+	// -- a máquina desativada, ou a do setor antigo de quem mudou de setor, continua
+	// no histórico e precisa continuar filtrável. Pequeno reparo não tem máquina e
+	// some no JOIN. Sem filtro de m.ativa, pelo mesmo motivo.
+	ListarMaquinasDasMinhasSolicitacoes(ctx context.Context, arg ListarMaquinasDasMinhasSolicitacoesParams) ([]ListarMaquinasDasMinhasSolicitacoesRow, error)
+	// GET /notificacoes -- sempre só as do próprio usuário (o id vem do token),
+	// mais novas primeiro, paginada por LIMIT/OFFSET pelo mesmo motivo de
+	// ListarSolicitacoesDoSolicitante: model.RespostaPaginada pede os dois números.
+	ListarNotificacoesDoUsuario(ctx context.Context, arg ListarNotificacoesDoUsuarioParams) ([]ListarNotificacoesDoUsuarioRow, error)
+	// A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
+	// máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
+	// ListarReparosEncerradosDaLoja, que cobre os reparos. Serve também à faixa de
+	// manutenções preventivas: `preventiva` separa os dois grupos pela origem da solicitação,
+	// o mesmo critério de `preventiva` em resumir (model/indicadorMaquina.go) -- false é o
+	// card do maquinário, true é a faixa das preventivas.
+	//
+	// ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
+	// MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
+	// desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
+	// transferida leva o histórico), escopo no WHERE. Entram as terceirizadas também -- o custo delas
+	// está no card, e a lista explica.
+	// Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
+	// Mais novo primeiro, paginada.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarOrdensMaquinarioEncerradasDaLoja(ctx context.Context, arg ListarOrdensMaquinarioEncerradasDaLojaParams) ([]ListarOrdensMaquinarioEncerradasDaLojaRow, error)
 	// GET /ordens-servico -- um endpoint para os três painéis, o que muda é o
 	// filtro (front-end/src/servicos/servicoOrdensServico.ts):
 	//   Gestor  (PainelGestor)                 -> sem filtro, recorta pelo escopo
@@ -693,6 +862,13 @@ type Querier interface {
 	// administrador (não filtra), os demais perfis só enxergam OS cujo setor eles
 	// alcançam. O setor é o da solicitação de origem -- ordem_servico não tem
 	// setor_id próprio, e nem deveria: a OS é da solicitação, não de um lugar.
+	// os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+	// poderiam trocar de página entre uma requisição e outra.
+	//
+	// Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+	// deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+	// antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+	// Loja -> Setor a partir da lista inteira.
 	ListarOrdensServico(ctx context.Context, arg ListarOrdensServicoParams) ([]ListarOrdensServicoRow, error)
 	// maquina_id é opcional (NULL não filtra): a aba "Manutenção Prev." do painel
 	// do gestor lista tudo, e a tela de edição de máquina pede só as dela
@@ -754,6 +930,15 @@ type Querier interface {
 	// pode estar velho quando o INSERT acontecer. Não usa p.* como as outras:
 	// aqui ninguém monta resposta de contrato.
 	ListarPreventivasVencidas(ctx context.Context) ([]ListarPreventivasVencidasRow, error)
+	// A LISTA por trás do card "Pequenos Reparos" do Painel de Indicadores: cada reparo
+	// encerrado que compõe quantidadeReparos/custoReparos. ⚠️ O WHERE tem que ser o MESMO de
+	// ListarHistoricoReparosDaLoja (e de ContarReparosEncerradosDaLoja logo abaixo) -- a soma
+	// dos itens é o número do card, e divergir faz a lista mentir. Mesma definição de
+	// reparo: solicitação sem máquina (um reparo terceirizado pelo Técnico continua reparo),
+	// setor da solicitação, escopo no WHERE. Filtros opcionais: o setor e o mês que a tela
+	// está mostrando. Mais novo primeiro, paginada.
+	// ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+	ListarReparosEncerradosDaLoja(ctx context.Context, arg ListarReparosEncerradosDaLojaParams) ([]ListarReparosEncerradosDaLojaRow, error)
 	// loja_id é opcional (NULL não filtra) porque o front usa os dois modos: o
 	// select em cascata pede os setores de uma loja (GET /setores?lojaId=) e
 	// agruparPorEscopoGestor pede todos de uma vez, para nomear o cabeçalho de um
@@ -824,12 +1009,20 @@ type Querier interface {
 	// certo: ele não pertence a loja alguma. ContarUsuarios repete o mesmo WHERE
 	// de propósito; divergir entre as duas dá total que não bate com a página.
 	ListarUsuarios(ctx context.Context, arg ListarUsuariosParams) ([]Usuario, error)
+	// :execrows pelo mesmo motivo das queries de desativar: notificação de outro
+	// usuário (ou inexistente) conta 0 e vira 404, em vez de responder sucesso
+	// sem ter feito nada. COALESCE e não "WHERE lida_em IS NULL": marcar de novo
+	// casa a linha e conta 1 (idempotente, como o front espera) e não reescreve
+	// a hora da primeira leitura.
+	MarcarNotificacaoComoLida(ctx context.Context, arg MarcarNotificacaoComoLidaParams) (int64, error)
 	// `AND status = 'Pendente'` no WHERE, não só no id: sem isso, abrir OS duas
 	// vezes seguidas passaria a segunda também (uq_os_solicitacao pegaria no
 	// INSERT de ordem_servico, mas tarde -- é melhor a solicitação já recusar
 	// antes de gastar o INSERT). 0 linhas afetadas é como o service sabe que não
 	// era Pendente e devolve ErrConflitoIntegridade, sem tentar o INSERT da OS.
 	MarcarSolicitacaoConvertida(ctx context.Context, arg MarcarSolicitacaoConvertidaParams) (int64, error)
+	// "Marcar todas como lidas" -- zero linhas é sucesso (já estava tudo lido).
+	MarcarTodasNotificacoesComoLidas(ctx context.Context, arg MarcarTodasNotificacoesComoLidasParams) error
 	ObterAnexosDaSolicitacao(ctx context.Context, solicitacaoID int64) ([]SolicitacaoAnexo, error)
 	// Plural de propósito, mesmo motivo de ObterImpactosDasSolicitacoes: quem
 	// monta uma página de solicitações busca os anexos de todas numa ida só.
@@ -854,9 +1047,9 @@ type Querier interface {
 	// ida só ao banco -- é o que ListarUsuarios usa para montar o escopo de uma
 	// página inteira sem N+1.
 	ObterEscoposSessaoPorUsuarios(ctx context.Context, usuarioIds []int64) ([]ObterEscoposSessaoPorUsuariosRow, error)
-	// Quem recebe a notificação de WhatsApp quando uma Solicitação nasce naquele
-	// setor (ver CLAUDE.md, "Notificação de solicitação por WhatsApp"): todo
-	// gestor cujo escopo alcança o setor, mesmo critério de "alcança" do EXISTS
+	// Quem recebe a notificação quando uma Solicitação nasce naquele setor (ver
+	// "Notificações" em docs/fluxo-de-negocio.md): todo gestor cujo escopo
+	// alcança o setor, mesmo critério de "alcança" do EXISTS
 	// em ListarSolicitacoes/ListarMaquinas -- a loja bate E, dentro dela, acesso
 	// total OU o setor específico marcado.
 	//
@@ -866,10 +1059,9 @@ type Querier interface {
 	// notificação de solicitação é só pro Gestor por ora (ver CLAUDE.md);
 	// Técnico entra quando a fase 2 existir, com sua própria query.
 	//
-	// Sem telefone cadastrado, o gestor não aparece -- não é erro, é degrade
-	// silencioso: quem chama (NotificacaoService) não teria pra onde mandar de
-	// qualquer forma. Ativo também filtra: gestor desativado não deve saber de
-	// solicitação nova.
+	// Ativo filtra: gestor desativado não deve saber de solicitação nova.
+	// Telefone NÃO filtra mais -- era o critério do WhatsApp; a notificação agora
+	// mora no próprio sistema e todo gestor tem pra onde receber.
 	//
 	// EXISTS e não JOIN, mesmo motivo de ListarUsuarios/ListarTecnicos: com JOIN
 	// o gestor apareceria uma vez por linha de usuario_escopo_setor que casasse
@@ -926,6 +1118,14 @@ type Querier interface {
 	// Espelho de ObterItensDeCustoDasOrdensServico; ver as notas de lá sobre a
 	// ausência de tenant_id e sobre a ordenação.
 	ObterNotasFiscaisDasOrdensServico(ctx context.Context, ordensServicoIds []int64) ([]ObterNotasFiscaisDasOrdensServicoRow, error)
+	// "Esta OS está ao meu alcance?" para a leitura da linha do tempo. Mesmo
+	// critério da listagem, em três perfis:
+	//   - administrador (escopo NULL): qualquer OS do tenant;
+	//   - gestor: o EXISTS de escopo sobre o setor da SOLICITAÇÃO de origem;
+	//   - técnico: só a que é dele (tecnico_id).
+	// Fora disso é pgx.ErrNoRows -> 404, nunca 403, mesmo critério de
+	// ObterSolicitacaoPorID: não confirma que o id existe.
+	ObterOrdemServicoNoEscopo(ctx context.Context, arg ObterOrdemServicoNoEscopoParams) (int64, error)
 	// ==========================================================================
 	// Ordem de serviço -- leitura e ciclo de vida.
 	//
@@ -1074,12 +1274,22 @@ type Querier interface {
 	// que lê o estado antes de chamar esta query (ObterOrdemServicoPorID) e
 	// repassa esse valor pra CriarPausa.status_anterior logo abaixo.
 	PausarOrdemServico(ctx context.Context, arg PausarOrdemServicoParams) (OrdemServico, error)
+	// Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+	// o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+	// ListarPreventivas, NULL é o administrador. Separado do histórico para a
+	// rota responder 404 a quem não alcança, em vez de uma lista vazia que
+	// pareceria "nunca rodou".
+	//
+	// Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+	// sendo histórico.
+	PreventivaNoEscopo(ctx context.Context, arg PreventivaNoEscopoParams) (int64, error)
 	// Espelho de DesativarMaquina. As preventivas não voltam junto porque nunca
 	// saíram: desativar a máquina não mexe nelas, e o job já pula máquina inativa
 	// (ListarPreventivasVencidas filtra m.ativa).
 	ReativarMaquina(ctx context.Context, arg ReativarMaquinaParams) (int64, error)
 	// Troca a senha e queima o token no mesmo UPDATE: dois cliques no mesmo link não passam os dois.
-	// 0 linhas = token inexistente, expirado, de outro tenant ou de usuário desativado -- o cliente não distingue.
+	// Sem linha (pgx.ErrNoRows) = token inexistente, expirado, de outro tenant ou de usuário
+	// desativado -- o cliente não distingue. Devolve o id para o service derrubar as sessões dele.
 	RedefinirSenhaPorToken(ctx context.Context, arg RedefinirSenhaPorTokenParams) (int64, error)
 	RegistrarUltimoAcesso(ctx context.Context, arg RegistrarUltimoAcessoParams) error
 	// ck_rejeicao exige os três juntos (motivo, autor, instante) -- por isso
@@ -1087,6 +1297,32 @@ type Querier interface {
 	// `status = 'Pendente'` de MarcarSolicitacaoConvertida e pelo mesmo motivo:
 	// não rejeitar (nem re-rejeitar) o que já saiu do estado inicial.
 	RejeitarSolicitacao(ctx context.Context, arg RejeitarSolicitacaoParams) (int64, error)
+	// O serviço de push respondeu 404/410: a inscrição morreu (app desinstalado,
+	// permissão revogada, navegador limpo). Por id, sem dono -- quem chama é o
+	// próprio servidor, com a linha que acabou de ler.
+	RemoverDispositivoPush(ctx context.Context, id int64) error
+	// POST /push/inscricoes/remover (o front chama no logout e ao desativar). Só
+	// apaga se o endpoint é do próprio usuário: ninguém desinscreve o aparelho de
+	// outro mandando o endpoint dele. :exec e não :execrows -- zero linhas é
+	// sucesso: o logout de um aparelho cuja inscrição já morreu (410) não é erro.
+	RemoverDispositivoPushDoUsuario(ctx context.Context, arg RemoverDispositivoPushDoUsuarioParams) error
+	// Quantas OS há em cada loja/setor para os MESMOS filtros da listagem -- os
+	// cards de loja e setor da navegação do Painel do Gestor. Existe porque a
+	// lista de OS Finalizadas é paginada no servidor: a tela deixou de ter a lista
+	// inteira para contar.
+	//
+	// ⚠️ O WHERE tem que ser o MESMO de ListarOrdensServico/ContarOrdensServico --
+	// filtro mudado lá e esquecido aqui faz o card dizer 40 e a lista mostrar 12.
+	// Só os JOINs que o WHERE usa mais os nomes de loja e setor.
+	//
+	// `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
+	// finalizadas não usam, mas a query serve às abas em andamento no dia em que
+	// elas também paginarem.
+	//
+	// Uma linha por MÁQUINA dentro do setor (o front soma por setor e por loja):
+	// é o que monta o terceiro nível da navegação. Os pequenos reparos do setor
+	// (s.maquina_id NULL) caem juntos numa linha só, com maquina_* nulos.
+	ResumoOrdensServicoPorSetor(ctx context.Context, arg ResumoOrdensServicoPorSetorParams) ([]ResumoOrdensServicoPorSetorRow, error)
 	// POST /ordens-servico/:id/retomar -- Pausada -> status_anterior da pausa
 	// que acabou de fechar ('Aberta' ou 'Em Andamento', nunca um valor fixo
 	// como em IniciarOrdemServico/PausarOrdemServico -- por isso `status` entra
@@ -1095,6 +1331,11 @@ type Querier interface {
 	// coluna (ver CriarPausa acima), um SET com sqlc.arg cru fica ambíguo pro
 	// sqlc -- mesma cautela de sqlc.narg(tipo)::tipo_os em ListarOrdensServico.
 	RetomarOrdemServico(ctx context.Context, arg RetomarOrdemServicoParams) (OrdemServico, error)
+	// POST /push/inscricoes. Upsert pelo endpoint: o mesmo navegador inscrevendo de
+	// novo (renovou a inscrição, ou OUTRO usuário logou no mesmo aparelho) atualiza
+	// a linha e troca o dono, em vez de duplicar ou recusar. Ver o cabeçalho da
+	// migration 000019.
+	SalvarDispositivoPush(ctx context.Context, arg SalvarDispositivoPushParams) error
 	// Validade calculada com o now() do banco, o mesmo relógio que RedefinirSenhaPorToken compara.
 	// Um pedido novo sobrescreve o anterior: só o último link enviado vale.
 	// Os 30 minutos estão escritos no texto do e-mail (EmailService.go): mudou aqui, muda lá.
@@ -1104,6 +1345,20 @@ type Querier interface {
 	// escopo por loja, sempre acesso_total_setores (ver o topo do arquivo), então
 	// basta a linha da loja.
 	TecnicoAtendeLoja(ctx context.Context, arg TecnicoAtendeLojaParams) (bool, error)
+	// Estica a sessão: é o ultimo_uso_em que conta os 14 dias. O service só chama
+	// quando o último toque já tem mais de um minuto -- sem isso cada request
+	// viraria um UPDATE.
+	TocarSessao(ctx context.Context, id int64) error
+	// O que o middleware de autenticação roda a cada request. Devolve quem é o
+	// dono só se a sessão ainda vale: usada nos últimos 14 dias, criada nos
+	// últimos 60 (os dois limites vêm do service, já calculados), usuário ativo e
+	// empresa ativa. O perfil sai da linha do usuário, então trocar o perfil de
+	// alguém vale no próximo request, não no próximo login.
+	//
+	// Sem filtro de tenant por parâmetro, e não é esquecimento: o tenant
+	// autoritativo é o DA SESSÃO (é ele que o middleware põe no contexto), como
+	// antes era o do JWT. O segredo de 256 bits é que identifica a linha.
+	ValidarSessao(ctx context.Context, arg ValidarSessaoParams) (ValidarSessaoRow, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -23,6 +24,11 @@ import (
 // expõe WithTx.
 type OrdemServicoService struct {
 	Pool *pgxpool.Pool
+	// Notificador é opcional, mesmo desenho de SolicitacaoService.Notificador
+	// (campo público setado no router.go; nil = não notifica). Só o Encerrar
+	// avisa alguém: pausar/retomar/acionar terceiro não notificam, de propósito
+	// -- aviso a cada passo da execução vira ruído e ninguém lê mais nenhum.
+	Notificador NotificadorInterface
 }
 
 func NewRepoOrdemServico(pool *pgxpool.Pool) *OrdemServicoService {
@@ -38,19 +44,46 @@ func NewRepoOrdemServico(pool *pgxpool.Pool) *OrdemServicoService {
 // *int64 vizinhos de lugar (LojaId/TecnicoId) compila e devolve a lista
 // errada, calado.
 //
-// `pagina` do contrato do front não entra: a resposta é array simples e o
-// front pagina no cliente, mesmo padrão de ListarSolicitacoes/ListarMaquinas.
+// `pagina` não entra aqui: ela não filtra, decide o FORMATO da resposta -- por
+// isso é parâmetro de ListarOrdensServicoPaginada, e não um campo que a versão
+// sem página teria de ignorar.
 type FiltrosOrdemServico struct {
 	Status     []string
 	Tipo       *string
 	Finalizada *bool
-	LojaId     *int64
+	// Revisado separa as abas de Custos Pendentes: o Administrador já conferiu
+	// o custo (custo_revisado_em) ou não. OS sem custo conta como não revisada.
+	Revisado *bool
+	LojaId   *int64
 	// SetorId recorta pelo setor da SOLICITAÇÃO de origem -- a OS não tem setor
 	// próprio (ver a nota da query). Continua sendo filtro do cliente, então
 	// só estreita: setor fora do escopo de quem chama devolve vazio.
-	SetorId   *int64
+	SetorId *int64
+	// MaquinaId e Reparo são o nível de máquina da navegação das OS
+	// Finalizadas: a máquina da solicitação, ou (Reparo=true) os pequenos
+	// reparos do setor, que não têm máquina.
+	MaquinaId *int64
+	Reparo    *bool
 	TecnicoId *int64
 	Busca     *string
+	// Filtros avançados do Painel do Gestor (ModalFiltrosOS), antes aplicados no
+	// navegador sobre a lista inteira e agora no WHERE -- sem isso a lista
+	// paginada de OS Finalizadas não conseguiria filtrar o que não carregou.
+	// Maquina casa nome OU patrimônio (Busca também olha a descrição); as datas
+	// são o dia de abertura (fuso de São Paulo); os valores, o custo TOTAL já
+	// lançado.
+	Maquina     *string
+	DataInicio  *time.Time
+	DataFim     *time.Time
+	ValorMinimo *float64
+	ValorMaximo *float64
+}
+
+func dataOuNula(t *time.Time) pgtype.Date {
+	if t == nil {
+		return pgtype.Date{}
+	}
+	return pgtype.Date{Time: *t, Valid: true}
 }
 
 // ListarOrdensServico é GET /ordens-servico -- um endpoint para os três
@@ -71,10 +104,18 @@ func (s *OrdemServicoService) ListarOrdensServico(ctx context.Context, tenantId,
 		Status:          filtros.Status,
 		Tipo:            (*repository.TipoOs)(filtros.Tipo),
 		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
 		LojaID:          filtros.LojaId,
 		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
 		TecnicoID:       filtros.TecnicoId,
 		Busca:           filtros.Busca,
+		Maquina:         filtros.Maquina,
+		DataInicio:      dataOuNula(filtros.DataInicio),
+		DataFim:         dataOuNula(filtros.DataFim),
+		ValorMinimo:     filtros.ValorMinimo,
+		ValorMaximo:     filtros.ValorMaximo,
 		EscopoUsuarioID: escopoDe(usuarioId, perfil),
 	})
 	if err != nil {
@@ -82,6 +123,186 @@ func (s *OrdemServicoService) ListarOrdensServico(ctx context.Context, tenantId,
 	}
 
 	return montarOrdensServicoEmLote(ctx, repo, linhas)
+}
+
+// ResumoOrdensServicoPorSetor é GET /ordens-servico/resumo -- quantas OS há em
+// cada loja/setor para os mesmos filtros e o mesmo escopo da listagem. Os
+// cards de loja e setor da navegação do Painel do Gestor saem daqui, porque a
+// lista de OS Finalizadas é paginada no servidor e a tela não tem mais a lista
+// inteira para contar. Slice não-nil: `null` quebraria o .map do front.
+func (s *OrdemServicoService) ResumoOrdensServicoPorSetor(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros FiltrosOrdemServico) ([]model.ResumoOrdensServicoSetor, error) {
+
+	linhas, err := repository.New(s.Pool).ResumoOrdensServicoPorSetor(ctx, repository.ResumoOrdensServicoPorSetorParams{
+		TenantID:        tenantId,
+		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
+		Status:          filtros.Status,
+		Tipo:            (*repository.TipoOs)(filtros.Tipo),
+		LojaID:          filtros.LojaId,
+		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
+		TecnicoID:       filtros.TecnicoId,
+		Busca:           filtros.Busca,
+		Maquina:         filtros.Maquina,
+		DataInicio:      dataOuNula(filtros.DataInicio),
+		DataFim:         dataOuNula(filtros.DataFim),
+		ValorMinimo:     filtros.ValorMinimo,
+		ValorMaximo:     filtros.ValorMaximo,
+		EscopoUsuarioID: escopoDe(usuarioId, perfil),
+	})
+	if err != nil {
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	resumo := make([]model.ResumoOrdensServicoSetor, 0, len(linhas))
+	for _, l := range linhas {
+		resumo = append(resumo, model.ResumoOrdensServicoSetor{
+			LojaId:         l.LojaID,
+			LojaNome:       l.LojaNome,
+			SetorId:        l.SetorID,
+			SetorNome:      l.SetorNome,
+			MaquinaId:      l.MaquinaID,
+			MaquinaNome:    l.MaquinaNome,
+			MaquinaCodigo:  l.MaquinaCodigo,
+			Quantidade:     l.Quantidade,
+			AfetamProducao: l.AfetamProducao,
+		})
+	}
+
+	return resumo, nil
+}
+
+// ObterOrdemServico é GET /ordens-servico/:id -- uma OS completa, no escopo de
+// quem pede. Existe para o link de notificação (?os=N): sem ela o painel
+// baixava a lista inteira só para achar uma OS. Mesmo recorte da listagem:
+// gestor pelo setor, administrador tudo, técnico só as dele; fora disso é 404,
+// igual a OS inexistente.
+func (s *OrdemServicoService) ObterOrdemServico(ctx context.Context, tenantId, usuarioId int64, perfil string, id int64) (model.OrdemServico, error) {
+
+	repo := repository.New(s.Pool)
+
+	var tecnicoId *int64
+	if perfil == "tecnico" {
+		tecnicoId = &usuarioId
+	}
+
+	linhas, err := repo.ListarOrdensServico(ctx, repository.ListarOrdensServicoParams{
+		TenantID:        tenantId,
+		ID:              &id,
+		TecnicoID:       tecnicoId,
+		EscopoUsuarioID: escopoDe(usuarioId, perfil),
+	})
+	if err != nil {
+		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
+	}
+	if len(linhas) == 0 {
+		return model.OrdemServico{}, helper.ErrNaoEncontrado
+	}
+
+	ordens, err := montarOrdensServicoEmLote(ctx, repo, linhas)
+	if err != nil {
+		return model.OrdemServico{}, err
+	}
+
+	return ordens[0], nil
+}
+
+// TamanhoPaginaOrdensServico é o tamanho da página de GET /ordens-servico?pagina=.
+// 12 e não os 10 de /solicitacoes/minhas: as telas de histórico de OS são grade
+// de 2 e 3 colunas (lg/2xl), e 12 fecha as duas sem sobrar card sozinho.
+const TamanhoPaginaOrdensServico = 12
+
+// ListarOrdensServicoPaginada é GET /ordens-servico?pagina= -- os mesmos
+// filtros e o mesmo escopo de ListarOrdensServico, uma página por vez, com o
+// total para o "1 de N". Existe à parte (em vez de a listagem passar a ser
+// sempre paginada) porque os painéis do Gestor e do Técnico ainda montam a
+// navegação Loja -> Setor e as contagens dos cards a partir da lista inteira.
+// As telas de histórico, que crescem sem parar, pedem por página.
+//
+// Contagem e página são duas queries fora de transação, como em
+// ListarMinhasSolicitacoes: uma OS que mude entre as duas no máximo deixa o
+// total desatualizado por uma requisição.
+func (s *OrdemServicoService) ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error) {
+	return s.listarPaginada(ctx, tenantId, usuarioId, perfil, filtros, pagina, TamanhoPaginaOrdensServico)
+}
+
+// listarPaginada recebe o tamanho da página só para o teste de integração
+// conseguir várias páginas com poucas OS de fixture; a rota usa sempre
+// TamanhoPaginaOrdensServico.
+func (s *OrdemServicoService) listarPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, filtros FiltrosOrdemServico, pagina, tamanho int32) (model.RespostaPaginada[model.OrdemServico], error) {
+
+	var vazio model.RespostaPaginada[model.OrdemServico]
+
+	if pagina < 1 {
+		pagina = 1
+	}
+
+	repo := repository.New(s.Pool)
+	escopo := escopoDe(usuarioId, perfil)
+
+	total, err := repo.ContarOrdensServico(ctx, repository.ContarOrdensServicoParams{
+		TenantID:        tenantId,
+		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
+		Status:          filtros.Status,
+		Tipo:            (*repository.TipoOs)(filtros.Tipo),
+		LojaID:          filtros.LojaId,
+		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
+		TecnicoID:       filtros.TecnicoId,
+		Busca:           filtros.Busca,
+		Maquina:         filtros.Maquina,
+		DataInicio:      dataOuNula(filtros.DataInicio),
+		DataFim:         dataOuNula(filtros.DataFim),
+		ValorMinimo:     filtros.ValorMinimo,
+		ValorMaximo:     filtros.ValorMaximo,
+		EscopoUsuarioID: escopo,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	limite := tamanho
+	deslocamento := (pagina - 1) * limite
+
+	linhas, err := repo.ListarOrdensServico(ctx, repository.ListarOrdensServicoParams{
+		TenantID:        tenantId,
+		Status:          filtros.Status,
+		Tipo:            (*repository.TipoOs)(filtros.Tipo),
+		Finalizada:      filtros.Finalizada,
+		Revisado:        filtros.Revisado,
+		LojaID:          filtros.LojaId,
+		SetorID:         filtros.SetorId,
+		MaquinaID:       filtros.MaquinaId,
+		Reparo:          filtros.Reparo,
+		TecnicoID:       filtros.TecnicoId,
+		Busca:           filtros.Busca,
+		Maquina:         filtros.Maquina,
+		DataInicio:      dataOuNula(filtros.DataInicio),
+		DataFim:         dataOuNula(filtros.DataFim),
+		ValorMinimo:     filtros.ValorMinimo,
+		ValorMaximo:     filtros.ValorMaximo,
+		EscopoUsuarioID: escopo,
+		Limite:          &limite,
+		Deslocamento:    &deslocamento,
+	})
+	if err != nil {
+		return vazio, helper.TraduzErroPostgres(err)
+	}
+
+	dados, err := montarOrdensServicoEmLote(ctx, repo, linhas)
+	if err != nil {
+		return vazio, err
+	}
+
+	return model.RespostaPaginada[model.OrdemServico]{
+		Dados:        dados,
+		Pagina:       pagina,
+		TotalPaginas: int32((total + int64(tamanho) - 1) / int64(tamanho)),
+		Total:        total,
+	}, nil
 }
 
 // montarOrdensServicoEmLote busca as pausas da página inteira numa ida só e
@@ -219,6 +440,11 @@ func (s *OrdemServicoService) Iniciar(ctx context.Context, tenantId, atorId, ord
 		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
 	}
 
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsIniciada,
+		&atorId, statusPtr(repository.StatusOsAberta), statusPtr(repository.StatusOsEmAndamento), nil); err != nil {
+		return model.OrdemServico{}, err
+	}
+
 	ordem, err := montarOrdemServicoUnica(ctx, repo, tenantId, ordemServicoId)
 	if err != nil {
 		return model.OrdemServico{}, err
@@ -286,6 +512,11 @@ func (s *OrdemServicoService) Pausar(ctx context.Context, tenantId, atorId, orde
 		Motivo:         motivo,
 	}); err != nil {
 		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
+	}
+
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsPausada,
+		&atorId, statusPtr(atual.Status), statusPtr(repository.StatusOsPausada), map[string]any{"motivo": motivo}); err != nil {
+		return model.OrdemServico{}, err
 	}
 
 	ordem, err := montarOrdemServicoUnica(ctx, repo, tenantId, ordemServicoId)
@@ -365,6 +596,11 @@ func (s *OrdemServicoService) Retomar(ctx context.Context, tenantId, atorId, ord
 		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
 	}
 
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsRetomada,
+		&atorId, statusPtr(repository.StatusOsPausada), statusPtr(pausa.StatusAnterior), map[string]any{"motivoDaPausa": pausa.Motivo}); err != nil {
+		return model.OrdemServico{}, err
+	}
+
 	ordem, err := montarOrdemServicoUnica(ctx, repo, tenantId, ordemServicoId)
 	if err != nil {
 		return model.OrdemServico{}, err
@@ -432,6 +668,16 @@ func (s *OrdemServicoService) AcionarTerceiro(ctx context.Context, tenantId, ato
 
 	ordem, err := montarOrdemServicoUnica(ctx, repo, tenantId, ordemServicoId)
 	if err != nil {
+		return model.OrdemServico{}, err
+	}
+
+	// Nome junto do id: a empresa pode ser renomeada ou desativada depois, e a
+	// linha do tempo conta o que foi acionado NAQUELE dia.
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsTerceiroAcionado,
+		&atorId, nil, nil, map[string]any{
+			"empresaTerceirizadaId":   empresaTerceirizadaId,
+			"empresaTerceirizadaNome": ordem.EmpresaTerceirizadaNome,
+		}); err != nil {
 		return model.OrdemServico{}, err
 	}
 
@@ -541,11 +787,41 @@ func (s *OrdemServicoService) Encerrar(ctx context.Context, tenantId, atorId, or
 		return model.OrdemServico{}, err
 	}
 
+	// O lançamento ORIGINAL do Técnico: a correção do Administrador apaga e
+	// regrava itens e notas, e este evento é o que preserva o que ele digitou.
+	detalhes := snapshotDeCusto(ordem)
+	if detalhes == nil {
+		detalhes = map[string]any{}
+	}
+	detalhes["tipoDefeito"] = payload.TipoDefeito
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsEncerrada,
+		&atorId, statusPtr(repository.StatusOsEmAndamento), statusPtr(repository.StatusOsConcluda), detalhes); err != nil {
+		return model.OrdemServico{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return model.OrdemServico{}, fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
+	s.notificarConclusao(tenantId, ordem)
+
 	return ordem, nil
+}
+
+// notificarConclusao avisa os gestores do setor que a OS foi encerrada --
+// qualquer origem (pedido, direta, preventiva): quem acompanha o setor quer
+// saber que a máquina voltou.
+func (s *OrdemServicoService) notificarConclusao(tenantId int64, ordem model.OrdemServico) {
+
+	if s.Notificador == nil {
+		return
+	}
+
+	dados := dadosDaOS(ordem)
+
+	emSegundoPlano("notificar conclusão de OS", func(ctx context.Context) error {
+		return s.Notificador.NotificarOSConcluida(ctx, tenantId, ordem.SetorId, dados)
+	}, "os", ordem.Id, "tenant", tenantId)
 }
 
 // CorrigirCusto é POST /ordens-servico/:id/custo -- a correção prometida no
@@ -606,11 +882,9 @@ func (s *OrdemServicoService) CorrigirCusto(ctx context.Context, tenantId, atorI
 	// então o que volta É a lista inteira, corrigida -- mesmo padrão do escopo
 	// em AtualizarUsuario e das preventivas em AtualizarMaquina.
 	//
-	// ⚠️ ponytail: a itemização original do Técnico se perde aqui, junto com o
-	// valor que ele lançou. É o ponto 2 da seção 6 de docs/modelagem-banco-dados.md
-	// ("histórico de lançamento de custo"), que esta mudança AMPLIA em vez de
-	// resolver. Quando doer, o caminho é os_custo_historico em append-only, com
-	// a linha vigente sendo a mais recente -- não um merge incremental aqui.
+	// O que o Técnico lançou não se perde: está no evento `encerrada` de
+	// os_evento (snapshotDeCusto), e cada correção grava o seu próprio
+	// `custo_corrigido` logo abaixo.
 	if err := repo.DeletarItensDeCustoDaOrdemServico(ctx, repository.DeletarItensDeCustoDaOrdemServicoParams{
 		TenantID:       tenantId,
 		OrdemServicoID: ordemServicoId,
@@ -662,6 +936,14 @@ func (s *OrdemServicoService) CorrigirCusto(ctx context.Context, tenantId, atorI
 		return model.OrdemServico{}, err
 	}
 
+	// O estado do custo DEPOIS da correção; o de antes é o evento anterior
+	// (`encerrada` ou outro `custo_corrigido`). É isto que resolve o ponto 2 da
+	// seção 6 da modelagem -- a itemização do Técnico não se perde mais.
+	if err := registrarEvento(ctx, repo, tenantId, ordemServicoId, repository.TipoEventoOsCustoCorrigido,
+		&atorId, nil, nil, snapshotDeCusto(ordem)); err != nil {
+		return model.OrdemServico{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return model.OrdemServico{}, fmt.Errorf("erro ao commitar transação: %w", err)
 	}
@@ -706,4 +988,173 @@ func (s *OrdemServicoService) ObterIndicadoresDaMaquina(ctx context.Context, ten
 	// Máquina existe e está no escopo, mas ainda não teve OS encerrada: zeros,
 	// não 404. É o estado normal de máquina recém-cadastrada.
 	return model.MontarIndicadoresMaquina(maquinaId, historico), nil
+}
+
+// lojaNoEscopo confere que a loja existe no tenant e, fora o administrador, está entre
+// os escopos de quem chama -- senão ErrNaoEncontrado (404). Devolve o escopo para o WHERE
+// das queries seguintes. Compartilhado pelo painel da loja e pela lista de reparos dele:
+// as duas têm que recortar exatamente igual.
+func lojaNoEscopo(ctx context.Context, repo *repository.Queries, tenantId, lojaId, usuarioId int64, perfil string) (*int64, error) {
+
+	if _, err := repo.ObterLojaPorID(ctx, repository.ObterLojaPorIDParams{ID: lojaId, TenantID: tenantId}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, helper.ErrNaoEncontrado
+		}
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	escopo := escopoDe(usuarioId, perfil)
+	if escopo != nil {
+		escopos, err := repo.ObterEscoposPorUsuario(ctx, usuarioId)
+		if err != nil {
+			return nil, helper.TraduzErroPostgres(err)
+		}
+		alcanca := false
+		for _, e := range escopos {
+			if e.LojaID == lojaId {
+				alcanca = true
+				break
+			}
+		}
+		if !alcanca {
+			return nil, helper.ErrNaoEncontrado
+		}
+	}
+
+	return escopo, nil
+}
+
+// FiltrosOrdensDoPainel são os recortes que a tela do painel da loja está mostrando: o setor
+// escolhido, a máquina (maquinário e preventivas; reparo não tem) e o mês de ENCERRAMENTO (YYYY-MM) clicado no
+// gráfico. Todos nulos = a loja inteira, o histórico inteiro.
+type FiltrosOrdensDoPainel struct {
+	SetorId   *int64
+	MaquinaId *int64
+	Mes       *string
+}
+
+// ListarOrdensDoPainelDaLoja é GET /indicadores/lojas/:id/ordens -- a lista por trás de um card de
+// custo do painel da loja, paginada. `grupo` é "maquinario" (as OS de máquina que compõem
+// quantidadeOs/custoTotal), "reparos" (os pequenos reparos, que compõem quantidadeReparos/
+// custoReparos) ou "preventivas" (as OS de preventiva, que compõem quantidadePreventivas/
+// custoPreventivas) -- os dois últimos SEPARADOS do maquinário. Mesmo escopo e mesma definição do painel, então a
+// soma dos itens é o número do card. O controller só passa um grupo válido.
+func (s *OrdemServicoService) ListarOrdensDoPainelDaLoja(ctx context.Context, tenantId, lojaId, usuarioId int64, perfil, grupo string, filtros FiltrosOrdensDoPainel, pagina int32) (model.RespostaPaginada[model.OrdemDoPainel], error) {
+
+	var vazio model.RespostaPaginada[model.OrdemDoPainel]
+
+	if pagina < 1 {
+		pagina = 1
+	}
+
+	repo := repository.New(s.Pool)
+
+	escopo, err := lojaNoEscopo(ctx, repo, tenantId, lojaId, usuarioId, perfil)
+	if err != nil {
+		return vazio, err
+	}
+
+	limite := int32(TamanhoPaginaOrdensServico)
+	deslocamento := (pagina - 1) * limite
+
+	var total int64
+	var dados []model.OrdemDoPainel
+
+	switch grupo {
+	case model.GrupoMaquinario, model.GrupoPreventivas:
+		// A mesma query para os dois: o que separa é a origem (a OS de preventiva sai do
+		// maquinário e vai para a faixa dela, como em resumir).
+		preventiva := grupo == model.GrupoPreventivas
+		total, err = repo.ContarOrdensMaquinarioEncerradasDaLoja(ctx, repository.ContarOrdensMaquinarioEncerradasDaLojaParams{
+			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId, MaquinaID: filtros.MaquinaId,
+			Preventiva: &preventiva, Mes: filtros.Mes, EscopoUsuarioID: escopo,
+		})
+		if err != nil {
+			return vazio, helper.TraduzErroPostgres(err)
+		}
+		linhas, err := repo.ListarOrdensMaquinarioEncerradasDaLoja(ctx, repository.ListarOrdensMaquinarioEncerradasDaLojaParams{
+			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId, MaquinaID: filtros.MaquinaId,
+			Preventiva: &preventiva, Mes: filtros.Mes, EscopoUsuarioID: escopo, Limite: limite, Deslocamento: deslocamento,
+		})
+		if err != nil {
+			return vazio, helper.TraduzErroPostgres(err)
+		}
+		dados = model.MontarOrdensMaquinarioEncerradas(linhas)
+
+	case model.GrupoReparos:
+		// Reparo não tem máquina: o filtro de máquina não se aplica (o controller o recusa).
+		total, err = repo.ContarReparosEncerradosDaLoja(ctx, repository.ContarReparosEncerradosDaLojaParams{
+			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId,
+			Mes: filtros.Mes, EscopoUsuarioID: escopo,
+		})
+		if err != nil {
+			return vazio, helper.TraduzErroPostgres(err)
+		}
+		linhas, err := repo.ListarReparosEncerradosDaLoja(ctx, repository.ListarReparosEncerradosDaLojaParams{
+			TenantID: tenantId, LojaID: lojaId, SetorID: filtros.SetorId,
+			Mes: filtros.Mes, EscopoUsuarioID: escopo, Limite: limite, Deslocamento: deslocamento,
+		})
+		if err != nil {
+			return vazio, helper.TraduzErroPostgres(err)
+		}
+		dados = model.MontarReparosEncerrados(linhas)
+
+	default:
+		return vazio, fmt.Errorf("%w: grupo %q desconhecido", helper.ErrValidacao, grupo)
+	}
+
+	return model.RespostaPaginada[model.OrdemDoPainel]{
+		Dados:        dados,
+		Pagina:       pagina,
+		TotalPaginas: int32((total + int64(limite) - 1) / int64(limite)),
+		Total:        total,
+	}, nil
+}
+
+// ObterIndicadoresDaLoja é GET /indicadores/lojas/:id -- a tela da loja no
+// Painel de Indicadores: total, setores e máquinas de uma vez.
+//
+// O escopo é aplicado duas vezes, e cada uma responde uma pergunta. A primeira
+// (loja existe no tenant e, fora o administrador, está entre os escopos de
+// quem chama) decide o 404 -- mesmo motivo de ObterIndicadoresDaMaquina:
+// loja alheia e loja sem histórico não podem ficar indistinguíveis atrás de
+// um painel zerado. A segunda é o WHERE das duas listas, que recorta os
+// SETORES: o Gestor com só a Padaria da loja vê a loja como a Padaria.
+func (s *OrdemServicoService) ObterIndicadoresDaLoja(ctx context.Context, tenantId, lojaId, usuarioId int64, perfil string) (model.IndicadoresLoja, error) {
+
+	repo := repository.New(s.Pool)
+
+	escopo, err := lojaNoEscopo(ctx, repo, tenantId, lojaId, usuarioId, perfil)
+	if err != nil {
+		return model.IndicadoresLoja{}, err
+	}
+
+	maquinas, err := repo.ListarMaquinas(ctx, repository.ListarMaquinasParams{
+		TenantID:        tenantId,
+		LojaID:          &lojaId,
+		EscopoUsuarioID: escopo,
+	})
+	if err != nil {
+		return model.IndicadoresLoja{}, helper.TraduzErroPostgres(err)
+	}
+
+	historico, err := repo.ListarHistoricoOsDaLoja(ctx, repository.ListarHistoricoOsDaLojaParams{
+		TenantID:        tenantId,
+		LojaID:          lojaId,
+		EscopoUsuarioID: escopo,
+	})
+	if err != nil {
+		return model.IndicadoresLoja{}, helper.TraduzErroPostgres(err)
+	}
+
+	reparos, err := repo.ListarHistoricoReparosDaLoja(ctx, repository.ListarHistoricoReparosDaLojaParams{
+		TenantID:        tenantId,
+		LojaID:          lojaId,
+		EscopoUsuarioID: escopo,
+	})
+	if err != nil {
+		return model.IndicadoresLoja{}, helper.TraduzErroPostgres(err)
+	}
+
+	return model.MontarIndicadoresLoja(lojaId, maquinas, historico, reparos), nil
 }

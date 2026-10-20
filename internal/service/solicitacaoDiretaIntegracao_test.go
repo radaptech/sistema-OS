@@ -13,7 +13,7 @@ import (
 
 // TestSolicitacaoDireta cobre POST /solicitacoes/direta (origem 'direta',
 // migration 000014): Gestor/Administrador abrindo solicitação e OS juntas,
-// sem foto, sem fila e sem WhatsApp -- e a regra que veio junto, valendo
+// sem foto, sem fila e avisando só o técnico -- e a regra que veio junto, valendo
 // também para o abrir-os da fila: o técnico tem que atender a loja.
 func TestSolicitacaoDireta(t *testing.T) {
 
@@ -111,6 +111,9 @@ func TestSolicitacaoDireta(t *testing.T) {
 		if err != nil {
 			t.Fatalf("erro ao abrir OS direta: %v", err)
 		}
+		if os.Origem != "direta" {
+			t.Errorf("origem = %q, esperado direta", os.Origem)
+		}
 		if os.TecnicoId != tecnicoA.Id || os.Urgencia != "Alta" || !os.AfetaProducao || os.StatusExecucao != "Aberta" {
 			t.Errorf("OS com forma errada: %+v", os)
 		}
@@ -125,14 +128,26 @@ func TestSolicitacaoDireta(t *testing.T) {
 		if sol.SolicitanteId == nil || *sol.SolicitanteId != gestor.Id {
 			t.Errorf("solicitanteId = %v, esperado o gestor (%d)", sol.SolicitanteId, gestor.Id)
 		}
+
+		// A linha do tempo registra o gestor como quem abriu, e que foi direta.
+		var autor int64
+		var origem string
+		if err := pool.QueryRow(ctx, `SELECT usuario_id, detalhes->>'origem' FROM os_evento WHERE ordem_servico_id = $1 AND tipo = 'aberta'`, os.Id).Scan(&autor, &origem); err != nil {
+			t.Fatalf("evento 'aberta' não gravado: %v", err)
+		}
+		if autor != gestor.Id || origem != "direta" {
+			t.Errorf("evento aberta = autor %d / origem %s, esperado %d / direta", autor, origem, gestor.Id)
+		}
 	})
 
-	t.Run("não notifica ninguém", func(t *testing.T) {
-		select {
-		case <-notificador.chamado:
-			t.Error("OS direta não deveria disparar WhatsApp")
-		case <-time.After(200 * time.Millisecond):
+	// Só o técnico: o "solicitante" da direta é o próprio gestor, e avisá-lo
+	// do que ele mesmo abriu (aceita, ou solicitação nova) é ruído.
+	t.Run("avisa só o técnico", func(t *testing.T) {
+		c := notificador.espera(t, "OSAberta")
+		if c.destino != tecnicoA.Id || c.dados.Urgencia != "Alta" || c.dados.OrdemServicoId == 0 {
+			t.Errorf("chamada = %+v, esperado o técnico %d com urgência e id da OS", c, tecnicoA.Id)
 		}
+		notificador.nenhuma(t)
 	})
 
 	t.Run("gestor abre reparo escolhendo o setor", func(t *testing.T) {

@@ -71,6 +71,11 @@ func TestPreventivaCrud(t *testing.T) {
 		if p.MaquinaNome != "Forno" || p.SetorNome != "Padaria" || p.LojaId != loja.Id || p.LojaNome != "Loja A" {
 			t.Errorf("nomes denormalizados não vieram: %+v", p)
 		}
+		// Máquinas iguais têm o mesmo nome: o patrimônio é o que o gestor usa
+		// para diferenciá-las. Sem foto cadastrada, a chave vem nil.
+		if p.MaquinaPatrimonio != "P1" || p.MaquinaFotoUrl != nil {
+			t.Errorf("patrimônio/foto da máquina não vieram como esperado: %+v", p)
+		}
 		if p.Vencida {
 			t.Errorf("preventiva com data futura não devia estar vencida: %+v", p)
 		}

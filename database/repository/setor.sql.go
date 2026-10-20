@@ -11,22 +11,32 @@ import (
 
 const atualizarSetor = `-- name: AtualizarSetor :one
 UPDATE setor
-SET nome = $3
+SET nome = $3,
+    foto_chave = COALESCE($4, foto_chave)
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, loja_id, nome, ativo, criado_em
+RETURNING id, tenant_id, loja_id, nome, ativo, criado_em, foto_chave
 `
 
 type AtualizarSetorParams struct {
-	ID       int64
-	TenantID int64
-	Nome     string
+	ID        int64
+	TenantID  int64
+	Nome      string
+	FotoChave *string
 }
 
 // Sem loja_id: mudar o setor de loja moveria junto as máquinas, o histórico de
 // OS e o escopo de quem tem acesso a ele -- e ninguém pediu isso. Setor na
 // loja errada se resolve desativando e criando na certa.
+// foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+// atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+// AtualizarMaquina). A antiga fica órfã no R2.
 func (q *Queries) AtualizarSetor(ctx context.Context, arg AtualizarSetorParams) (Setor, error) {
-	row := q.db.QueryRow(ctx, atualizarSetor, arg.ID, arg.TenantID, arg.Nome)
+	row := q.db.QueryRow(ctx, atualizarSetor,
+		arg.ID,
+		arg.TenantID,
+		arg.Nome,
+		arg.FotoChave,
+	)
 	var i Setor
 	err := row.Scan(
 		&i.ID,
@@ -35,21 +45,23 @@ func (q *Queries) AtualizarSetor(ctx context.Context, arg AtualizarSetorParams) 
 		&i.Nome,
 		&i.Ativo,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
 
 const criarSetor = `-- name: CriarSetor :one
 
-INSERT INTO setor (tenant_id, loja_id, nome)
-VALUES ($1, $2, $3)
-RETURNING id, tenant_id, loja_id, nome, ativo, criado_em
+INSERT INTO setor (tenant_id, loja_id, nome, foto_chave)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, loja_id, nome, ativo, criado_em, foto_chave
 `
 
 type CriarSetorParams struct {
-	TenantID int64
-	LojaID   int64
-	Nome     string
+	TenantID  int64
+	LojaID    int64
+	Nome      string
+	FotoChave *string
 }
 
 // Setor pertence a uma loja. Exclusão é soft delete (ativo = false) -- ver
@@ -64,8 +76,15 @@ type CriarSetorParams struct {
 // fk_setor_loja (tenant_id, loja_id) -> loja (tenant_id, id) só fecha com os
 // dois, e é ela que torna impossível pendurar um setor numa loja de outro
 // tenant -- o banco recusa, não depende de disciplina no service.
+//
+// foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_SETORES), opcional.
 func (q *Queries) CriarSetor(ctx context.Context, arg CriarSetorParams) (Setor, error) {
-	row := q.db.QueryRow(ctx, criarSetor, arg.TenantID, arg.LojaID, arg.Nome)
+	row := q.db.QueryRow(ctx, criarSetor,
+		arg.TenantID,
+		arg.LojaID,
+		arg.Nome,
+		arg.FotoChave,
+	)
 	var i Setor
 	err := row.Scan(
 		&i.ID,
@@ -74,6 +93,7 @@ func (q *Queries) CriarSetor(ctx context.Context, arg CriarSetorParams) (Setor, 
 		&i.Nome,
 		&i.Ativo,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }
@@ -121,7 +141,7 @@ func (q *Queries) DesativarSetoresDaLoja(ctx context.Context, arg DesativarSetor
 }
 
 const listarSetores = `-- name: ListarSetores :many
-SELECT id, tenant_id, loja_id, nome, ativo, criado_em FROM setor
+SELECT id, tenant_id, loja_id, nome, ativo, criado_em, foto_chave FROM setor
 WHERE tenant_id = $1
   AND ativo
   AND ($2::bigint IS NULL OR loja_id = $2)
@@ -155,6 +175,7 @@ func (q *Queries) ListarSetores(ctx context.Context, arg ListarSetoresParams) ([
 			&i.Nome,
 			&i.Ativo,
 			&i.CriadoEm,
+			&i.FotoChave,
 		); err != nil {
 			return nil, err
 		}
@@ -167,7 +188,7 @@ func (q *Queries) ListarSetores(ctx context.Context, arg ListarSetoresParams) ([
 }
 
 const obterSetorCompletoPorID = `-- name: ObterSetorCompletoPorID :one
-SELECT id, tenant_id, loja_id, nome, ativo, criado_em FROM setor
+SELECT id, tenant_id, loja_id, nome, ativo, criado_em, foto_chave FROM setor
 WHERE id = $1 AND tenant_id = $2
 `
 
@@ -188,6 +209,7 @@ func (q *Queries) ObterSetorCompletoPorID(ctx context.Context, arg ObterSetorCom
 		&i.Nome,
 		&i.Ativo,
 		&i.CriadoEm,
+		&i.FotoChave,
 	)
 	return i, err
 }

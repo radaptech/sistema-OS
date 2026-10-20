@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,10 +34,10 @@ func NewRepoSolicitacao(pool *pgxpool.Pool) *SolicitacaoService {
 	}
 }
 
-// notificar avisa os gestores do setor por WhatsApp que uma solicitação nova
-// chegou -- fora da transação (já commitada, resposta já montada) e em
-// goroutine própria: falha de rede/Evolution API não pode atrasar nem
-// derrubar a resposta HTTP pro Solicitante que acabou de criar o pedido.
+// notificar avisa os gestores do setor que uma solicitação nova chegou --
+// fora da transação (já commitada, resposta já montada) e em segundo plano:
+// falha de rede/serviço de push não pode atrasar nem derrubar a resposta
+// HTTP pro Solicitante que acabou de criar o pedido.
 func (s *SolicitacaoService) notificar(tenantId int64, sol model.SolicitacaoOS) {
 
 	if s.Notificador == nil {
@@ -52,16 +50,60 @@ func (s *SolicitacaoService) notificar(tenantId int64, sol model.SolicitacaoOS) 
 		LojaNome:        sol.LojaNome,
 		SetorNome:       sol.SetorNome,
 		SolicitanteNome: sol.SolicitanteNome,
+		SolicitacaoId:   sol.Id,
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	emSegundoPlano("notificar solicitação", func(ctx context.Context) error {
+		return s.Notificador.NotificarNovaSolicitacao(ctx, tenantId, sol.SetorId, dados)
+	}, "solicitacao", sol.Id, "tenant", tenantId)
+}
 
-		if err := s.Notificador.NotificarNovaSolicitacao(ctx, tenantId, sol.SetorId, dados); err != nil {
-			slog.ErrorContext(ctx, "notificar solicitação", "solicitacao", sol.Id, "tenant", tenantId, "err", err)
+// notificarAbertura avisa o Técnico que a OS nasceu no nome dele e, quando a
+// OS veio de um pedido de verdade (solicitanteId != nil), o Solicitante que
+// o pedido foi aceito. Os dois na mesma goroutine e nessa ordem: o técnico é
+// quem tem trabalho a fazer.
+//
+// A direta passa solicitanteId nil: o "solicitante" gravado ali é o próprio
+// Gestor que abriu (migration 000014), e avisá-lo do que ele mesmo fez é ruído.
+func (s *SolicitacaoService) notificarAbertura(tenantId int64, os model.OrdemServico, solicitanteId *int64) {
+
+	if s.Notificador == nil {
+		return
+	}
+
+	dados := dadosDaOS(os)
+
+	emSegundoPlano("notificar abertura de OS", func(ctx context.Context) error {
+		errTecnico := s.Notificador.NotificarOSAberta(ctx, tenantId, os.TecnicoId, dados)
+		if solicitanteId == nil {
+			return errTecnico
 		}
-	}()
+		return errors.Join(errTecnico, s.Notificador.NotificarSolicitacaoAceita(ctx, tenantId, *solicitanteId, dados))
+	}, "os", os.Id, "tenant", tenantId)
+}
+
+// notificarRejeicao avisa o Solicitante, com o motivo. Só pedido humano: a
+// fila só tem pendente de origem 'solicitante', mas a guarda não custa nada.
+func (s *SolicitacaoService) notificarRejeicao(tenantId int64, sol model.SolicitacaoOS) {
+
+	if s.Notificador == nil || sol.SolicitanteId == nil || sol.Origem != string(repository.OrigemSolicitacaoSolicitante) {
+		return
+	}
+
+	dados := DadosNotificacao{
+		Alvo:          alvoDaSolicitacao(sol),
+		Descricao:     sol.Descricao,
+		LojaNome:      sol.LojaNome,
+		SetorNome:     sol.SetorNome,
+		SolicitacaoId: sol.Id,
+	}
+	if sol.MotivoRejeicao != nil {
+		dados.MotivoRejeicao = *sol.MotivoRejeicao
+	}
+
+	emSegundoPlano("notificar rejeição", func(ctx context.Context) error {
+		return s.Notificador.NotificarSolicitacaoRejeitada(ctx, tenantId, *sol.SolicitanteId, dados)
+	}, "solicitacao", sol.Id, "tenant", tenantId)
 }
 
 // CadastrarSolicitacaoMaquinario é POST /solicitacoes/maquinario. Foto e
@@ -198,7 +240,7 @@ func (s *SolicitacaoService) CadastrarSolicitacaoReparo(ctx context.Context, ten
 
 // ListarMinhasSolicitacoes é GET /solicitacoes/minhas -- restrita ao próprio
 // solicitante (nunca escopo: é a lista pessoal, não a fila do gestor).
-func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string) (model.RespostaPaginada[model.SolicitacaoOS], error) {
+func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64, pagina int32, status, busca *string, maquinaId *int64) (model.RespostaPaginada[model.SolicitacaoOS], error) {
 
 	var vazio model.RespostaPaginada[model.SolicitacaoOS]
 
@@ -212,6 +254,7 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TenantID:      tenantId,
 		SolicitanteID: &solicitanteId,
 		Status:        (*repository.StatusSolicitacao)(status),
+		MaquinaID:     maquinaId,
 		Busca:         busca,
 	})
 	if err != nil {
@@ -222,6 +265,7 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TenantID:      tenantId,
 		SolicitanteID: &solicitanteId,
 		Status:        (*repository.StatusSolicitacao)(status),
+		MaquinaID:     maquinaId,
 		Busca:         busca,
 		Limite:        TamanhoPaginaSolicitacoes,
 		Deslocamento:  (pagina - 1) * TamanhoPaginaSolicitacoes,
@@ -246,6 +290,36 @@ func (s *SolicitacaoService) ListarMinhasSolicitacoes(ctx context.Context, tenan
 		TotalPaginas: int32((total + TamanhoPaginaSolicitacoes - 1) / TamanhoPaginaSolicitacoes),
 		Total:        total,
 	}, nil
+}
+
+// MaquinasDasMinhasSolicitacoes é GET /solicitacoes/minhas/maquinas: as
+// máquinas que aparecem nas solicitações do próprio solicitante -- as opções
+// do filtro de Minhas Solicitações. Mesmo recorte de ListarMinhasSolicitacoes:
+// só o usuario.id do token, nunca escopo.
+func (s *SolicitacaoService) MaquinasDasMinhasSolicitacoes(ctx context.Context, tenantId, solicitanteId int64) ([]model.MaquinaDasMinhasSolicitacoes, error) {
+
+	repo := repository.New(s.Pool)
+
+	linhas, err := repo.ListarMaquinasDasMinhasSolicitacoes(ctx, repository.ListarMaquinasDasMinhasSolicitacoesParams{
+		TenantID:      tenantId,
+		SolicitanteID: &solicitanteId,
+	})
+	if err != nil {
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	// Não-nil: o front faz .map na resposta, e nil viraria `null` no JSON.
+	dto := make([]model.MaquinaDasMinhasSolicitacoes, 0, len(linhas))
+	for _, l := range linhas {
+		dto = append(dto, model.MaquinaDasMinhasSolicitacoes{
+			Id:               l.ID,
+			Nome:             l.Nome,
+			NumeroPatrimonio: l.NumeroPatrimonio,
+			FotoUrl:          l.FotoChave,
+		})
+	}
+
+	return dto, nil
 }
 
 // ListarSolicitacoes é GET /solicitacoes -- a fila do Gestor (e Administrador
@@ -383,6 +457,14 @@ func (s *SolicitacaoService) AbrirOS(ctx context.Context, tenantId, atorId int64
 		return model.OrdemServico{}, fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
+	// Só pedido humano tem a quem avisar "aceito" -- a fila só tem pendente
+	// de origem 'solicitante' hoje, mas a guarda não custa nada.
+	var solicitanteId *int64
+	if atual.Origem == repository.OrigemSolicitacaoSolicitante {
+		solicitanteId = atual.SolicitanteID
+	}
+	s.notificarAbertura(tenantId, os, solicitanteId)
+
 	return os, nil
 }
 
@@ -390,8 +472,9 @@ func (s *SolicitacaoService) AbrirOS(ctx context.Context, tenantId, atorId int64
 // Administrador) abre a OS sem passar pela fila, para quando o Solicitante não
 // está disponível. Solicitação e OS nascem juntas, como na preventiva
 // (origem 'direta', status 'Convertida', migration 000014). Sem foto e sem
-// WhatsApp: a foto e o aviso existem para o Gestor avaliar o pedido, e aqui é
-// ele quem pede.
+// avisar gestor nem solicitante: a foto e o aviso de solicitação nova existem
+// para o Gestor avaliar o pedido, e aqui é ele quem pede. O Técnico é avisado
+// (notificarAbertura), como em qualquer OS aberta pelo Gestor.
 //
 // O escopo é cobrado relendo a solicitação recém-inserida com
 // escopoDe(ator) -- o mesmo EXISTS de GET /solicitacoes/:id. Fora do escopo a
@@ -490,6 +573,9 @@ func (s *SolicitacaoService) CadastrarSolicitacaoDireta(ctx context.Context, ten
 		return model.OrdemServico{}, fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
+	// Só o Técnico: quem "pediu" é o próprio Gestor (ver notificarAbertura).
+	s.notificarAbertura(tenantId, os, nil)
+
 	return os, nil
 }
 
@@ -540,5 +626,12 @@ func (s *SolicitacaoService) Rejeitar(ctx context.Context, tenantId, atorId int6
 		return model.SolicitacaoOS{}, fmt.Errorf("%w: solicitação já não está mais pendente", helper.ErrConflitoIntegridade)
 	}
 
-	return concluirSolicitacao(ctx, tx, repo, tenantId, solicitacaoId)
+	sol, err := concluirSolicitacao(ctx, tx, repo, tenantId, solicitacaoId)
+	if err != nil {
+		return model.SolicitacaoOS{}, err
+	}
+
+	s.notificarRejeicao(tenantId, sol)
+
+	return sol, nil
 }

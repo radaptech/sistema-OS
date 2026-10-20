@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 	// tzdata embutido no binário (~450KB): a imagem de produção é alpine pelada,
 	// sem /usr/share/zoneinfo, e sem isto o LoadLocation abaixo falharia lá e
 	// passaria no dev.
@@ -78,6 +80,23 @@ func (d *DataBr) MarshalJSON() ([]byte, error) {
 func NewDataBrPtr(t time.Time) *DataBr {
 	d := DataBr(t)
 	return &d
+}
+
+// NewDataBrDeDate é para coluna `date` (hoje só preventiva.proxima_data), nunca
+// NewDataBrPtr.
+//
+// ⚠️ O pgx decodifica `date` como meia-noite UTC, e um dia do calendário não é
+// um instante: o .In(Brasilia) do MarshalJSON levava 17/10 00:00 UTC para
+// "16/10/2026 21:00:00" -- um dia antes. E como o formulário de edição da
+// máquina regrava a data que leu, cada "Salvar" sem mudar nada atrasava a
+// preventiva mais um dia. Remontar a meia-noite em Brasília a partir do ano,
+// mês e dia mantém o dia que o banco guarda.
+func NewDataBrDeDate(d pgtype.Date) *DataBr {
+	if !d.Valid {
+		return nil
+	}
+	ano, mes, dia := d.Time.Date()
+	return NewDataBrPtr(time.Date(ano, mes, dia, 0, 0, 0, 0, Brasilia))
 }
 
 func (d *DataBr) Time() time.Time {

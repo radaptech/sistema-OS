@@ -43,6 +43,11 @@ RETURNING *;
 SELECT
     p.*,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -76,6 +81,11 @@ WHERE p.id = $1 AND p.tenant_id = $2;
 SELECT
     p.*,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -152,17 +162,36 @@ UPDATE preventiva
 SET ativa = false
 WHERE id = $1 AND tenant_id = $2;
 
--- name: DesativarPreventivasDaMaquina :exec
--- PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
--- incremental): o service desativa todas as da máquina e insere as novas, na
--- mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+-- name: DesativarPreventivasForaDaLista :exec
+-- PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+-- as que já existiam voltam com id. Desativa só as que saíram do formulário.
 --
--- Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
--- um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
--- tivesse vencido uma vez.
+-- ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+-- edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+-- que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+-- via "0 de 0 feitos" depois de qualquer "Salvar".
+--
+-- Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+-- quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+-- Lista vazia (só preventivas novas) desativa todas as atuais.
 UPDATE preventiva
 SET ativa = false
-WHERE tenant_id = $1 AND maquina_id = $2;
+WHERE tenant_id = $1
+  AND maquina_id = $2
+  AND ativa
+  AND NOT (id = ANY(sqlc.arg(manter)::bigint[]));
+
+-- name: AtualizarPreventivaDaMaquina :execrows
+-- A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+-- WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+-- não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+UPDATE preventiva
+SET descricao = $4,
+    intervalo_dias = $5,
+    proxima_data = $6,
+    ativa = $7,
+    tecnico_id = sqlc.narg(tecnico_id)::bigint
+WHERE id = $1 AND tenant_id = $2 AND maquina_id = $3 AND ativa;
 
 -- name: ListarPreventivasVencidas :many
 -- Alimenta o job de abertura automática de solicitação (subcomando de CLI
@@ -260,3 +289,57 @@ WHERE p.id = $1
   AND m.ativa
   AND p.proxima_data <= (now() AT TIME ZONE 'America/Sao_Paulo')::date
 FOR UPDATE OF p;
+
+-- name: PreventivaNoEscopo :one
+-- Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+-- o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+-- ListarPreventivas, NULL é o administrador. Separado do histórico para a
+-- rota responder 404 a quem não alcança, em vez de uma lista vazia que
+-- pareceria "nunca rodou".
+--
+-- Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+-- sendo histórico.
+SELECT p.id
+FROM preventiva p
+JOIN maquina m ON m.tenant_id = p.tenant_id AND m.id = p.maquina_id
+JOIN setor   s ON s.tenant_id = m.tenant_id AND s.id = m.setor_id
+WHERE p.id = sqlc.arg(id)
+  AND p.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = s.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  );
+
+-- name: ListarHistoricoPreventiva :many
+-- Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+-- solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+-- transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+-- tabela própria.
+--
+-- aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+-- (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+-- duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+--
+-- LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+-- ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+SELECT
+    os.id,
+    os.status,
+    sol.criado_em AS aberta_em,
+    os.iniciada_em,
+    enc.data_fim,
+    t.nome AS tecnico_nome
+FROM solicitacao_os sol
+JOIN ordem_servico os ON os.tenant_id = sol.tenant_id AND os.solicitacao_id = sol.id
+JOIN usuario t ON t.tenant_id = os.tenant_id AND t.id = os.tecnico_id
+LEFT JOIN os_encerramento enc ON enc.ordem_servico_id = os.id
+WHERE sol.tenant_id = sqlc.arg(tenant_id)
+  AND sol.preventiva_id = sqlc.arg(preventiva_id)
+ORDER BY sol.criado_em DESC, os.id DESC;

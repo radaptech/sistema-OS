@@ -23,15 +23,26 @@ type LojaServiceInterface interface {
 	ListarEmpresas(ctx context.Context, tenantID int64) ([]model.Empresa, error)
 }
 
+// bucketFotos é o bucket do R2 da foto de cadastro (R2_BUCKET_NAME_IMG_LOJAS), lido
+// pelo router -- mesma escolha de MaquinaController: o bucket é de wiring, não
+// coluna do banco.
 type LojaController struct {
-	service LojaServiceInterface
+	service     LojaServiceInterface
+	bucketFotos string
 }
 
-func NewLojaController(service LojaServiceInterface) *LojaController {
+func NewLojaController(service LojaServiceInterface, bucketFotos string) *LojaController {
 
 	return &LojaController{
-		service: service,
+		service:     service,
+		bucketFotos: bucketFotos,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 pela URL assinada (assinarFoto,
+// controller/foto.go).
+func (l *LojaController) resolverFoto(ctx context.Context, loja *model.Loja) {
+	loja.FotoUrl = assinarFoto(ctx, l.bucketFotos, loja.FotoUrl, "loja", loja.Id)
 }
 
 // Cadastrar é POST /lojas.
@@ -39,15 +50,18 @@ func (l *LojaController) Cadastrar() gin.HandlerFunc {
 
 	return func(ctx *gin.Context) {
 
-		input, ok := corpoJSON[model.NovaLojaPayload](ctx)
-		if !ok {
-			return
-		}
-
 		tenantId, okTenant := tenantDaRota(ctx)
 		if !okTenant {
 			return
 		}
+
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovaLojaPayload](ctx, tenantId, l.bucketFotos, "loja")
+		if !ok {
+			return
+		}
+		input.FotoChave = chave
 
 		loja, err := l.service.CadastrarLoja(ctx.Request.Context(), tenantId, input)
 		if err != nil {
@@ -67,6 +81,8 @@ func (l *LojaController) Cadastrar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		l.resolverFoto(ctx.Request.Context(), &loja)
 
 		ctx.JSON(http.StatusCreated, loja)
 	}
@@ -100,6 +116,8 @@ func (l *LojaController) Obter() gin.HandlerFunc {
 			return
 		}
 
+		l.resolverFoto(ctx.Request.Context(), &loja)
+
 		ctx.JSON(http.StatusOK, loja)
 	}
 }
@@ -123,6 +141,12 @@ func (l *LojaController) Listar() gin.HandlerFunc {
 			return
 		}
 
+		// Índice, não valor: o range daria uma cópia e a URL assinada não
+		// voltaria pro slice da resposta.
+		for i := range lojas {
+			l.resolverFoto(ctx.Request.Context(), &lojas[i])
+		}
+
 		ctx.JSON(http.StatusOK, lojas)
 	}
 }
@@ -139,15 +163,18 @@ func (l *LojaController) Atualizar() gin.HandlerFunc {
 			return
 		}
 
-		input, okCorpo := corpoJSON[model.NovaLojaPayload](ctx)
-		if !okCorpo {
-			return
-		}
-
 		tenantId, okTenant := tenantDaRota(ctx)
 		if !okTenant {
 			return
 		}
+
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovaLojaPayload](ctx, tenantId, l.bucketFotos, "loja")
+		if !ok {
+			return
+		}
+		input.FotoChave = chave
 
 		loja, err := l.service.AtualizarLoja(ctx.Request.Context(), tenantId, id, input)
 		if err != nil {
@@ -167,6 +194,8 @@ func (l *LojaController) Atualizar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		l.resolverFoto(ctx.Request.Context(), &loja)
 
 		ctx.JSON(http.StatusOK, loja)
 	}

@@ -66,6 +66,47 @@ func (q *Queries) AtualizarPreventiva(ctx context.Context, arg AtualizarPreventi
 	return i, err
 }
 
+const atualizarPreventivaDaMaquina = `-- name: AtualizarPreventivaDaMaquina :execrows
+UPDATE preventiva
+SET descricao = $4,
+    intervalo_dias = $5,
+    proxima_data = $6,
+    ativa = $7,
+    tecnico_id = $8::bigint
+WHERE id = $1 AND tenant_id = $2 AND maquina_id = $3 AND ativa
+`
+
+type AtualizarPreventivaDaMaquinaParams struct {
+	ID            int64
+	TenantID      int64
+	MaquinaID     int64
+	Descricao     string
+	IntervaloDias int32
+	ProximaData   pgtype.Date
+	Ativa         bool
+	TecnicoID     *int64
+}
+
+// A preventiva que voltou com id no PUT /maquinas/:id. maquina_id e ativa no
+// WHERE são a trava: um id de outra máquina (ou de uma preventiva já excluída)
+// não é atualizado nem ressuscitado -- 0 linhas e o service recusa.
+func (q *Queries) AtualizarPreventivaDaMaquina(ctx context.Context, arg AtualizarPreventivaDaMaquinaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, atualizarPreventivaDaMaquina,
+		arg.ID,
+		arg.TenantID,
+		arg.MaquinaID,
+		arg.Descricao,
+		arg.IntervaloDias,
+		arg.ProximaData,
+		arg.Ativa,
+		arg.TecnicoID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const avancarProximaData = `-- name: AvancarProximaData :one
 UPDATE preventiva
 SET proxima_data = proxima_data + (intervalo_dias * INTERVAL '1 day')
@@ -191,33 +232,115 @@ func (q *Queries) DesativarPreventiva(ctx context.Context, arg DesativarPreventi
 	return result.RowsAffected(), nil
 }
 
-const desativarPreventivasDaMaquina = `-- name: DesativarPreventivasDaMaquina :exec
+const desativarPreventivasForaDaLista = `-- name: DesativarPreventivasForaDaLista :exec
 UPDATE preventiva
 SET ativa = false
-WHERE tenant_id = $1 AND maquina_id = $2
+WHERE tenant_id = $1
+  AND maquina_id = $2
+  AND ativa
+  AND NOT (id = ANY($3::bigint[]))
 `
 
-type DesativarPreventivasDaMaquinaParams struct {
+type DesativarPreventivasForaDaListaParams struct {
 	TenantID  int64
 	MaquinaID int64
+	Manter    []int64
 }
 
-// PUT /maquinas/:id substitui o conjunto inteiro de preventivas (não faz merge
-// incremental): o service desativa todas as da máquina e insere as novas, na
-// mesma transação -- mesmo padrão do escopo de acesso em AtualizarUsuario.
+// PUT /maquinas/:id manda a lista inteira de preventivas que a máquina deve ter;
+// as que já existiam voltam com id. Desativa só as que saíram do formulário.
 //
-// Desativa em vez de deletar justamente por causa de fk_solicitacao_preventiva:
-// um DELETE aqui quebraria a edição de qualquer máquina cuja preventiva já
-// tivesse vencido uma vez.
-func (q *Queries) DesativarPreventivasDaMaquina(ctx context.Context, arg DesativarPreventivasDaMaquinaParams) error {
-	_, err := q.db.Exec(ctx, desativarPreventivasDaMaquina, arg.TenantID, arg.MaquinaID)
+// ⚠️ Já foi "desativa todas e insere de novo", e isso dava id novo a cada
+// edição da máquina: o histórico da preventiva (GET /preventivas/:id/historico,
+// que segue solicitacao_os.preventiva_id) ficava preso ao id antigo e o Gestor
+// via "0 de 0 feitos" depois de qualquer "Salvar".
+//
+// Desativa em vez de deletar por causa de fk_solicitacao_preventiva: um DELETE
+// quebraria a edição de qualquer máquina cuja preventiva já venceu uma vez.
+// Lista vazia (só preventivas novas) desativa todas as atuais.
+func (q *Queries) DesativarPreventivasForaDaLista(ctx context.Context, arg DesativarPreventivasForaDaListaParams) error {
+	_, err := q.db.Exec(ctx, desativarPreventivasForaDaLista, arg.TenantID, arg.MaquinaID, arg.Manter)
 	return err
+}
+
+const listarHistoricoPreventiva = `-- name: ListarHistoricoPreventiva :many
+SELECT
+    os.id,
+    os.status,
+    sol.criado_em AS aberta_em,
+    os.iniciada_em,
+    enc.data_fim,
+    t.nome AS tecnico_nome
+FROM solicitacao_os sol
+JOIN ordem_servico os ON os.tenant_id = sol.tenant_id AND os.solicitacao_id = sol.id
+JOIN usuario t ON t.tenant_id = os.tenant_id AND t.id = os.tecnico_id
+LEFT JOIN os_encerramento enc ON enc.ordem_servico_id = os.id
+WHERE sol.tenant_id = $1
+  AND sol.preventiva_id = $2
+ORDER BY sol.criado_em DESC, os.id DESC
+`
+
+type ListarHistoricoPreventivaParams struct {
+	TenantID     int64
+	PreventivaID *int64
+}
+
+type ListarHistoricoPreventivaRow struct {
+	ID          int64
+	Status      StatusOs
+	AbertaEm    pgtype.Timestamptz
+	IniciadaEm  pgtype.Timestamptz
+	DataFim     pgtype.Timestamptz
+	TecnicoNome string
+}
+
+// Um ciclo por linha: cada vez que a preventiva venceu, o job abriu uma
+// solicitação (origem 'preventiva', preventiva_id) e a OS dela na mesma
+// transação (abrirSolicitacaoDaPreventiva). O histórico é essa trilha, sem
+// tabela própria.
+//
+// aberta_em é o criado_em da SOLICITAÇÃO, não da OS: é quando o ciclo venceu
+// (o job roda diário, então é a própria data prevista ou o dia seguinte). As
+// duas nascem juntas hoje, mas é a solicitação que representa o vencimento.
+//
+// LEFT em os_encerramento: OS ainda aberta não tem data_fim -- é justamente o
+// ciclo "não feito" que a tela pinta de vermelho. Mais recente primeiro.
+func (q *Queries) ListarHistoricoPreventiva(ctx context.Context, arg ListarHistoricoPreventivaParams) ([]ListarHistoricoPreventivaRow, error) {
+	rows, err := q.db.Query(ctx, listarHistoricoPreventiva, arg.TenantID, arg.PreventivaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarHistoricoPreventivaRow
+	for rows.Next() {
+		var i ListarHistoricoPreventivaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.AbertaEm,
+			&i.IniciadaEm,
+			&i.DataFim,
+			&i.TecnicoNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listarPreventivas = `-- name: ListarPreventivas :many
 SELECT
     p.id, p.tenant_id, p.maquina_id, p.descricao, p.intervalo_dias, p.proxima_data, p.ativa, p.criado_em, p.tecnico_id,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -263,22 +386,24 @@ type ListarPreventivasParams struct {
 }
 
 type ListarPreventivasRow struct {
-	ID            int64
-	TenantID      int64
-	MaquinaID     int64
-	Descricao     string
-	IntervaloDias int32
-	ProximaData   pgtype.Date
-	Ativa         bool
-	CriadoEm      pgtype.Timestamptz
-	TecnicoID     *int64
-	MaquinaNome   string
-	SetorID       int64
-	SetorNome     string
-	LojaID        int64
-	LojaNome      string
-	TecnicoNome   *string
-	Vencida       bool
+	ID                int64
+	TenantID          int64
+	MaquinaID         int64
+	Descricao         string
+	IntervaloDias     int32
+	ProximaData       pgtype.Date
+	Ativa             bool
+	CriadoEm          pgtype.Timestamptz
+	TecnicoID         *int64
+	MaquinaNome       string
+	MaquinaPatrimonio string
+	MaquinaFotoChave  *string
+	SetorID           int64
+	SetorNome         string
+	LojaID            int64
+	LojaNome          string
+	TecnicoNome       *string
+	Vencida           bool
 }
 
 // maquina_id é opcional (NULL não filtra): a aba "Manutenção Prev." do painel
@@ -317,6 +442,8 @@ func (q *Queries) ListarPreventivas(ctx context.Context, arg ListarPreventivasPa
 			&i.CriadoEm,
 			&i.TecnicoID,
 			&i.MaquinaNome,
+			&i.MaquinaPatrimonio,
+			&i.MaquinaFotoChave,
 			&i.SetorID,
 			&i.SetorNome,
 			&i.LojaID,
@@ -417,6 +544,11 @@ const obterPreventivaPorID = `-- name: ObterPreventivaPorID :one
 SELECT
     p.id, p.tenant_id, p.maquina_id, p.descricao, p.intervalo_dias, p.proxima_data, p.ativa, p.criado_em, p.tecnico_id,
     m.nome AS maquina_nome,
+    -- Patrimônio e foto da máquina: a aba "Manutenção Prev." do gestor
+    -- diferencia máquinas iguais (mesmo nome) pelo patrimônio. foto_chave é a
+    -- KEY no R2 -- o controller assina antes de responder (resolverFotos).
+    m.numero_patrimonio AS maquina_patrimonio,
+    m.foto_chave AS maquina_foto_chave,
     m.setor_id,
     s.nome AS setor_nome,
     s.loja_id,
@@ -437,22 +569,24 @@ type ObterPreventivaPorIDParams struct {
 }
 
 type ObterPreventivaPorIDRow struct {
-	ID            int64
-	TenantID      int64
-	MaquinaID     int64
-	Descricao     string
-	IntervaloDias int32
-	ProximaData   pgtype.Date
-	Ativa         bool
-	CriadoEm      pgtype.Timestamptz
-	TecnicoID     *int64
-	MaquinaNome   string
-	SetorID       int64
-	SetorNome     string
-	LojaID        int64
-	LojaNome      string
-	TecnicoNome   *string
-	Vencida       bool
+	ID                int64
+	TenantID          int64
+	MaquinaID         int64
+	Descricao         string
+	IntervaloDias     int32
+	ProximaData       pgtype.Date
+	Ativa             bool
+	CriadoEm          pgtype.Timestamptz
+	TecnicoID         *int64
+	MaquinaNome       string
+	MaquinaPatrimonio string
+	MaquinaFotoChave  *string
+	SetorID           int64
+	SetorNome         string
+	LojaID            int64
+	LojaNome          string
+	TecnicoNome       *string
+	Vencida           bool
 }
 
 // Traz os denormalizados porque PreventivaListada (o retorno de POST e PUT
@@ -478,6 +612,8 @@ func (q *Queries) ObterPreventivaPorID(ctx context.Context, arg ObterPreventivaP
 		&i.CriadoEm,
 		&i.TecnicoID,
 		&i.MaquinaNome,
+		&i.MaquinaPatrimonio,
+		&i.MaquinaFotoChave,
 		&i.SetorID,
 		&i.SetorNome,
 		&i.LojaID,
@@ -559,4 +695,45 @@ func (q *Queries) ObterPreventivaVencidaParaAbertura(ctx context.Context, arg Ob
 		&i.SetorID,
 	)
 	return i, err
+}
+
+const preventivaNoEscopo = `-- name: PreventivaNoEscopo :one
+SELECT p.id
+FROM preventiva p
+JOIN maquina m ON m.tenant_id = p.tenant_id AND m.id = p.maquina_id
+JOIN setor   s ON s.tenant_id = m.tenant_id AND s.id = m.setor_id
+WHERE p.id = $1
+  AND p.tenant_id = $2
+  AND (
+    $3::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $3
+        AND ue.loja_id = s.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+`
+
+type PreventivaNoEscopoParams struct {
+	ID              int64
+	TenantID        int64
+	EscopoUsuarioID *int64
+}
+
+// Porteiro de GET /preventivas/:id/historico: a preventiva existe no tenant E
+// o escopo de quem chama alcança a máquina dela -- mesmo EXISTS de
+// ListarPreventivas, NULL é o administrador. Separado do histórico para a
+// rota responder 404 a quem não alcança, em vez de uma lista vazia que
+// pareceria "nunca rodou".
+//
+// Sem filtro de `ativa`: o histórico de uma preventiva desativada continua
+// sendo histórico.
+func (q *Queries) PreventivaNoEscopo(ctx context.Context, arg PreventivaNoEscopoParams) (int64, error) {
+	row := q.db.QueryRow(ctx, preventivaNoEscopo, arg.ID, arg.TenantID, arg.EscopoUsuarioID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }

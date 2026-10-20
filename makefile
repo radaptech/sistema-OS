@@ -20,3 +20,8 @@ backup-banco:
 # "Abertura automatica de solicitacao por preventiva" no CLAUDE.md.
 preventivas-vencidas:
 	@go run . preventivas-vencidas
+
+# Gera um par de chaves VAPID (Web Push) e imprime as linhas pro .env. Uma vez
+# por ambiente: trocar o par invalida as inscrições de todo mundo.
+chaves-vapid:
+	@go run . chaves-vapid

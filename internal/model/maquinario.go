@@ -102,9 +102,9 @@ func MontarListaMaquinarios(m repository.ListarMaquinasRow) Maquinario {
 // estende NovaMaquinaPayload), com o id vindo pela rota. As tags seguem a mesma
 // regra explicada lá: `serie` é o nome do front e os derivados levam json:"-".
 //
-// Preventivas substitui o conjunto inteiro, não faz merge incremental (é o que
-// o front espera de PUT /maquinas/:id): o service desativa as atuais e insere
-// estas, na mesma transação -- mesmo padrão do escopo em AtualizarUsuario.
+// Preventivas é o conjunto inteiro que a máquina deve ter: a que volta com id é
+// atualizada no lugar (mantém o histórico), a sem id é criada e a que não veio
+// é desativada, na mesma transação -- ver sincronizarPreventivas.
 //
 // FotoChave nil significa "não mandou foto nova", e a query preserva a atual
 // (COALESCE em maquina.sql) -- não é "apagar a foto". O front não tem ação de

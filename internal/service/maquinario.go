@@ -172,18 +172,9 @@ func (m *MaquinarioService) AtualizarMaquina(ctx context.Context, tenantId, id i
 		return model.Maquinario{}, traduzErroMaquina(err)
 	}
 
-	// Substitui o conjunto inteiro, sem merge incremental: desativa as atuais e
-	// insere as novas na mesma transação -- espelho do que AtualizarUsuario faz
-	// com o escopo de acesso. Desativa em vez de deletar por causa da FK das
-	// solicitações já geradas (ver preventiva.sql).
-	if err := repo.DesativarPreventivasDaMaquina(ctx, repository.DesativarPreventivasDaMaquinaParams{
-		TenantID:  tenantId,
-		MaquinaID: id,
-	}); err != nil {
-		return model.Maquinario{}, helper.TraduzErroPostgres(err)
-	}
-
-	if err := gravarPreventivas(ctx, repo, tenantId, id, payload.Preventivas); err != nil {
+	// A lista é o conjunto inteiro, mas a preventiva que volta com id é
+	// atualizada no lugar -- ver sincronizarPreventivas.
+	if err := sincronizarPreventivas(ctx, repo, tenantId, id, payload.Preventivas); err != nil {
 		return model.Maquinario{}, err
 	}
 
@@ -314,8 +305,8 @@ func (m *MaquinarioService) ExcluirMaquinaDefinitivo(ctx context.Context, tenant
 		return nil, nil, helper.TraduzErroPostgres(err)
 	}
 
-	// !Ativo: o JWT não consulta o banco, então um administrador desativado
-	// segue com token válido até expirar -- aqui o custo disso seria apagar dados.
+	// !Ativo: a sessão já cai com o usuário desativado (middleware), mas aqui o
+	// custo de um furo seria apagar dados -- a confirmação confere de novo.
 	if ok, err := auth.HashCompare([]byte(usuario.SenhaHash), payload.Senha); err != nil || !ok || !usuario.Ativo {
 		return nil, nil, helper.ErrSenhaIncorreta
 	}

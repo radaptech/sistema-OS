@@ -37,9 +37,9 @@ type EncerramentoOrdemServico struct {
 // CustoOrdemServico espelha CustoOrdemServico do front.
 //
 // CustoHoraTecnico é ponteiro e sem `omitempty` (front: `number | null`, sem
-// `?`): ck_custo_por_tipo proíbe hora técnica fora de 'maquinario' -- em
-// 'terceiros' quem trabalhou foi a empresa e em 'reparo' o serviço não cobra
-// hora. `null` ali é a regra de negócio aparecendo, não dado faltando.
+// `?`): reparos anteriores à 000017 e OS de terceiros anteriores à 000016
+// foram gravados sem mão de obra, e `null` ali é esse histórico aparecendo.
+// Em 'terceiros' a coluna é a mão de obra da EMPRESA.
 //
 // TemNotaFiscal é a declaração do Técnico no encerramento: houve compra (peça,
 // material, fatura da empresa) ou foi só mão de obra? É ela que decide se a
@@ -154,10 +154,8 @@ type EncerramentoOrdemServicoPayload struct {
 // como campo vazio. Mesma armadilha que os custos escalares já evitavam.
 //
 // CustoHoraTecnico é ponteiro e opcional: uma tarefa pode ser só material (a
-// peça que o Técnico trocou sem cobrar hora). A regra "hora técnica só em
-// maquinário" NÃO cabe no binding: ela depende do tipo da OS, que só o service
-// conhece -- é ele quem responde 400 nomeando o campo, antes de
-// ck_custo_item_hora_tecnico estourar como 422 genérico.
+// peça que o Técnico trocou sem cobrar hora). Desde a 000017 todo tipo de OS
+// aceita mão de obra.
 type ItemCustoPayload struct {
 	Descricao        string   `json:"descricao" binding:"required"`
 	CustoManutencao  float64  `json:"custoManutencao" binding:"gte=0"`
@@ -245,39 +243,46 @@ type LancamentoCustoManutencaoPayload struct {
 // HorasParada vem nula e as telas exibem "Não se aplica" em vez de um número
 // -- que é diferente de zero, e é por isso que o campo é ponteiro.
 type OrdemServico struct {
-	Id                      int64                     `json:"id"`
-	SolicitacaoId           int64                     `json:"solicitacaoId"`
-	Tipo                    string                    `json:"tipo"`
-	MaquinaId               *int64                    `json:"maquinaId"`
-	MaquinaNome             *string                   `json:"maquinaNome"`
-	MaquinaCodigo           *string                   `json:"maquinaCodigo"`
-	ItemDescricao           *string                   `json:"itemDescricao"`
-	Descricao               string                    `json:"descricao"`
-	TipoDefeito             *string                   `json:"tipoDefeito,omitempty"`
-	SetorId                 int64                     `json:"setorId"`
-	SetorNome               string                    `json:"setorNome"`
-	LojaId                  int64                     `json:"lojaId"`
-	LojaNome                string                    `json:"lojaNome"`
-	SolicitanteNome         *string                   `json:"solicitanteNome"`
-	Urgencia                string                    `json:"urgencia,omitempty"`
-	TecnicoId               int64                     `json:"tecnicoId,omitempty"`
-	TecnicoNome             *string                   `json:"tecnicoNome,omitempty"`
-	TecnicoArea             *string                   `json:"tecnicoArea,omitempty"`
-	EmpresaTerceirizadaId   *int64                    `json:"empresaTerceirizadaId,omitempty"`
-	EmpresaTerceirizadaNome *string                   `json:"empresaTerceirizadaNome,omitempty"`
-	StatusExecucao          string                    `json:"statusExecucao"`
-	Finalizada              bool                      `json:"finalizada"`
-	AfetaProducao           bool                      `json:"afetaProducao"`
-	DataSolicitacao         *config.DataBr            `json:"dataSolicitacao"`
-	DataAbertura            *config.DataBr            `json:"dataAbertura"`
-	DataInicio              *config.DataBr            `json:"dataInicio,omitempty"`
-	DataFim                 *config.DataBr            `json:"dataFim,omitempty"`
-	HorasTrabalhadas        *float64                  `json:"horasTrabalhadas,omitempty"`
-	HorasParada             *float64                  `json:"horasParada,omitempty"`
-	PausaAtual              *PausaOrdemServico        `json:"pausaAtual,omitempty"`
-	Pausas                  []PausaOrdemServico       `json:"pausas,omitempty"`
-	Encerramento            *EncerramentoOrdemServico `json:"encerramento,omitempty"`
-	Custo                   *CustoOrdemServico        `json:"custo,omitempty"`
+	Id              int64   `json:"id"`
+	SolicitacaoId   int64   `json:"solicitacaoId"`
+	Tipo            string  `json:"tipo"`
+	MaquinaId       *int64  `json:"maquinaId"`
+	MaquinaNome     *string `json:"maquinaNome"`
+	MaquinaCodigo   *string `json:"maquinaCodigo"`
+	ItemDescricao   *string `json:"itemDescricao"`
+	Descricao       string  `json:"descricao"`
+	TipoDefeito     *string `json:"tipoDefeito,omitempty"`
+	SetorId         int64   `json:"setorId"`
+	SetorNome       string  `json:"setorNome"`
+	LojaId          int64   `json:"lojaId"`
+	LojaNome        string  `json:"lojaNome"`
+	SolicitanteNome *string `json:"solicitanteNome"`
+	// Origem da solicitação que gerou a OS: 'solicitante' (fila do Gestor),
+	// 'direta' (Gestor/Administrador abriu sem fila) ou 'preventiva' (o job). É o que
+	// as telas usam para marcar a OS de preventiva, que nasce sem pessoa.
+	Origem                  string  `json:"origem"`
+	Urgencia                string  `json:"urgencia,omitempty"`
+	TecnicoId               int64   `json:"tecnicoId,omitempty"`
+	TecnicoNome             *string `json:"tecnicoNome,omitempty"`
+	TecnicoArea             *string `json:"tecnicoArea,omitempty"`
+	EmpresaTerceirizadaId   *int64  `json:"empresaTerceirizadaId,omitempty"`
+	EmpresaTerceirizadaNome *string `json:"empresaTerceirizadaNome,omitempty"`
+	// Nasce com a foto_chave crua da terceirizada e o controller troca pela URL
+	// assinada -- mesmo padrão de SolicitacaoOS.MaquinaFotoUrl.
+	EmpresaTerceirizadaFotoUrl *string                   `json:"empresaTerceirizadaFotoUrl,omitempty"`
+	StatusExecucao             string                    `json:"statusExecucao"`
+	Finalizada                 bool                      `json:"finalizada"`
+	AfetaProducao              bool                      `json:"afetaProducao"`
+	DataSolicitacao            *config.DataBr            `json:"dataSolicitacao"`
+	DataAbertura               *config.DataBr            `json:"dataAbertura"`
+	DataInicio                 *config.DataBr            `json:"dataInicio,omitempty"`
+	DataFim                    *config.DataBr            `json:"dataFim,omitempty"`
+	HorasTrabalhadas           *float64                  `json:"horasTrabalhadas,omitempty"`
+	HorasParada                *float64                  `json:"horasParada,omitempty"`
+	PausaAtual                 *PausaOrdemServico        `json:"pausaAtual,omitempty"`
+	Pausas                     []PausaOrdemServico       `json:"pausas,omitempty"`
+	Encerramento               *EncerramentoOrdemServico `json:"encerramento,omitempty"`
+	Custo                      *CustoOrdemServico        `json:"custo,omitempty"`
 }
 
 // dataBrOuNil e floatOuNil traduzem os tipos nullable do pgx para os ponteiros
@@ -325,34 +330,36 @@ func MontarOrdemServico(
 ) OrdemServico {
 
 	ordem := OrdemServico{
-		Id:                      os.ID,
-		SolicitacaoId:           os.SolicitacaoID,
-		Tipo:                    string(os.Tipo),
-		MaquinaId:               os.MaquinaID,
-		MaquinaNome:             os.MaquinaNome,
-		MaquinaCodigo:           os.MaquinaCodigo,
-		ItemDescricao:           os.ItemDescricao,
-		Descricao:               os.Descricao,
-		SetorId:                 os.SetorID,
-		SetorNome:               os.SetorNome,
-		LojaId:                  os.LojaID,
-		LojaNome:                os.LojaNome,
-		SolicitanteNome:         os.SolicitanteNome,
-		Urgencia:                string(os.Urgencia),
-		TecnicoId:               os.TecnicoID,
-		TecnicoNome:             &os.TecnicoNome,
-		TecnicoArea:             os.TecnicoArea,
-		EmpresaTerceirizadaId:   os.EmpresaTerceirizadaID,
-		EmpresaTerceirizadaNome: os.EmpresaTerceirizadaNome,
-		StatusExecucao:          string(os.Status),
-		Finalizada:              os.Finalizada,
-		AfetaProducao:           os.AfetaProducao,
-		DataSolicitacao:         dataBrOuNil(os.DataSolicitacao),
-		DataAbertura:            dataBrOuNil(os.AbertaEm),
-		DataInicio:              dataBrOuNil(os.IniciadaEm),
-		DataFim:                 dataBrOuNil(os.DataFim),
-		HorasTrabalhadas:        floatOuNil(os.HorasTrabalhadas),
-		HorasParada:             floatOuNil(os.HorasParada),
+		Id:                         os.ID,
+		SolicitacaoId:              os.SolicitacaoID,
+		Tipo:                       string(os.Tipo),
+		MaquinaId:                  os.MaquinaID,
+		MaquinaNome:                os.MaquinaNome,
+		MaquinaCodigo:              os.MaquinaCodigo,
+		ItemDescricao:              os.ItemDescricao,
+		Descricao:                  os.Descricao,
+		SetorId:                    os.SetorID,
+		SetorNome:                  os.SetorNome,
+		LojaId:                     os.LojaID,
+		LojaNome:                   os.LojaNome,
+		SolicitanteNome:            os.SolicitanteNome,
+		Origem:                     string(os.Origem),
+		Urgencia:                   string(os.Urgencia),
+		TecnicoId:                  os.TecnicoID,
+		TecnicoNome:                &os.TecnicoNome,
+		TecnicoArea:                os.TecnicoArea,
+		EmpresaTerceirizadaId:      os.EmpresaTerceirizadaID,
+		EmpresaTerceirizadaNome:    os.EmpresaTerceirizadaNome,
+		EmpresaTerceirizadaFotoUrl: os.EmpresaTerceirizadaFotoChave,
+		StatusExecucao:             string(os.Status),
+		Finalizada:                 os.Finalizada,
+		AfetaProducao:              os.AfetaProducao,
+		DataSolicitacao:            dataBrOuNil(os.DataSolicitacao),
+		DataAbertura:               dataBrOuNil(os.AbertaEm),
+		DataInicio:                 dataBrOuNil(os.IniciadaEm),
+		DataFim:                    dataBrOuNil(os.DataFim),
+		HorasTrabalhadas:           floatOuNil(os.HorasTrabalhadas),
+		HorasParada:                floatOuNil(os.HorasParada),
 	}
 
 	if os.TipoDefeito != nil {
@@ -372,8 +379,8 @@ func MontarOrdemServico(
 	}
 
 	// Mesmo critério, com custo_manutencao (NOT NULL em os_custo).
-	// custo_hora_tecnico não serviria: ele é nulo por regra em reparo e
-	// terceiros, mesmo com a linha existindo.
+	// custo_hora_tecnico não serviria: ele é nulo em reparos e OS de terceiros
+	// antigos (antes das 000016/000017), mesmo com a linha existindo.
 	if os.CustoManutencao.Valid {
 		horaTecnico := floatOuNil(os.CustoHoraTecnico)
 		// CustoTotal é somado aqui, e não no SELECT: uma expressão a mais na
@@ -466,8 +473,9 @@ func textoOuVazio(s *string) string {
 // decidiu e o que o service computou de solicitacao_impacto, respectivamente.
 //
 // Devolve a mesma struct de MontarOrdemServico, só que com menos preenchido:
-// tecnicoNome/tecnicoArea/empresaTerceirizada* ficam de fora porque a query da
-// abertura não faz esses JOINs, e encerramento/custo/horas/pausas porque uma
+// tecnicoArea/empresaTerceirizada* ficam de fora porque a query da abertura não
+// faz esses JOINs (tecnicoNome quem preenche é criarOrdemServico, que já leu o
+// técnico pra validar), e encerramento/custo/horas/pausas porque uma
 // OS que acabou de nascer não tem nada disso. Os oito são opcionais no
 // contrato do front. Finalizada nasce sempre `false`.
 func MontarOrdemServicoDaAbertura(os repository.CriarOrdemServicoDeSolicitacaoRow, s repository.ObterSolicitacaoPorIDRow, urgencia string, tecnicoId int64, afetaProducao bool) OrdemServico {
@@ -486,6 +494,7 @@ func MontarOrdemServicoDaAbertura(os repository.CriarOrdemServicoDeSolicitacaoRo
 		LojaId:          s.LojaID,
 		LojaNome:        s.LojaNome,
 		SolicitanteNome: s.SolicitanteNome,
+		Origem:          string(s.Origem),
 		Urgencia:        urgencia,
 		TecnicoId:       tecnicoId,
 		StatusExecucao:  string(repository.StatusOsAberta),

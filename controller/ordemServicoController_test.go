@@ -42,6 +42,22 @@ type ordemServicoFake struct {
 	encerramento *model.EncerramentoOrdemServicoPayload
 	// payload recebido por CorrigirCusto.
 	custo *model.LancamentoCustoManutencaoPayload
+	// pagina recebida pela listagem paginada; fica 0 quando a chamada foi a
+	// listagem sem página -- é o que distingue os dois caminhos no teste.
+	pagina *int32
+	// o que ListarOrdensDoPainelDaLoja recebeu, como "grupo=,setor=,maquina=,mes=,pagina=".
+	painelRecebido *string
+}
+
+func (o ordemServicoFake) ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, f service.FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error) {
+	if o.pagina != nil {
+		*o.pagina = pagina
+	}
+	lista, err := o.ListarOrdensServico(ctx, tenantId, usuarioId, perfil, f)
+	if err != nil {
+		return model.RespostaPaginada[model.OrdemServico]{}, err
+	}
+	return model.RespostaPaginada[model.OrdemServico]{Dados: lista, Pagina: pagina, TotalPaginas: 1, Total: int64(len(lista))}, nil
 }
 
 func (o ordemServicoFake) ListarOrdensServico(_ context.Context, _, usuarioId int64, perfil string, f service.FiltrosOrdemServico) ([]model.OrdemServico, error) {
@@ -72,6 +88,13 @@ func (o ordemServicoFake) ObterIndicadoresDaMaquina(_ context.Context, _, maquin
 		return model.IndicadoresMaquina{}, o.err
 	}
 	return model.MontarIndicadoresMaquina(maquinaId, nil), nil
+}
+
+func (o ordemServicoFake) ObterIndicadoresDaLoja(_ context.Context, _, lojaId, _ int64, _ string) (model.IndicadoresLoja, error) {
+	if o.err != nil {
+		return model.IndicadoresLoja{}, o.err
+	}
+	return model.MontarIndicadoresLoja(lojaId, nil, nil, nil), nil
 }
 
 func (o ordemServicoFake) Iniciar(_ context.Context, _, atorId, ordemServicoId int64) (model.OrdemServico, error) {
@@ -190,7 +213,7 @@ func (o ordemServicoFake) CorrigirCusto(_ context.Context, _, atorId, ordemServi
 	}, nil
 }
 
-// contextoOS monta a requisição já autenticada, como o AutenticacaoJwt
+// contextoOS monta a requisição já autenticada, como o middleware.Autenticacao
 // deixaria: tenant, id e perfil no contexto do Gin.
 //
 // Recebe url.Values e não uma string crua de propósito: é o que o front manda
@@ -238,7 +261,7 @@ func TestOrdemServicoListarStatus(t *testing.T) {
 	for _, caso := range casos {
 		t.Run(caso.nome, func(t *testing.T) {
 			ctx, rec := contextoOS(caso.query)
-			NewOrdemServicoController(ordemServicoFake{err: caso.err}).Listar()(ctx)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").Listar()(ctx)
 
 			if rec.Code != caso.esperar {
 				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
@@ -259,7 +282,7 @@ func TestOrdemServicoStatusSeparadoPorVirgula(t *testing.T) {
 
 	var recebidos service.FiltrosOrdemServico
 	ctx, rec := contextoOS(url.Values{"status": {"Aberta,Em Andamento,Pausada"}})
-	NewOrdemServicoController(ordemServicoFake{filtros: &recebidos}).Listar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{filtros: &recebidos}, "").Listar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
@@ -278,7 +301,7 @@ func TestOrdemServicoStatusSeparadoPorVirgula(t *testing.T) {
 	// "Em Andamento" tem espaço DENTRO -- aparar a borda não pode comê-lo.
 	var comEspaco service.FiltrosOrdemServico
 	ctx2, rec2 := contextoOS(url.Values{"status": {"Aberta, Em Andamento"}})
-	NewOrdemServicoController(ordemServicoFake{filtros: &comEspaco}).Listar()(ctx2)
+	NewOrdemServicoController(ordemServicoFake{filtros: &comEspaco}, "").Listar()(ctx2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("espaço depois da vírgula devia passar, veio %d (%s)", rec2.Code, rec2.Body.String())
 	}
@@ -291,7 +314,7 @@ func TestOrdemServicoFiltrosChegamNoService(t *testing.T) {
 
 	var recebidos service.FiltrosOrdemServico
 	ctx, rec := contextoOS(url.Values{"tipo": {"terceiros"}, "finalizada": {"true"}, "lojaId": {"3"}, "tecnicoId": {"9"}, "busca": {"forno"}})
-	NewOrdemServicoController(ordemServicoFake{filtros: &recebidos}).Listar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{filtros: &recebidos}, "").Listar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
@@ -316,7 +339,7 @@ func TestOrdemServicoFiltrosChegamNoService(t *testing.T) {
 	// Gestor, e um filtro que chega vazio em vez de nil viraria WHERE = ''.
 	var vazios service.FiltrosOrdemServico
 	ctx2, _ := contextoOS(nil)
-	NewOrdemServicoController(ordemServicoFake{filtros: &vazios}).Listar()(ctx2)
+	NewOrdemServicoController(ordemServicoFake{filtros: &vazios}, "").Listar()(ctx2)
 	if vazios.Status != nil || vazios.Tipo != nil || vazios.Finalizada != nil ||
 		vazios.LojaId != nil || vazios.TecnicoId != nil || vazios.Busca != nil {
 		t.Errorf("sem query, todos os filtros deviam ser nil: %+v", vazios)
@@ -326,7 +349,7 @@ func TestOrdemServicoFiltrosChegamNoService(t *testing.T) {
 	// "não filtrar" -- o zero value do bool não pode engolir a diferença.
 	var negativo service.FiltrosOrdemServico
 	ctx3, _ := contextoOS(url.Values{"finalizada": {"false"}})
-	NewOrdemServicoController(ordemServicoFake{filtros: &negativo}).Listar()(ctx3)
+	NewOrdemServicoController(ordemServicoFake{filtros: &negativo}, "").Listar()(ctx3)
 	if negativo.Finalizada == nil || *negativo.Finalizada {
 		t.Errorf("finalizada = %v, esperado ponteiro para false", negativo.Finalizada)
 	}
@@ -340,7 +363,7 @@ func TestOrdemServicoAtorVemDoToken(t *testing.T) {
 	var ator string
 	var filtros service.FiltrosOrdemServico
 	ctx, rec := contextoOS(url.Values{"usuarioId": {"99"}, "perfil": {"administrador"}, "tecnicoId": {"9"}})
-	NewOrdemServicoController(ordemServicoFake{ator: &ator, filtros: &filtros}).Listar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, filtros: &filtros}, "").Listar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -355,7 +378,7 @@ func TestOrdemServicoAtorVemDoToken(t *testing.T) {
 	}
 }
 
-// Claim ausente é 500 (bug de wiring da rota -- o AutenticacaoJwt já devia ter
+// Claim ausente é 500 (bug de wiring da rota -- o middleware.Autenticacao já devia ter
 // garantido), nunca 401: 401 fora de /login desloga o usuário no front.
 func TestOrdemServicoSemClaimDaSessao(t *testing.T) {
 
@@ -385,7 +408,7 @@ func TestOrdemServicoSemClaimDaSessao(t *testing.T) {
 				}
 			}
 
-			NewOrdemServicoController(ordemServicoFake{}).Listar()(ctx)
+			NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx)
 
 			if rec.Code != http.StatusInternalServerError {
 				t.Errorf("status = %d, esperado 500", rec.Code)
@@ -398,7 +421,7 @@ func TestOrdemServicoSemClaimDaSessao(t *testing.T) {
 func TestOrdemServicoRespondeArray(t *testing.T) {
 
 	ctx, rec := contextoOS(nil)
-	NewOrdemServicoController(ordemServicoFake{}).Listar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx)
 
 	var corpo []map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &corpo); err != nil {
@@ -448,7 +471,7 @@ func TestIndicadoresStatus(t *testing.T) {
 	for _, caso := range casos {
 		t.Run(caso.nome, func(t *testing.T) {
 			ctx, rec := contextoIndicadores(caso.id)
-			NewOrdemServicoController(ordemServicoFake{err: caso.err}).Indicadores()(ctx)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").Indicadores()(ctx)
 
 			if rec.Code != caso.esperar {
 				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
@@ -469,7 +492,7 @@ func TestIndicadoresAtorDoTokenEMaquinaDaRota(t *testing.T) {
 	var maquinaId int64
 
 	ctx, rec := contextoIndicadores("42")
-	NewOrdemServicoController(ordemServicoFake{ator: &ator, maquinaId: &maquinaId}).Indicadores()(ctx)
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, maquinaId: &maquinaId}, "").Indicadores()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
@@ -488,7 +511,7 @@ func TestIndicadoresAtorDoTokenEMaquinaDaRota(t *testing.T) {
 func TestIndicadoresCorpoSemHistorico(t *testing.T) {
 
 	ctx, rec := contextoIndicadores("9")
-	NewOrdemServicoController(ordemServicoFake{}).Indicadores()(ctx)
+	NewOrdemServicoController(ordemServicoFake{}, "").Indicadores()(ctx)
 
 	var corpo struct {
 		MaquinaId      int64 `json:"maquinaId"`
@@ -517,7 +540,7 @@ func TestIndicadoresCorpoSemHistorico(t *testing.T) {
 }
 
 // contextoOSAcao monta a requisição de uma transição do ciclo de vida
-// (POST /ordens-servico/:id/<ação>), como o AutenticacaoJwt deixaria: id na
+// (POST /ordens-servico/:id/<ação>), como o middleware.Autenticacao deixaria: id na
 // rota, tenant/ator/perfil no contexto. Perfil fixo "tecnico" -- é o único
 // que o RBAC da rota libera pra estas ações.
 func contextoOSAcao(id, corpo string) (*gin.Context, *httptest.ResponseRecorder) {
@@ -552,7 +575,7 @@ func TestOrdemServicoIniciarStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", "")
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.Iniciar()(ctx)
 
@@ -569,7 +592,7 @@ func TestOrdemServicoIniciarAtorEIdVemDaRota(t *testing.T) {
 	var ordemServicoId int64
 	ctx, rec := contextoOSAcao("42", "")
 
-	NewOrdemServicoController(ordemServicoFake{ator: &ator, ordemServicoId: &ordemServicoId}).Iniciar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, ordemServicoId: &ordemServicoId}, "").Iniciar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -586,7 +609,7 @@ func TestOrdemServicoIniciarRespondeOrdemServico(t *testing.T) {
 
 	ctx, rec := contextoOSAcao("42", "")
 
-	NewOrdemServicoController(ordemServicoFake{}).Iniciar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{}, "").Iniciar()(ctx)
 
 	var corpo model.OrdemServico
 	if err := json.Unmarshal(rec.Body.Bytes(), &corpo); err != nil {
@@ -620,7 +643,7 @@ func TestOrdemServicoPausarStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", c.corpo)
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.Pausar()(ctx)
 
@@ -637,7 +660,7 @@ func TestOrdemServicoPausarAtorIdEMotivo(t *testing.T) {
 	var ordemServicoId int64
 	ctx, rec := contextoOSAcao("42", `{"motivo":"Aguardando peça"}`)
 
-	NewOrdemServicoController(ordemServicoFake{ator: &ator, motivo: &motivo, ordemServicoId: &ordemServicoId}).Pausar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, motivo: &motivo, ordemServicoId: &ordemServicoId}, "").Pausar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -669,7 +692,7 @@ func TestOrdemServicoRetomarStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", "")
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.Retomar()(ctx)
 
@@ -686,7 +709,7 @@ func TestOrdemServicoRetomarAtorEIdVemDaRota(t *testing.T) {
 	var ordemServicoId int64
 	ctx, rec := contextoOSAcao("42", "")
 
-	NewOrdemServicoController(ordemServicoFake{ator: &ator, ordemServicoId: &ordemServicoId}).Retomar()(ctx)
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, ordemServicoId: &ordemServicoId}, "").Retomar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -719,7 +742,7 @@ func TestOrdemServicoAcionarTerceiroStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", c.corpo)
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.AcionarTerceiro()(ctx)
 
@@ -738,7 +761,7 @@ func TestOrdemServicoAcionarTerceiroAtorIdEEmpresa(t *testing.T) {
 
 	NewOrdemServicoController(ordemServicoFake{
 		ator: &ator, ordemServicoId: &ordemServicoId, empresaTerceirizadaId: &empresaTerceirizadaId,
-	}).AcionarTerceiro()(ctx)
+	}, "").AcionarTerceiro()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -778,7 +801,7 @@ func TestOrdemServicoEncerrarStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", c.corpo)
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.Encerrar()(ctx)
 
@@ -798,7 +821,7 @@ func TestOrdemServicoEncerrarAtorIdEPayload(t *testing.T) {
 
 	NewOrdemServicoController(ordemServicoFake{
 		ator: &ator, ordemServicoId: &ordemServicoId, encerramento: &recebido,
-	}).Encerrar()(ctx)
+	}, "").Encerrar()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -856,7 +879,7 @@ func TestOrdemServicoCustoStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 			ctx, rec := contextoOSAcao("42", c.corpo)
-			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err})
+			ctrl := NewOrdemServicoController(ordemServicoFake{err: c.err}, "")
 
 			ctrl.Custo()(ctx)
 
@@ -879,7 +902,7 @@ func TestOrdemServicoCustoAtorIdEPayload(t *testing.T) {
 
 	NewOrdemServicoController(ordemServicoFake{
 		ator: &ator, ordemServicoId: &ordemServicoId, custo: &recebido,
-	}).Custo()(ctx)
+	}, "").Custo()(ctx)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, corpo: %s", rec.Code, rec.Body.String())
@@ -895,5 +918,305 @@ func TestOrdemServicoCustoAtorIdEPayload(t *testing.T) {
 	}
 	if recebido.Itens[0].CustoManutencao != 120.5 {
 		t.Errorf("custoManutencao da tarefa = %v, esperado 120.5", recebido.Itens[0].CustoManutencao)
+	}
+}
+
+// ?pagina= troca o formato da resposta (RespostaPaginada em vez de array) e
+// leva os mesmos filtros; sem ela, a listagem continua array -- é o que o
+// Gestor e o Técnico consomem.
+func TestOrdemServicoPaginacaoOpcional(t *testing.T) {
+
+	var pagina int32
+	var filtros service.FiltrosOrdemServico
+	ctx, rec := contextoOS(url.Values{"pagina": {"3"}, "finalizada": {"true"}, "revisado": {"false"}})
+	NewOrdemServicoController(ordemServicoFake{pagina: &pagina, filtros: &filtros}, "").Listar()(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
+	}
+	if pagina != 3 {
+		t.Errorf("pagina = %d, esperado 3", pagina)
+	}
+	if filtros.Finalizada == nil || !*filtros.Finalizada || filtros.Revisado == nil || *filtros.Revisado {
+		t.Errorf("filtros não chegaram na paginada: %+v", filtros)
+	}
+	if !strings.Contains(rec.Body.String(), `"totalPaginas"`) {
+		t.Errorf("com ?pagina= a resposta devia ser RespostaPaginada: %s", rec.Body.String())
+	}
+
+	var semPagina int32
+	ctx2, rec2 := contextoOS(url.Values{})
+	NewOrdemServicoController(ordemServicoFake{pagina: &semPagina}, "").Listar()(ctx2)
+	if semPagina != 0 || !strings.HasPrefix(strings.TrimSpace(rec2.Body.String()), "[") {
+		t.Errorf("sem ?pagina= devia ser array pela listagem inteira (pagina=%d, corpo=%s)", semPagina, rec2.Body.String())
+	}
+
+	for _, ruim := range []string{"0", "-1", "abc"} {
+		ctx3, rec3 := contextoOS(url.Values{"pagina": {ruim}})
+		NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx3)
+		if rec3.Code != http.StatusBadRequest {
+			t.Errorf("pagina=%s: status = %d, esperado 400", ruim, rec3.Code)
+		}
+	}
+
+	ctx4, rec4 := contextoOS(url.Values{"revisado": {"talvez"}})
+	NewOrdemServicoController(ordemServicoFake{}, "").Listar()(ctx4)
+	if rec4.Code != http.StatusBadRequest {
+		t.Errorf("revisado=talvez: status = %d, esperado 400", rec4.Code)
+	}
+}
+
+func (o ordemServicoFake) ListarHistorico(_ context.Context, _, usuarioId int64, perfil string, ordemServicoId int64) ([]model.EventoOrdemServico, error) {
+	if o.ordemServicoId != nil {
+		*o.ordemServicoId = ordemServicoId
+	}
+	if o.ator != nil {
+		*o.ator = perfil + "/" + strconv.FormatInt(usuarioId, 10)
+	}
+	if o.err != nil {
+		return nil, o.err
+	}
+	return model.MontarEventosOrdemServico(nil), nil
+}
+
+func TestHistoricoStatus(t *testing.T) {
+
+	casos := []struct {
+		nome    string
+		id      string
+		err     error
+		esperar int
+	}{
+		{"sucesso", "9", nil, http.StatusOK},
+		// OS fora do alcance e OS inexistente são o mesmo 404 de propósito.
+		{"fora do escopo ou inexistente", "9", helper.ErrNaoEncontrado, http.StatusNotFound},
+		{"id não numérico", "abc", nil, http.StatusBadRequest},
+		{"erro do banco", "9", errors.New("connection refused"), http.StatusInternalServerError},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			ctx, rec := contextoIndicadores(caso.id)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").Historico()(ctx)
+
+			if rec.Code != caso.esperar {
+				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
+			}
+			if caso.err != nil && strings.Contains(rec.Body.String(), caso.err.Error()) {
+				t.Errorf("o erro cru vazou na resposta: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// Ator do TOKEN, OS da ROTA, e `[]` (nunca `null`) sem eventos -- o front faz
+// .map na lista.
+func TestHistoricoAtorDoTokenEListaVazia(t *testing.T) {
+
+	var ator string
+	var osId int64
+
+	ctx, rec := contextoIndicadores("42")
+	NewOrdemServicoController(ordemServicoFake{ator: &ator, ordemServicoId: &osId}, "").Historico()(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (corpo: %s)", rec.Code, rec.Body.String())
+	}
+	if ator != "gestor/5" || osId != 42 {
+		t.Errorf("ator = %q, os = %d; esperado gestor/5 e 42", ator, osId)
+	}
+	if strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Errorf("corpo = %s, esperado []", rec.Body.String())
+	}
+}
+
+func (o ordemServicoFake) ResumoOrdensServicoPorSetor(_ context.Context, _, usuarioId int64, perfil string, f service.FiltrosOrdemServico) ([]model.ResumoOrdensServicoSetor, error) {
+	if o.filtros != nil {
+		*o.filtros = f
+	}
+	if o.ator != nil {
+		*o.ator = perfil + "/" + strconv.FormatInt(usuarioId, 10)
+	}
+	if o.err != nil {
+		return nil, o.err
+	}
+	return []model.ResumoOrdensServicoSetor{}, nil
+}
+
+func (o ordemServicoFake) ObterOrdemServico(_ context.Context, _, _ int64, _ string, id int64) (model.OrdemServico, error) {
+	if o.err != nil {
+		return model.OrdemServico{}, o.err
+	}
+	return model.OrdemServico{Id: id, SolicitacaoId: 3, Tipo: "maquinario", StatusExecucao: "Aberta", SetorId: 4, LojaId: 1}, nil
+}
+
+// Os filtros avançados do Painel do Gestor chegam no service pelas DUAS rotas
+// (listagem e resumo): se uma aceitasse e a outra não, o card diria uma
+// quantidade e a lista mostraria outra.
+func TestOrdemServicoFiltrosAvancadosChegamNoService(t *testing.T) {
+
+	consulta := url.Values{
+		"maquina": {" PAT-9 "}, "dataInicio": {"2026-08-01"}, "dataFim": {"2026-08-31"},
+		"valorMinimo": {"100"}, "valorMaximo": {"900.5"}, "finalizada": {"true"},
+	}
+
+	conferir := func(t *testing.T, f service.FiltrosOrdemServico) {
+		t.Helper()
+		if f.Maquina == nil || *f.Maquina != "PAT-9" {
+			t.Errorf("maquina = %v, esperado PAT-9 (sem os espaços)", f.Maquina)
+		}
+		if f.DataInicio == nil || f.DataInicio.Format("2006-01-02") != "2026-08-01" || f.DataFim == nil || f.DataFim.Format("2006-01-02") != "2026-08-31" {
+			t.Errorf("período = %v a %v", f.DataInicio, f.DataFim)
+		}
+		if f.ValorMinimo == nil || *f.ValorMinimo != 100 || f.ValorMaximo == nil || *f.ValorMaximo != 900.5 {
+			t.Errorf("valores = %v a %v", f.ValorMinimo, f.ValorMaximo)
+		}
+	}
+
+	t.Run("listagem", func(t *testing.T) {
+		var f service.FiltrosOrdemServico
+		ctx, rec := contextoOS(consulta)
+		NewOrdemServicoController(ordemServicoFake{filtros: &f}, "").Listar()(ctx)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+		}
+		conferir(t, f)
+	})
+
+	t.Run("resumo", func(t *testing.T) {
+		var f service.FiltrosOrdemServico
+		ctx, rec := contextoOS(consulta)
+		NewOrdemServicoController(ordemServicoFake{filtros: &f}, "").Resumo()(ctx)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+		}
+		conferir(t, f)
+		if strings.TrimSpace(rec.Body.String()) != "[]" {
+			t.Errorf("corpo = %s, esperado [] (nunca null)", rec.Body.String())
+		}
+	})
+
+	// Lixo é erro de cliente: ignorar calado devolveria a lista inteira para
+	// quem pediu um recorte.
+	for nome, valores := range map[string]url.Values{
+		"data inválida":  {"dataInicio": {"31/08/2026"}},
+		"valor inválido": {"valorMinimo": {"abc"}},
+		"valor negativo": {"valorMaximo": {"-1"}},
+	} {
+		t.Run(nome, func(t *testing.T) {
+			ctx, rec := contextoOS(valores)
+			NewOrdemServicoController(ordemServicoFake{}, "").Resumo()(ctx)
+			if rec.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, esperado 400", rec.Code)
+			}
+		})
+	}
+}
+
+func TestOrdemServicoObterStatus(t *testing.T) {
+
+	casos := []struct {
+		nome    string
+		id      string
+		err     error
+		esperar int
+	}{
+		{"sucesso", "9", nil, http.StatusOK},
+		{"fora do escopo ou inexistente", "9", helper.ErrNaoEncontrado, http.StatusNotFound},
+		{"id não numérico", "abc", nil, http.StatusBadRequest},
+		{"erro do banco", "9", errors.New("connection refused"), http.StatusInternalServerError},
+	}
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			ctx, rec := contextoIndicadores(caso.id)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").Obter()(ctx)
+			if rec.Code != caso.esperar {
+				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
+			}
+		})
+	}
+}
+
+func (o ordemServicoFake) ListarOrdensDoPainelDaLoja(_ context.Context, _, lojaId, _ int64, _, grupo string, f service.FiltrosOrdensDoPainel, pagina int32) (model.RespostaPaginada[model.OrdemDoPainel], error) {
+	if o.ordemServicoId != nil {
+		*o.ordemServicoId = lojaId
+	}
+	if o.painelRecebido != nil {
+		partes := []string{"grupo=" + grupo, "setor=", "maquina=", "mes=", "pagina=" + strconv.Itoa(int(pagina))}
+		if f.SetorId != nil {
+			partes[1] += strconv.FormatInt(*f.SetorId, 10)
+		}
+		if f.MaquinaId != nil {
+			partes[2] += strconv.FormatInt(*f.MaquinaId, 10)
+		}
+		if f.Mes != nil {
+			partes[3] += *f.Mes
+		}
+		*o.painelRecebido = strings.Join(partes, ",")
+	}
+	if o.err != nil {
+		return model.RespostaPaginada[model.OrdemDoPainel]{}, o.err
+	}
+	return model.RespostaPaginada[model.OrdemDoPainel]{Dados: model.MontarReparosEncerrados(nil), Pagina: pagina, TotalPaginas: 1}, nil
+}
+
+func contextoOrdensDoPainel(id string, consulta url.Values) (*gin.Context, *httptest.ResponseRecorder) {
+	ctx, rec := contextoIndicadores(id)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/indicadores/lojas/"+id+"/ordens?"+consulta.Encode(), nil)
+	return ctx, rec
+}
+
+func TestOrdensDoPainelDaLojaStatus(t *testing.T) {
+
+	casos := []struct {
+		nome     string
+		id       string
+		consulta url.Values
+		err      error
+		esperar  int
+	}{
+		{"maquinário", "9", url.Values{"grupo": {"maquinario"}}, nil, http.StatusOK},
+		{"reparos", "9", url.Values{"grupo": {"reparos"}}, nil, http.StatusOK},
+		{"sem grupo", "9", nil, nil, http.StatusBadRequest},
+		{"grupo desconhecido", "9", url.Values{"grupo": {"tudo"}}, nil, http.StatusBadRequest},
+		{"loja fora do escopo ou inexistente", "9", url.Values{"grupo": {"reparos"}}, helper.ErrNaoEncontrado, http.StatusNotFound},
+		{"id de loja inválido", "abc", url.Values{"grupo": {"reparos"}}, nil, http.StatusBadRequest},
+		{"mês em formato errado", "9", url.Values{"grupo": {"reparos"}, "mes": {"2026-07"}}, nil, http.StatusBadRequest},
+		{"mês impossível", "9", url.Values{"grupo": {"reparos"}, "mes": {"13/2026"}}, nil, http.StatusBadRequest},
+		{"setor inválido", "9", url.Values{"grupo": {"reparos"}, "setorId": {"x"}}, nil, http.StatusBadRequest},
+		{"página inválida", "9", url.Values{"grupo": {"reparos"}, "pagina": {"0"}}, nil, http.StatusBadRequest},
+		// Reparo não tem máquina: filtrar por ela não faz sentido e é recusado.
+		{"máquina em reparos", "9", url.Values{"grupo": {"reparos"}, "maquinaId": {"3"}}, nil, http.StatusBadRequest},
+		{"máquina em maquinário", "9", url.Values{"grupo": {"maquinario"}, "maquinaId": {"3"}}, nil, http.StatusOK},
+		{"erro do banco", "9", url.Values{"grupo": {"reparos"}}, errors.New("connection refused"), http.StatusInternalServerError},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			ctx, rec := contextoOrdensDoPainel(caso.id, caso.consulta)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").OrdensDoPainelDaLoja()(ctx)
+			if rec.Code != caso.esperar {
+				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
+			}
+		})
+	}
+}
+
+// O mês chega como MM/AAAA (o rótulo do gráfico) e vai ao service como AAAA-MM, o que a query
+// compara; grupo, setor, máquina e página chegam como vieram.
+func TestOrdensDoPainelDaLojaFiltrosChegamNoService(t *testing.T) {
+
+	var recebido string
+	ctx, rec := contextoOrdensDoPainel("9", url.Values{"grupo": {"maquinario"}, "mes": {"07/2026"}, "setorId": {"4"}, "maquinaId": {"7"}, "pagina": {"2"}})
+	NewOrdemServicoController(ordemServicoFake{painelRecebido: &recebido}, "").OrdensDoPainelDaLoja()(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if recebido != "grupo=maquinario,setor=4,maquina=7,mes=2026-07,pagina=2" {
+		t.Errorf("service recebeu %q", recebido)
+	}
+	if !strings.Contains(rec.Body.String(), `"dados":[]`) {
+		t.Errorf("corpo = %s, esperado dados [] (nunca null)", rec.Body.String())
 	}
 }

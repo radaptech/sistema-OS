@@ -396,6 +396,99 @@ func (ns NullTipoDefeito) Value() (driver.Value, error) {
 	return string(ns.TipoDefeito), nil
 }
 
+type TipoEventoOs string
+
+const (
+	TipoEventoOsAberta           TipoEventoOs = "aberta"
+	TipoEventoOsIniciada         TipoEventoOs = "iniciada"
+	TipoEventoOsPausada          TipoEventoOs = "pausada"
+	TipoEventoOsRetomada         TipoEventoOs = "retomada"
+	TipoEventoOsTerceiroAcionado TipoEventoOs = "terceiro_acionado"
+	TipoEventoOsEncerrada        TipoEventoOs = "encerrada"
+	TipoEventoOsCustoCorrigido   TipoEventoOs = "custo_corrigido"
+)
+
+func (e *TipoEventoOs) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TipoEventoOs(s)
+	case string:
+		*e = TipoEventoOs(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TipoEventoOs: %T", src)
+	}
+	return nil
+}
+
+type NullTipoEventoOs struct {
+	TipoEventoOs TipoEventoOs
+	Valid        bool // Valid is true if TipoEventoOs is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTipoEventoOs) Scan(value interface{}) error {
+	if value == nil {
+		ns.TipoEventoOs, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TipoEventoOs.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTipoEventoOs) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TipoEventoOs), nil
+}
+
+type TipoNotificacao string
+
+const (
+	TipoNotificacaoSolicitacaoNova      TipoNotificacao = "solicitacao_nova"
+	TipoNotificacaoSolicitacaoAceita    TipoNotificacao = "solicitacao_aceita"
+	TipoNotificacaoSolicitacaoRejeitada TipoNotificacao = "solicitacao_rejeitada"
+	TipoNotificacaoOsAberta             TipoNotificacao = "os_aberta"
+	TipoNotificacaoOsPreventiva         TipoNotificacao = "os_preventiva"
+	TipoNotificacaoOsConcluida          TipoNotificacao = "os_concluida"
+)
+
+func (e *TipoNotificacao) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TipoNotificacao(s)
+	case string:
+		*e = TipoNotificacao(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TipoNotificacao: %T", src)
+	}
+	return nil
+}
+
+type NullTipoNotificacao struct {
+	TipoNotificacao TipoNotificacao
+	Valid           bool // Valid is true if TipoNotificacao is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTipoNotificacao) Scan(value interface{}) error {
+	if value == nil {
+		ns.TipoNotificacao, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TipoNotificacao.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTipoNotificacao) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TipoNotificacao), nil
+}
+
 type TipoOs string
 
 const (
@@ -487,6 +580,18 @@ type AreaTecnico struct {
 	Nome     string
 }
 
+type DispositivoPush struct {
+	ID           int64
+	TenantID     int64
+	UsuarioID    int64
+	Endpoint     string
+	P256dh       string
+	Auth         string
+	UserAgent    *string
+	CriadoEm     pgtype.Timestamptz
+	AtualizadoEm pgtype.Timestamptz
+}
+
 type Empresa struct {
 	ID         int64
 	Subdominio string
@@ -503,14 +608,16 @@ type EmpresaTerceirizada struct {
 	Telefone      *string
 	Ativa         bool
 	CriadoEm      pgtype.Timestamptz
+	FotoChave     *string
 }
 
 type Loja struct {
-	ID       int64
-	TenantID int64
-	Nome     string
-	Ativa    bool
-	CriadoEm pgtype.Timestamptz
+	ID        int64
+	TenantID  int64
+	Nome      string
+	Ativa     bool
+	CriadoEm  pgtype.Timestamptz
+	FotoChave *string
 }
 
 type Maquina struct {
@@ -527,6 +634,18 @@ type Maquina struct {
 	Ativa            bool
 	CriadoEm         pgtype.Timestamptz
 	Criticidade      NivelCriticidade
+}
+
+type Notificacao struct {
+	ID        int64
+	TenantID  int64
+	UsuarioID int64
+	Tipo      TipoNotificacao
+	Titulo    string
+	Corpo     string
+	Url       string
+	LidaEm    pgtype.Timestamptz
+	CriadoEm  pgtype.Timestamptz
 }
 
 type OrdemServico struct {
@@ -585,6 +704,18 @@ type OsEncerramento struct {
 	CriadoEm          pgtype.Timestamptz
 }
 
+type OsEvento struct {
+	ID             int64
+	TenantID       int64
+	OrdemServicoID int64
+	Tipo           TipoEventoOs
+	UsuarioID      *int64
+	StatusAnterior *StatusOs
+	StatusNovo     *StatusOs
+	Detalhes       []byte
+	OcorridoEm     pgtype.Timestamptz
+}
+
 type OsNotaFiscal struct {
 	ID             int64
 	TenantID       int64
@@ -615,13 +746,23 @@ type Preventiva struct {
 	TecnicoID     *int64
 }
 
+type Sessao struct {
+	ID          int64
+	TenantID    int64
+	UsuarioID   int64
+	TokenHash   []byte
+	CriadaEm    pgtype.Timestamptz
+	UltimoUsoEm pgtype.Timestamptz
+}
+
 type Setor struct {
-	ID       int64
-	TenantID int64
-	LojaID   int64
-	Nome     string
-	Ativo    bool
-	CriadoEm pgtype.Timestamptz
+	ID        int64
+	TenantID  int64
+	LojaID    int64
+	Nome      string
+	Ativo     bool
+	CriadoEm  pgtype.Timestamptz
+	FotoChave *string
 }
 
 type SolicitacaoAnexo struct {
@@ -671,6 +812,7 @@ type Usuario struct {
 	CriadoEm                 pgtype.Timestamptz
 	TokenRecuperacaoHash     *string
 	TokenRecuperacaoExpiraEm pgtype.Timestamptz
+	ValorHora                pgtype.Float8
 }
 
 type UsuarioEscopo struct {

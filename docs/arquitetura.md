@@ -12,8 +12,9 @@ estiver em dúvida sobre onde uma regra deve morar.
 - **Go 1.26**, módulo `github.com/radaptech/sistema-OSm--Back-end`.
 - **Gin** (HTTP), **pgx/v5** (Postgres, via `pgxpool`), **golang-migrate** (migrations),
   **sqlc** (`sqlc.yaml` → gera `database/repository/` a partir de `database/queries/`).
-- **JWT** (`golang-jwt/jwt/v5`, HMAC HS256) para sessão, cookie HttpOnly — ver
-  "Autenticação" abaixo e front-end `CLAUDE.md`.
+- **Sessão no banco** (tabela `sessao`, migration `000022`; segredo aleatório em cookie
+  HttpOnly, o banco guarda o SHA-256) — ver "Autenticação" em `api-e-rotas.md` e
+  front-end `CLAUDE.md`. Substituiu o JWT em 17/10/2026.
 - **`golang.org/x/time/rate`** (token bucket) para o rate limit por IP — ver
   "Rotas e rate limit" abaixo.
 - **Hash de senha: argon2id** (`alexedwards/argon2id`, `auth/passHash.go` —
@@ -21,8 +22,8 @@ estiver em dúvida sobre onde uma regra deve morar.
   `provisionamento.go` também passou a usar `auth.HashPassword`; não reintroduza bcrypt
   em nenhum caminho de senha nova.
 - **Resend** (`resend-go/v2`) para o e-mail de recuperação de senha
-  (`internal/service/EmailService.go`) e **Evolution API** (HTTP cru, sem SDK) para o
-  WhatsApp — os dois opcionais: sem a chave, a rota responde e só o envio falha no log.
+  (`internal/service/EmailService.go`) — opcional: sem a chave, a rota responde e só o
+  envio falha no log.
 - Infra alvo: **Railway** (app, plano Hobby), **Supabase** (Postgres) e **Cloudflare R2**
   (bucket de fotos/vídeos, S3-compatível). O Postgres **não** é do plugin do Railway e
   **não** é conexão direta: é o Supabase atrás do **Session Pooler** (Supavisor), host
@@ -67,7 +68,11 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
 
 ## Estrutura atual
 - `main.go` — entrypoint. Roda migrations automaticamente no boot
-  (`RunMigrationPostgress`), aplica `middleware.CorsConfig()` global, monta o
+  (`RunMigrationPostgress`), aplica `middleware.CorsConfig()` global e a
+  compressão gzip das respostas (`gin-contrib/gzip` v1.2.5, entre o CORS e o
+  `Timeout` — a lista inteira de OS cai de ~380 KB para ~45 KB; erro ≥ 400 sai sem
+  compressão; v1.2.5 e não a mais nova porque a 1.2.8 arrastava uma atualização em
+  massa de dependências indiretas), monta o
   `router.Container` e registra as rotas (`router.ConfigurarRotas`), e sobe o Gin na
   porta 8081. Também despacha subcomandos de CLI antes de subir o servidor:
   `subcomandos` (mapa nome → função) + `despacharSubcomando(args) bool`, que roda o
@@ -91,12 +96,12 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
   o pgx devolve `timestamptz` no fuso local do processo, e container é UTC (OS aberta
   21:56 aparecia 00:56 do dia seguinte). `tzdata` vai embutido no binário porque a imagem
   de produção é alpine sem `/usr/share/zoneinfo`. `config/dataBr_test.go` tranca ida e volta.
-- `auth/` — `jwt.go` (`GerarJwt`, claims `sub`/`tenantId`/`perfil`/`exp`/`iat`,
-  HS256), `passHash.go` (`HashPassword`/`HashCompare`, argon2id).
-- `middleware/` — `middJwt.go` (`AutenticacaoJwt`, lê cookie `token` ou
-  `Authorization: Bearer`, valida e injeta `userId`/`user_perfil`/`user_TenantId` no
-  contexto do Gin — falha fechada: claim ausente/malformada aborta com 401; as chaves
-  são as consts `UserId`/`UserPerfil`/`UserTenantId`, e
+- `auth/` — `passHash.go` (`HashPassword`/`HashCompare`, argon2id).
+- `middleware/` — `sessao.go` (`Autenticacao(validador)`, lê cookie `token` ou
+  `Authorization: Bearer`, confere a sessão no banco pela interface `ValidadorSessao`
+  — implementada por `service.SessaoService` — e injeta `userId`/`user_perfil`/
+  `user_TenantId` no contexto do Gin; `GravarCookieSessao` é a única escrita do cookie;
+  as chaves são as consts `UserId`/`UserPerfil`/`UserTenantId`, e
   `GetUserID`/`GetUserPerfil`/`GetTenantIDToken`
   leem tipado), `tenantId.go` (`TenantMiddleware` resolve o header `X-tenant-ID` em
   `empresa.id` via `ObterEmpresaPorSubdominio` e guarda na chave `TenantId`;
@@ -222,9 +227,13 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
     atomicidade. Mesmo padrão de `gravarEscopo`. **A regra "máquina exige ao menos uma
     preventiva" é validada aqui, no servidor**: o `min(1)` do Zod é só do navegador, e sem
     o cheque um POST direto criaria máquina sem preventiva nenhuma.
-    `AtualizarMaquina` substitui o conjunto inteiro (`DesativarPreventivasDaMaquina` antes
-    de `gravarPreventivas`, sem merge incremental) — mesmo padrão do escopo em
-    `AtualizarUsuario`.
+    `AtualizarMaquina` chama `sincronizarPreventivas`, **não** `gravarPreventivas`: a
+    lista é o conjunto inteiro, mas a preventiva que volta com `id` é atualizada no lugar
+    (`AtualizarPreventivaDaMaquina`, com `maquina_id` e `ativa` no `WHERE` para não
+    aceitar id de outra máquina), a sem `id` é criada e só as que não vieram são
+    desativadas (`DesativarPreventivasForaDaLista`). ⚠️ Já foi "desativa todas e
+    recria", e cada edição da máquina dava id novo às preventivas — o histórico de ciclos
+    (que segue `solicitacao_os.preventiva_id`) ficava no id antigo.
     Mora aqui também o **job de preventiva vencida**:
     `AbrirSolicitacoesDePreventivasVencidas` (percorre as vencidas, devolve quantas abriu
     e as falhas num `errors.Join`) e `abrirSolicitacaoDaPreventiva` (a transação de uma
@@ -251,8 +260,14 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
     numa **struct** (`FiltrosOrdemServico`) em vez de parâmetros soltos — são seis, e
     dois deles são `*int64` vizinhos (`LojaId`/`TecnicoId`): trocá-los de lugar numa
     assinatura posicional compila e devolve a lista errada, calado.
-  - `notificacaoService.go` — `NotificacaoService`, o cliente da Evolution API (WhatsApp).
-    Ver "Notificação" em `docs/fluxo-de-negocio.md`.
+  - `notificacaoService.go` — `NotificadorInterface` + `DadosNotificacao` (o contrato
+    que `SolicitacaoService`/`PreventivaService` usam) e `NotificacaoService`, a
+    implementação: grava em `notificacao` (o sininho) e serve as rotas `/notificacoes`.
+    Todo envio passa por `entregar`, que grava e depois manda o Web Push. Também serve as
+    rotas `/push` (inscrição do aparelho). Ver "Notificações" em `docs/fluxo-de-negocio.md`.
+  - `pushService.go` — `EnviadorPush` (interface, pro teste trocar por fake) e `WebPush`, o
+    de verdade (`SherClockHolmes/webpush-go`: cifra RFC 8291 + VAPID RFC 8292), mais
+    `validarEndpointPush`/`validarChavesPush`. `NewWebPush` devolve nil sem as chaves.
   - `recuperacaoSenhaService.go` + `EmailService.go` — `esqueci-senha`/`redefinir-senha`.
     O service depende de `EnviadorEmailRecuperacao` (interface, pro teste trocar o Resend
     por um fake, mesmo motivo de `NotificadorInterface`); `NewEmailService` recebe
@@ -262,8 +277,8 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
   `LoginServiceInterface` (a interface existe pro teste do handler poder trocar o
   service — `UsuarioService` guarda `*pgxpool.Pool` concreto, não dá pra mockar de
   outro jeito). Handlers: `Registrar` (`POST /usuarios`), `Login`, `Logout`, `Sessao`.
-  O cookie de sessão sai só de `cookieSessao(ctx, token, maxAge)` — login e logout
-  passam pela mesma função porque o `Set-Cookie` de remoção só apaga se casar com o de
+  O cookie de sessão sai só de `middleware.GravarCookieSessao(ctx, segredo, maxAge)` —
+  login, logout e o middleware passam pela mesma função porque o `Set-Cookie` de remoção só apaga se casar com o de
   criação (nome, path, `Secure`, `SameSite`). Mais `Obter`/`ListarUsuarios`/
   `Atualizar`/`Desativar`.
   `lojaController.go`, `setorController.go`, `maquinasController.go`,
@@ -290,8 +305,8 @@ que o front espera (camelCase, datas `dd/mm/yyyy HH:MM:SS`, ver `config/dataBr.g
   - `idDaRota` — `:id` malformado é **400**, não 404 (`/abc` não é um id que não existe, é
     bug de cliente). `idDeQuery(ctx, nome)` é o mesmo critério para `?lojaId=`/`?setorId=`/
     `?maquinaId=`: ausente ou vazio vira `nil` sem erro, inválido é 400.
-  - `tenantDaRota` — tenant do **token**, nunca do header (ver "Autenticação").
-  - `atorDaRota` — `usuario.id` + `perfil` do token, para as listagens que filtram por
+  - `tenantDaRota` — tenant da **sessão**, nunca do header (ver "Autenticação").
+  - `atorDaRota` — `usuario.id` + `perfil` da sessão, para as listagens que filtram por
     escopo. Mesmo motivo do anterior: aceitar do cliente deixaria um solicitante listar a
     loja inteira mandando outro id. Claim faltando é 500 (bug de wiring), não 401.
   - `corpoJSON[T]` — `ShouldBindJSON` das rotas sem arquivo. Campo extra é ignorado pelo

@@ -13,6 +13,9 @@ type Setor struct {
 	Nome   string `json:"nome"`
 	LojaId int64  `json:"lojaId"`
 	Ativo  bool   `json:"ativo"`
+	// FotoUrl nasce com a foto_chave crua e o controller troca pela URL
+	// assinada antes de responder -- mesmo padrão de Maquinario.FotoUrl.
+	FotoUrl *string `json:"fotoUrl,omitempty"`
 }
 
 // NovoSetorPayload é o corpo de POST /setores e PUT /setores/:id.
@@ -24,4 +27,8 @@ type Setor struct {
 type NovoSetorPayload struct {
 	Nome   string `json:"nome" binding:"required"`
 	LojaId int64  `json:"lojaId" binding:"required,gt=0"`
+	// FotoChave não vem do JSON (json:"-"): é a key do upload da parte `foto`
+	// do multipart, preenchida pelo controller. nil = sem foto nova, e o UPDATE
+	// mantém a atual (COALESCE).
+	FotoChave *string `json:"-"`
 }

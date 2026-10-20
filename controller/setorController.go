@@ -19,15 +19,26 @@ type SetorServiceInterface interface {
 	DesativarSetor(ctx context.Context, tenantID, id int64) error
 }
 
+// bucketFotos é o bucket do R2 da foto de cadastro (R2_BUCKET_NAME_IMG_SETORES), lido
+// pelo router -- mesma escolha de MaquinaController: o bucket é de wiring, não
+// coluna do banco.
 type SetorController struct {
-	service SetorServiceInterface
+	service     SetorServiceInterface
+	bucketFotos string
 }
 
-func NewSetorController(service SetorServiceInterface) *SetorController {
+func NewSetorController(service SetorServiceInterface, bucketFotos string) *SetorController {
 
 	return &SetorController{
-		service: service,
+		service:     service,
+		bucketFotos: bucketFotos,
 	}
+}
+
+// resolverFoto troca, no lugar, a chave do R2 pela URL assinada (assinarFoto,
+// controller/foto.go).
+func (s *SetorController) resolverFoto(ctx context.Context, setor *model.Setor) {
+	setor.FotoUrl = assinarFoto(ctx, s.bucketFotos, setor.FotoUrl, "setor", setor.Id)
 }
 
 // Cadastrar é POST /setores.
@@ -39,15 +50,18 @@ func (s *SetorController) Cadastrar() gin.HandlerFunc {
 
 	return func(ctx *gin.Context) {
 
-		input, ok := corpoJSON[model.NovoSetorPayload](ctx)
-		if !ok {
-			return
-		}
-
 		tenantId, okTenant := tenantDaRota(ctx)
 		if !okTenant {
 			return
 		}
+
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovoSetorPayload](ctx, tenantId, s.bucketFotos, "setor")
+		if !ok {
+			return
+		}
+		input.FotoChave = chave
 
 		setor, err := s.service.CadastrarSetor(ctx.Request.Context(), tenantId, input)
 		if err != nil {
@@ -65,6 +79,8 @@ func (s *SetorController) Cadastrar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		s.resolverFoto(ctx.Request.Context(), &setor)
 
 		ctx.JSON(http.StatusCreated, setor)
 	}
@@ -98,6 +114,8 @@ func (s *SetorController) Obter() gin.HandlerFunc {
 			return
 		}
 
+		s.resolverFoto(ctx.Request.Context(), &setor)
+
 		ctx.JSON(http.StatusOK, setor)
 	}
 }
@@ -127,6 +145,12 @@ func (s *SetorController) Listar() gin.HandlerFunc {
 			return
 		}
 
+		// Índice, não valor: o range daria uma cópia e a URL assinada não
+		// voltaria pro slice da resposta.
+		for i := range setores {
+			s.resolverFoto(ctx.Request.Context(), &setores[i])
+		}
+
 		ctx.JSON(http.StatusOK, setores)
 	}
 }
@@ -141,15 +165,18 @@ func (s *SetorController) Atualizar() gin.HandlerFunc {
 			return
 		}
 
-		input, okCorpo := corpoJSON[model.NovoSetorPayload](ctx)
-		if !okCorpo {
-			return
-		}
-
 		tenantId, okTenant := tenantDaRota(ctx)
 		if !okTenant {
 			return
 		}
+
+		// Tenant antes do corpo: a foto sobe pro R2 já na leitura, numa key
+		// prefixada pelo tenant.
+		input, chave, ok := corpoComFoto[model.NovoSetorPayload](ctx, tenantId, s.bucketFotos, "setor")
+		if !ok {
+			return
+		}
+		input.FotoChave = chave
 
 		setor, err := s.service.AtualizarSetor(ctx.Request.Context(), tenantId, id, input)
 		if err != nil {
@@ -169,6 +196,8 @@ func (s *SetorController) Atualizar() gin.HandlerFunc {
 			}
 			return
 		}
+
+		s.resolverFoto(ctx.Request.Context(), &setor)
 
 		ctx.JSON(http.StatusOK, setor)
 	}

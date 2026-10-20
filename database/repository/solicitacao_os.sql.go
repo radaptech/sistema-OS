@@ -18,11 +18,14 @@ LEFT JOIN maquina m ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
 WHERE s.tenant_id = $1
   AND s.solicitante_id = $2
   AND ($3::status_solicitacao IS NULL OR s.status = $3)
+  -- Filtro "de qual máquina" de Minhas Solicitações. NULL não filtra; com valor,
+  -- pequeno reparo (maquina_id NULL) nunca casa -- é o esperado.
+  AND ($4::bigint IS NULL OR s.maquina_id = $4)
   AND (
-    $4::text IS NULL
-    OR s.descricao ILIKE '%' || $4 || '%'
-    OR m.nome ILIKE '%' || $4 || '%'
-    OR s.item_descricao ILIKE '%' || $4 || '%'
+    $5::text IS NULL
+    OR s.descricao ILIKE '%' || $5 || '%'
+    OR m.nome ILIKE '%' || $5 || '%'
+    OR s.item_descricao ILIKE '%' || $5 || '%'
   )
 `
 
@@ -30,6 +33,7 @@ type ContarSolicitacoesDoSolicitanteParams struct {
 	TenantID      int64
 	SolicitanteID *int64
 	Status        *StatusSolicitacao
+	MaquinaID     *int64
 	Busca         *string
 }
 
@@ -38,6 +42,7 @@ func (q *Queries) ContarSolicitacoesDoSolicitante(ctx context.Context, arg Conta
 		arg.TenantID,
 		arg.SolicitanteID,
 		arg.Status,
+		arg.MaquinaID,
 		arg.Busca,
 	)
 	var count int64
@@ -479,6 +484,57 @@ func (q *Queries) CriarSolicitacaoReparo(ctx context.Context, arg CriarSolicitac
 	return i, err
 }
 
+const listarMaquinasDasMinhasSolicitacoes = `-- name: ListarMaquinasDasMinhasSolicitacoes :many
+SELECT DISTINCT m.id, m.nome, m.numero_patrimonio, m.foto_chave
+FROM solicitacao_os s
+JOIN maquina m ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+WHERE s.tenant_id = $1
+  AND s.solicitante_id = $2
+ORDER BY m.nome, m.numero_patrimonio
+`
+
+type ListarMaquinasDasMinhasSolicitacoesParams struct {
+	TenantID      int64
+	SolicitanteID *int64
+}
+
+type ListarMaquinasDasMinhasSolicitacoesRow struct {
+	ID               int64
+	Nome             string
+	NumeroPatrimonio string
+	FotoChave        *string
+}
+
+// As opções do filtro "de qual máquina" de Minhas Solicitações: as máquinas
+// que aparecem nas solicitações do PRÓPRIO solicitante, e não as do setor dele
+// -- a máquina desativada, ou a do setor antigo de quem mudou de setor, continua
+// no histórico e precisa continuar filtrável. Pequeno reparo não tem máquina e
+// some no JOIN. Sem filtro de m.ativa, pelo mesmo motivo.
+func (q *Queries) ListarMaquinasDasMinhasSolicitacoes(ctx context.Context, arg ListarMaquinasDasMinhasSolicitacoesParams) ([]ListarMaquinasDasMinhasSolicitacoesRow, error) {
+	rows, err := q.db.Query(ctx, listarMaquinasDasMinhasSolicitacoes, arg.TenantID, arg.SolicitanteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarMaquinasDasMinhasSolicitacoesRow
+	for rows.Next() {
+		var i ListarMaquinasDasMinhasSolicitacoesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Nome,
+			&i.NumeroPatrimonio,
+			&i.FotoChave,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listarSolicitacoes = `-- name: ListarSolicitacoes :many
 SELECT
     s.id, s.tenant_id, s.tipo, s.maquina_id, s.item_descricao, s.setor_id, s.solicitante_id, s.preventiva_id, s.status, s.origem, s.descricao, s.motivo_rejeicao, s.rejeitado_por_id, s.rejeitada_em, s.criado_em,
@@ -636,20 +692,24 @@ LEFT JOIN usuario rej ON rej.tenant_id = s.tenant_id AND rej.id = s.rejeitado_po
 WHERE s.tenant_id = $1
   AND s.solicitante_id = $2
   AND ($3::status_solicitacao IS NULL OR s.status = $3)
+  -- Filtro "de qual máquina" de Minhas Solicitações. NULL não filtra; com valor,
+  -- pequeno reparo (maquina_id NULL) nunca casa -- é o esperado.
+  AND ($4::bigint IS NULL OR s.maquina_id = $4)
   AND (
-    $4::text IS NULL
-    OR s.descricao ILIKE '%' || $4 || '%'
-    OR m.nome ILIKE '%' || $4 || '%'
-    OR s.item_descricao ILIKE '%' || $4 || '%'
+    $5::text IS NULL
+    OR s.descricao ILIKE '%' || $5 || '%'
+    OR m.nome ILIKE '%' || $5 || '%'
+    OR s.item_descricao ILIKE '%' || $5 || '%'
   )
 ORDER BY s.criado_em DESC
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListarSolicitacoesDoSolicitanteParams struct {
 	TenantID      int64
 	SolicitanteID *int64
 	Status        *StatusSolicitacao
+	MaquinaID     *int64
 	Busca         *string
 	Deslocamento  int32
 	Limite        int32
@@ -691,6 +751,7 @@ func (q *Queries) ListarSolicitacoesDoSolicitante(ctx context.Context, arg Lista
 		arg.TenantID,
 		arg.SolicitanteID,
 		arg.Status,
+		arg.MaquinaID,
 		arg.Busca,
 		arg.Deslocamento,
 		arg.Limite,

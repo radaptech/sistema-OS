@@ -26,7 +26,19 @@ O modelo de dados em si (o porquê de cada constraint) está em
   preventiva vai direto para o técnico, `000009` custo revisado pelo Administrador,
   `000010` nota fiscal em qualquer tipo, `000011` nota fiscal declarada no encerramento,
   `000012` custo itemizado por tarefa e notas fiscais em lista, `000013` token de
-  recuperação de senha (só o SHA-256 + validade, na própria `usuario`).
+  recuperação de senha (só o SHA-256 + validade, na própria `usuario`), … `000018`
+  central de notificações (`notificacao`, uma linha por destinatário; ver "Notificações"
+  em `docs/fluxo-de-negocio.md`).
+- `000019` `dispositivo_push` — aparelho inscrito no Web Push (`endpoint` + chaves `p256dh`/`auth`
+  da `PushSubscription`). **`UNIQUE (endpoint)`** e upsert em `SalvarDispositivoPush`: o mesmo
+  celular com outro usuário logado troca o dono em vez de duplicar. **Hard delete** (exceção ao
+  soft delete, como `os_custo_item`): inscrição é endereço, não entidade — morre no logout,
+  no 404/410 do serviço de push, ou trocada. `ck_dispositivo_push_endpoint` exige `https://` e
+  ≤ 2048; a lista de hosts permitidos (anti-SSRF) é do service.
+- **`notificacao` não tem FK pra solicitação/OS** de propósito: o destino é a `url`, e
+  `ExcluirMaquinaDefinitivo` não precisa conhecê-la. `ck_notificacao_url` só aceita
+  caminho relativo (`^/[^/\\]`) — o service worker abre essa url no toque do push, e
+  `//outro.site` viraria redirecionamento pra fora.
 - ⚠️ **Tabela e tipo dividem namespace no Postgres** — trocar uma tabela por um ENUM
   homônimo exige dropar a tabela **antes** de criar o tipo (foi o caso de `000004`).
 
@@ -68,8 +80,8 @@ O modelo de dados em si (o porquê de cada constraint) está em
   histórico de OS e o escopo de quem tem acesso a ele. Setor na loja errada se resolve
   desativando e criando na certa. O front manda `lojaId` no PUT; o service ignora.
 - **Escopo de acesso (`usuario_escopo` + `usuario_escopo_setor`, ver
-  `docs/modelagem-banco-dados.md` 3.8) edita substituindo o conjunto inteiro**, mesmo
-  padrão de preventivas em `CadastrarMaquina`: o service apaga tudo do usuário
+  `docs/modelagem-banco-dados.md` 3.8) edita substituindo o conjunto inteiro**: o
+  service apaga tudo do usuário
   (`DeletarSetoresDosEscoposPorUsuario` **antes de** `DeletarEscoposPorUsuario` — não há
   `ON DELETE CASCADE` entre as duas) e recria numa transação. Não existe
   `AtualizarEscopo` de propósito.

@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -86,26 +84,65 @@ func gravarPreventivas(ctx context.Context, repo *repository.Queries, tenantID, 
 	}
 
 	for _, p := range preventivas {
-		descricao := strings.TrimSpace(p.Descricao)
-		if descricao == "" {
-			return fmt.Errorf("%w: a descrição da preventiva não pode ficar em branco", helper.ErrValidacao)
-		}
-		// ck_intervalo (intervalo_dias > 0) recusaria no banco, mas como 422; o
-		// valor veio do formulário, então é erro de preenchimento (400).
-		if p.IntervaloDias <= 0 {
-			return fmt.Errorf("%w: o intervalo da preventiva deve ser de pelo menos 1 dia", helper.ErrValidacao)
-		}
-		if p.ProximaData == nil || p.ProximaData.IsZero() {
-			return fmt.Errorf("%w: informe a próxima data da preventiva", helper.ErrValidacao)
-		}
-		if err := validarTecnicoPreventiva(ctx, repo, tenantID, p.TecnicoId); err != nil {
+		descricao, err := validarPreventiva(ctx, repo, tenantID, p)
+		if err != nil {
 			return err
 		}
+		if err := criarPreventivaDaMaquina(ctx, repo, tenantID, maquinaID, descricao, p); err != nil {
+			return err
+		}
+	}
 
-		// tecnicoId é ponteiro na query (coluna nullable, migration 000008) mas
-		// nunca nulo aqui: validarTecnicoPreventiva já recusou o zero acima.
+	return nil
+}
+
+// sincronizarPreventivas é o caminho do PUT /maquinas/:id: a lista que chega é
+// o conjunto inteiro que a máquina deve ter. A que volta com Id é atualizada
+// no lugar (mantém o id e, com ele, o histórico de ciclos); a sem Id é nova; a
+// que existia e não veio é desativada.
+//
+// ⚠️ Já foi "desativa todas e grava de novo": cada edição da máquina trocava o
+// id de toda preventiva, e o histórico (que segue solicitacao_os.preventiva_id)
+// ficava no id antigo -- o Gestor via o ciclo zerar depois de qualquer "Salvar".
+func sincronizarPreventivas(ctx context.Context, repo *repository.Queries, tenantID, maquinaID int64, preventivas []model.PreventivaPayload) error {
+
+	if len(preventivas) == 0 {
+		return fmt.Errorf("%w: a máquina precisa de pelo menos uma manutenção preventiva", helper.ErrValidacao)
+	}
+
+	// Slice vazio e nunca nil: nil vira NULL no pgx, `id = ANY(NULL)` é NULL e o
+	// UPDATE não desativaria nada -- a preventiva removida no formulário ficaria.
+	manter := make([]int64, 0, len(preventivas))
+	for _, p := range preventivas {
+		if p.Id != nil {
+			manter = append(manter, *p.Id)
+		}
+	}
+	// Desativa antes de gravar: a validação de cada item roda de novo abaixo, e
+	// tudo está na transação de quem chama -- erro em qualquer item desfaz isto.
+	if err := repo.DesativarPreventivasForaDaLista(ctx, repository.DesativarPreventivasForaDaListaParams{
+		TenantID:  tenantID,
+		MaquinaID: maquinaID,
+		Manter:    manter,
+	}); err != nil {
+		return helper.TraduzErroPostgres(err)
+	}
+
+	for _, p := range preventivas {
+		descricao, err := validarPreventiva(ctx, repo, tenantID, p)
+		if err != nil {
+			return err
+		}
+		if p.Id == nil {
+			if err := criarPreventivaDaMaquina(ctx, repo, tenantID, maquinaID, descricao, p); err != nil {
+				return err
+			}
+			continue
+		}
+
 		tecnicoID := p.TecnicoId
-		_, err := repo.CriarPreventiva(ctx, repository.CriarPreventivaParams{
+		linhas, err := repo.AtualizarPreventivaDaMaquina(ctx, repository.AtualizarPreventivaDaMaquinaParams{
+			ID:            *p.Id,
 			TenantID:      tenantID,
 			MaquinaID:     maquinaID,
 			Descricao:     descricao,
@@ -117,8 +154,52 @@ func gravarPreventivas(ctx context.Context, repo *repository.Queries, tenantID, 
 		if err != nil {
 			return helper.TraduzErroPostgres(err)
 		}
+		// Id de outra máquina, de outro tenant ou de preventiva já excluída: o
+		// WHERE não casa. Recusa em vez de criar uma nova calada no lugar.
+		if linhas == 0 {
+			return fmt.Errorf("%w: a preventiva %d não pertence a esta máquina", helper.ErrValidacao, *p.Id)
+		}
 	}
 
+	return nil
+}
+
+// validarPreventiva confere um item da lista e devolve a descrição já sem os
+// espaços das pontas. Os CHECKs do banco recusariam parte disto, mas como 422;
+// o valor veio do formulário, então é erro de preenchimento (400).
+func validarPreventiva(ctx context.Context, repo *repository.Queries, tenantID int64, p model.PreventivaPayload) (string, error) {
+	descricao := strings.TrimSpace(p.Descricao)
+	if descricao == "" {
+		return "", fmt.Errorf("%w: a descrição da preventiva não pode ficar em branco", helper.ErrValidacao)
+	}
+	if p.IntervaloDias <= 0 {
+		return "", fmt.Errorf("%w: o intervalo da preventiva deve ser de pelo menos 1 dia", helper.ErrValidacao)
+	}
+	if p.ProximaData == nil || p.ProximaData.IsZero() {
+		return "", fmt.Errorf("%w: informe a próxima data da preventiva", helper.ErrValidacao)
+	}
+	if err := validarTecnicoPreventiva(ctx, repo, tenantID, p.TecnicoId); err != nil {
+		return "", err
+	}
+	return descricao, nil
+}
+
+func criarPreventivaDaMaquina(ctx context.Context, repo *repository.Queries, tenantID, maquinaID int64, descricao string, p model.PreventivaPayload) error {
+	// tecnicoId é ponteiro na query (coluna nullable, migration 000008) mas
+	// nunca nulo aqui: validarTecnicoPreventiva já recusou o zero.
+	tecnicoID := p.TecnicoId
+	_, err := repo.CriarPreventiva(ctx, repository.CriarPreventivaParams{
+		TenantID:      tenantID,
+		MaquinaID:     maquinaID,
+		Descricao:     descricao,
+		IntervaloDias: p.IntervaloDias,
+		ProximaData:   pgtype.Date{Time: p.ProximaData.Time(), Valid: true},
+		Ativa:         p.Ativa,
+		TecnicoID:     &tecnicoID,
+	})
+	if err != nil {
+		return helper.TraduzErroPostgres(err)
+	}
 	return nil
 }
 
@@ -222,6 +303,42 @@ func (s *PreventivaService) ObterPreventiva(ctx context.Context, tenantID, id in
 	}
 
 	return model.MontarPreventiva(repository.ListarPreventivasRow(preventiva)), nil
+}
+
+// HistoricoPreventiva é GET /preventivas/:id/historico: os ciclos que a
+// preventiva já gerou, mais recente primeiro. Quem não alcança a máquina da
+// preventiva recebe ErrNaoEncontrado -- mesmo recorte de ListarPreventivas,
+// e 404 em vez de 403 para não confirmar que o id existe em outro setor.
+func (s *PreventivaService) HistoricoPreventiva(ctx context.Context, tenantID, usuarioID int64, perfil string, id int64) ([]model.CicloPreventiva, error) {
+
+	repo := repository.New(s.Pool)
+
+	if _, err := repo.PreventivaNoEscopo(ctx, repository.PreventivaNoEscopoParams{
+		ID:              id,
+		TenantID:        tenantID,
+		EscopoUsuarioID: escopoDe(usuarioID, perfil),
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, helper.ErrNaoEncontrado
+		}
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	ciclos, err := repo.ListarHistoricoPreventiva(ctx, repository.ListarHistoricoPreventivaParams{
+		TenantID:     tenantID,
+		PreventivaID: &id,
+	})
+	if err != nil {
+		return nil, helper.TraduzErroPostgres(err)
+	}
+
+	// Não-nil: preventiva que ainda não venceu nenhuma vez devolve [], não null.
+	dto := make([]model.CicloPreventiva, 0, len(ciclos))
+	for _, c := range ciclos {
+		dto = append(dto, model.MontarCicloPreventiva(c))
+	}
+
+	return dto, nil
 }
 
 // AtualizarPreventiva é PUT /preventivas/:id. Sem maquina_id: mover a
@@ -426,12 +543,24 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 
 	// Tipo, urgência, aberta_por_id e afeta_producao são literais na query --
 	// ver CriarOrdemServicoDePreventiva para o porquê de cada um.
-	if _, err := repo.CriarOrdemServicoDePreventiva(ctx, repository.CriarOrdemServicoDePreventivaParams{
+	ordem, err := repo.CriarOrdemServicoDePreventiva(ctx, repository.CriarOrdemServicoDePreventivaParams{
 		TenantID:      prev.TenantID,
 		SolicitacaoID: solicitacaoId,
 		TecnicoID:     *prev.TecnicoID,
-	}); err != nil {
+	})
+	if err != nil {
 		return helper.TraduzErroPostgres(err)
+	}
+
+	// Sem autor: ninguém abriu, foi o calendário (ck_os_evento_usuario só
+	// deixa o `aberta` ficar sem usuário).
+	if err := registrarEvento(ctx, repo, prev.TenantID, ordem.ID, repository.TipoEventoOsAberta,
+		nil, nil, statusPtr(repository.StatusOsAberta), map[string]any{
+			"origem":    "preventiva",
+			"tecnicoId": *prev.TecnicoID,
+			"urgencia":  "Baixa",
+		}); err != nil {
+		return err
 	}
 
 	// A query soma o intervalo a partir da proxima_data vencida, não de hoje --
@@ -447,12 +576,12 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 		return fmt.Errorf("erro ao commitar transação: %w", err)
 	}
 
-	s.notificarPreventivaVencida(prev, tecnico.ID)
+	s.notificarPreventivaVencida(prev, tecnico.ID, ordem.ID)
 
 	return nil
 }
 
-// notificarPreventivaVencida avisa o técnico designado por WhatsApp depois
+// notificarPreventivaVencida avisa o técnico designado depois
 // que a OS já commitou -- fora da transação e em goroutine própria, mesmo
 // motivo de SolicitacaoService.notificar: falha de rede não pode atrasar nem
 // derrubar o job (que ainda tem outras N preventivas pra processar no mesmo
@@ -469,36 +598,31 @@ func (s *PreventivaService) abrirSolicitacaoDaPreventiva(ctx context.Context, p 
 // query já explica: "aqui ninguém monta resposta de contrato") -- por isso
 // relê a máquina via ObterMaquinaPorID, fora da transação já fechada, só pra
 // montar o texto da mensagem.
-func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPreventivaVencidaParaAberturaRow, tecnicoId int64) {
+func (s *PreventivaService) notificarPreventivaVencida(p repository.ObterPreventivaVencidaParaAberturaRow, tecnicoId, ordemServicoId int64) {
 
 	if s.Notificador == nil {
 		return
 	}
 
-	go func() {
-		fundo, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		maquina, err := repository.New(s.Pool).ObterMaquinaPorID(fundo, repository.ObterMaquinaPorIDParams{
+	emSegundoPlano("notificar preventiva vencida", func(ctx context.Context) error {
+		maquina, err := repository.New(s.Pool).ObterMaquinaPorID(ctx, repository.ObterMaquinaPorIDParams{
 			ID: p.MaquinaID, TenantID: p.TenantID,
 		})
 		if err != nil {
-			slog.ErrorContext(fundo, "notificar preventiva: obter máquina", "preventiva", p.ID, "maquina", p.MaquinaID, "tenant", p.TenantID, "err", err)
-			return
+			return fmt.Errorf("obter máquina %d: %w", p.MaquinaID, err)
 		}
 
 		dados := DadosNotificacao{
-			Alvo:      maquina.Nome + " · " + maquina.NumeroPatrimonio,
-			Descricao: p.Descricao,
-			LojaNome:  maquina.LojaNome,
-			SetorNome: maquina.SetorNome,
+			Alvo:           maquina.Nome + " · " + maquina.NumeroPatrimonio,
+			Descricao:      p.Descricao,
+			LojaNome:       maquina.LojaNome,
+			SetorNome:      maquina.SetorNome,
+			OrdemServicoId: ordemServicoId,
 			// SolicitanteNome fica nil de propósito: preventiva não tem
 			// solicitante (ck_origem proíbe), e é o que o template usa pra
 			// diferenciar as origens.
 		}
 
-		if err := s.Notificador.NotificarOSPreventiva(fundo, p.TenantID, tecnicoId, dados); err != nil {
-			slog.ErrorContext(fundo, "notificar preventiva", "preventiva", p.ID, "tenant", p.TenantID, "err", err)
-		}
-	}()
+		return s.Notificador.NotificarOSPreventiva(ctx, p.TenantID, tecnicoId, dados)
+	}, "preventiva", p.ID, "tenant", p.TenantID)
 }

@@ -97,11 +97,10 @@ nenhuma. Sem hora lançada o agregado é **zero** em maquinário (a coluna exist
   quantas vezes o Administrador clicasse em salvar. Violação vira **409**, e o `case` de
   `ErrDadoDuplicado` no `switch` de `Custo` foi adicionado junto — até a `000011` esta
   rota era um `UPDATE` 1:1, sem como colidir, e sem esse ramo o Administrador levava 500.
-- ⚠️ **Isso amplia o ponto 2 da seção 6 da modelagem** ("histórico de lançamento de
-  custo"): antes o Administrador sobrescrevia um número, agora substitui a itemização
-  inteira que o Técnico escreveu. Há um marcador `ponytail:` em `CorrigirCusto` apontando
-  para cá. O caminho, quando doer, é `os_custo_historico` em append-only — não um merge
-  incremental.
+- ⚠️ A correção do Administrador **substitui** a itemização inteira que o Técnico escreveu
+  (ponto 2 da seção 6 da modelagem), mas o que ele lançou **não se perde mais**: está no evento
+  `encerrada` de `os_evento`, e cada correção grava o seu `custo_corrigido` (ver "Linha do
+  tempo da OS" abaixo).
 
 `AtualizarCusto` grava `os_custo.custo_revisado_em = now()` de quebra: toda passagem do
 Administrador por aqui É a conferência. `GET /ordens-servico` projeta a coluna como
@@ -115,15 +114,14 @@ nasce da aprovação do Gestor, nunca de um `POST /ordens-servico`) e a **leitur
 mesmo de essas linhas existirem.
 
 Prontos e testados, fora da lista: os **indicadores de máquina**, o **job de preventiva
-vencida** (falta só o Cron Job no Railway), a **notificação por WhatsApp** (falta só o
-chip dedicado) — cada um com seção própria abaixo — e a **recuperação de senha por
+vencida** (falta só o Cron Job no Railway) — cada um com seção própria abaixo — e a **recuperação de senha por
 e-mail** (migration `000013`; falta só `RESEND_API_KEY`/`URL_FRONTEND_FORMATO` em produção
 e o domínio verificado no Resend — ver "Recuperação de senha" em `docs/api-e-rotas.md`).
 
 **O que ainda não existe, de propósito ou por falta de pedido:** `GET /tecnicos/:id` (o
 front não chama), aviso ao Técnico quando o **Gestor** abre uma OS para ele (só a OS de
-preventiva avisa), histórico de lançamento de custo e `os_evento` (pontos 2 e 4 da seção 6
-da modelagem), revogação de token (`token_version`, ver "Revogação" em
+preventiva avisa), reatribuir o Técnico de uma OS (ponto 7 da seção 6 da modelagem; a
+auditoria que ele pedia já existe, ver "Linha do tempo" abaixo), revogação de token (`token_version`, ver "Revogação" em
 `docs/api-e-rotas.md`) e rotação de backup antigo no R2.
 
 Listagem nova que precise recortar por escopo usa `atorDaRota` no controller +
@@ -176,8 +174,13 @@ real antes de seguir pra próxima (histórico: PR #11, `radaptech/sistema-OSm--B
 Um endpoint para os **três** painéis; o que muda é o filtro que cada um manda:
 Gestor sem filtro (abas "OS em Andamento"/"OS Finalizadas"), Técnico `?tecnicoId=`,
 Administrador `?status=Concluída` (Custos Pendentes) e `?finalizada=true` (OS
-Finalizadas). Array simples, sem paginação — `?pagina=` é aceito e **ignorado**, o front
-pagina no cliente (mesmo padrão de `/solicitacoes`, `/maquinas`, `/preventivas`).
+Finalizadas). Array simples por padrão; com `?pagina=` vira `RespostaPaginada` de 12 (o histórico do Administrador e a
+aba OS Finalizadas do Gestor). Para essa aba existem ainda `GET /ordens-servico/resumo` (contagem por
+loja/setor, mesmos filtros e mesmo escopo — a soma é o `total` da lista, e há teste trancando isso) e
+`GET /ordens-servico/:id` (uma OS no escopo, para o link de notificação). Os **filtros avançados** do
+Gestor foram para o `WHERE`: `?maquina=` (nome ou patrimônio), `?dataInicio=`/`?dataFim=` (dia de
+abertura, fuso de São Paulo), `?valorMinimo=`/`?valorMaximo=` (custo total lançado; OS sem custo não
+combina). `?busca=` passou a olhar também o patrimônio.
 
 Por cima disso as telas estreitam com `?busca=`, `?tipo=`, `?lojaId=` e `?setorId=`,
 todos opcionais e cumulativos. **`?setorId=` recorta pelo setor da SOLICITAÇÃO de
@@ -215,7 +218,7 @@ OS é da solicitação, não de um lugar.
   As quatro são NULL em estado legítimo: `horas_*` só existem em OS encerrada
   (`vw_os_horas` é INNER em `os_encerramento`), `horas_parada` some também quando
   `afeta_producao` é falsa (o front exibe "Não se aplica", que **não** é zero), e
-  `custo_hora_tecnico` é nulo por regra em reparo e terceiros (`ck_custo_por_tipo`).
+  `custo_hora_tecnico` é nulo em reparos anteriores à `000017` (até ali `ck_custo_por_tipo` o proibia). Hoje todo tipo de OS lança, por tarefa, Valor Peças (`custo_manutencao`) e Valor Mão de Obra (`custo_hora_tecnico`); em terceiros (`000016`) a mão de obra é da EMPRESA.
 - ⚠️ **O override de `numeric` no `sqlc.yaml` nunca casou nada** — o `db_type` correto é
   `pg_catalog.numeric`, não `numeric`. É por isso que `shopspring/decimal` não está no
   `go.mod` e `models.go` seguia com `pgtype.Numeric`. Nunca doeu porque nenhuma query
@@ -268,8 +271,10 @@ OS é da solicitação, não de um lugar.
 
 O Painel de Indicadores do Gestor (`DashboardGestor`, a ação rápida "Indicadores"):
 Horas Parada, MTTR, MTBF e Custo Total da máquina, mais a rosca de paradas por tipo de
-defeito e as barras de custo mensal dos últimos 6 meses. Tudo sai do histórico de OS
+defeito e as barras de custo mensal dos últimos 12 meses. Tudo sai do histórico de OS
 **encerradas** daquela máquina — `ListarHistoricoOsDaMaquina`, uma linha por OS.
+Cada item de `porMes` repete as mesmas grandezas (`ResumoIndicadores`) calculadas só
+com as OS encerradas naquele mês: o painel troca os cards e a rosca pelo mês clicado.
 
 **Não responde mais só zeros** desde que o ciclo de vida da OS ficou completo
 (`/encerrar` grava `os_encerramento`/`os_custo`, `/custo` corrige o segundo depois) — os
@@ -277,6 +282,60 @@ números aparecem sozinhos a partir da primeira OS encerrada de cada máquina, s
 aqui. Ficou pronto e testado contra linhas inseridas na mão ANTES disso existir, e
 continua valendo: nada nesta seção mudou com o ciclo de vida, só passou a ter dado de
 verdade por trás.
+
+**Por loja (`GET /indicadores/lojas/:id`, feito):** a tela da loja no mesmo painel —
+o total, um item por setor e um por máquina (`IndicadoresLoja`), cada um com o próprio
+`porMes`, porque o mês clicado no gráfico da loja filtra todos os cards da tela. Sai de
+`ListarHistoricoOsDaLoja` (a mesma linha por OS, com `maquina_id`/`setor_id`, e o EXISTS
+de escopo de `ListarMaquinas`) e de `ListarMaquinas` (para toda máquina/setor ganhar
+card, zerado quando não tem OS). Os dois recortes usam o MESMO `resumir`
+(`MontarIndicadoresLoja`): o total da loja tem que bater com a soma do que a tela mostra.
+- ⚠️ **A OS de preventiva fica FORA do MTBF e do MTTR** (`origem = 'preventiva'`, corrigido em 15/10/2026).
+  Os dois medem falha e conserto, e a revisão programada não é nenhum dos dois: contada, o MTBF encolhia a
+  cada revisão (a máquina "falhava" mais só por receber manutenção em dia) e o MTTR era puxado pelo tempo de
+  uma revisão curta -- o indicador punia quem fazia a manutenção em dia. **Desde 17/10/2026 ela sai também
+  das horas, da rosca, do custo e da contagem do maquinário** -- vai para a faixa própria (próximo item). O corte está em
+  `resumir`/`mtbf` (`model/indicadorMaquina.go`), alimentado por `s.origem` nas duas queries de histórico;
+  vale no total, no recorte por mês, por setor e por loja (mesmo `resumir`). A OS direta continua entrando:
+  é o Gestor abrindo conserto sem fila. Pequeno reparo (sem máquina) segue fora dos indicadores de máquina.
+  Testes: `indicadorMaquina_test.go` e `indicadorPreventivaIntegracao_test.go`.
+- **Pequenos reparos têm custo próprio, SEPARADO do maquinário** (15/10/2026). O reparo não tem máquina, então
+  continua fora dos indicadores por máquina, do MTBF, do MTTR e das horas; mas o custo dele aparece na tela da
+  loja (`GET /indicadores/lojas/:id`) em campos próprios, `quantidadeReparos` e `custoReparos`, no total da loja,
+  em cada setor e em cada mês (`porMes`). **`custoTotal` e `quantidadeOs` continuam sendo só do maquinário**:
+  o Gestor vê os dois lado a lado e nunca somados num número só. Vêm de `ListarHistoricoReparosDaLoja`: reparo
+  é a solicitação sem máquina (`maquina_id IS NULL`), então um reparo que o Técnico terceirizou continua
+  reparo; o setor é o da solicitação; o escopo do Gestor vale (EXISTS sobre o setor). Um setor que só teve
+  reparo (sem máquina cadastrada) ganha card, para explicar o custo que está no total. Nas máquinas os dois
+  campos vêm zerados. Testes: `indicadorMaquina_test.go` e `indicadorReparosIntegracao_test.go`.
+- **Manutenções preventivas têm custo próprio, SEPARADO do maquinário, igual aos reparos** (17/10/2026, pedido
+  do Gestor). A OS de preventiva (`origem = 'preventiva'`) soma só em `quantidadePreventivas`/`custoPreventivas`,
+  no total da loja, em cada setor, em cada mês **e na máquina** (diferente do reparo, ela tem máquina; vem também
+  em `GET /indicadores/maquinas/:id`). `custoTotal`, `quantidadeOs`, horas paradas e a rosca passam a ser só do
+  que quebrou. O corte é o mesmo `continue` do reparo em `resumir`. Testes: `indicadorMaquina_test.go`
+  (`TestIndicadoresLojaPreventivasSaemSeparadas`) e `indicadorPreventivaIntegracao_test.go`.
+  **A lista por trás de cada card:** `GET /indicadores/lojas/:id/ordens?grupo=maquinario|reparos|preventivas`
+  (`ListarOrdensMaquinarioEncerradasDaLoja` / `ListarReparosEncerradosDaLoja`) devolve as OS encerradas que
+  compõem o número, paginadas (12), mais novas primeiro, com item (a máquina ou o que o Solicitante digitou),
+  patrimônio, origem, setor, técnico, data de encerramento e custo. **Maquinário e preventivas saem da mesma
+  query**, separados por `preventiva` (a origem): o maquinário NÃO traz mais a preventiva. Os dois aceitam
+  `?maquinaId=` (a tela da máquina individual usa); o filtro de máquina é recusado em reparos (400). Os dois aceitam `?setorId=` e `?mes=MM/AAAA` (o rótulo do
+  gráfico; o **mês de encerramento**, em São Paulo — não o da abertura, senão a lista e a barra discordariam).
+  Mesma definição e mesmo escopo do painel (loja fora do escopo é 404; só máquina ativa; setor ATUAL da máquina),
+  então **a soma dos itens é o `custoTotal` / `custoPreventivas` / `custoReparos` do card** (há teste dos três). É endpoint próprio e
+  não `GET /ordens-servico` porque o reparo terceirizado vira `tipo = 'terceiros'` e ficaria de fora, e porque
+  aquela listagem filtra o mês pela abertura e define "finalizada" (encerrada **e com custo lançado**) de outro
+  jeito que o painel (encerrada). A aba **OS Finalizadas** do Gestor continua sendo a ferramenta operacional
+  (buscar, imprimir, filtrar por período e valor); a lista do painel é para explicar o número.
+- **MTBF de grupo só mede entre OS da mesma máquina** (`mtbf` agrupa por `maquinaId`):
+  entre OS consecutivas do setor ele mediria o espaçamento entre falhas de máquinas
+  diferentes, que encolhe a cada máquina cadastrada sem nenhuma quebrar mais. Para uma
+  máquina só, é a conta de antes. MTTR e custo/horas são médias e somas diretas.
+- **Loja fora do escopo é 404** (checado contra `usuario_escopo` antes das listas), pelo
+  mesmo motivo da rota de máquina; o gestor com só alguns setores da loja recebe a loja
+  como a soma desses setores — o `WHERE` recorta, não o front.
+- `quantidadeOs` faz parte de `ResumoIndicadores` (total e cada mês): é o "em N OS" dos
+  cards da loja.
 
 - **A agregação é em Go, não no `SELECT`** (`MontarIndicadoresMaquina`, em
   `internal/model/indicadorMaquina.go`). Seis grandezas seriam três `GROUP BY` numa
@@ -309,78 +368,115 @@ verdade por trás.
   que lê é histórico de OS. A URL é `/indicadores/...` e não `/maquinas/:id/indicadores`
   porque é a que o front já chama.
 - Testado: `internal/model/indicadorMaquina_test.go` (a matemática, sem banco: MTTR
-  ignorando nulo, MTBF precisando de duas OS, corte de 6 meses com meses fora de ordem) e
+  ignorando nulo, MTBF precisando de duas OS, corte de 12 meses com meses fora de ordem) e
   `internal/service/indicadorIntegracao_test.go` (a query contra Postgres: OS aberta não
   entra, os dois relógios, o mês em BRT, escopo → 404, administrador sem escopo).
 
-## Notificação de solicitação por WhatsApp (feito — infra, código e wiring; falta o chip)
+## Linha do tempo da OS (`os_evento`, migration `000021`, feito)
 
-Gestor não fica com o app aberto o tempo todo — o sistema avisa por WhatsApp sempre que
-uma Solicitação humana nasce `Pendente` (as duas criações do Solicitante), pro Gestor
-saber sem precisar checar o painel. Desde a `000008` a preventiva vencida não passa mais
-pelo Gestor, e quem recebe o aviso é o **Técnico** designado (`NotificarOSPreventiva`, ver
-a seção do job). A OS aberta pelo Gestor (`AbrirOS`) ainda **não** avisa o Técnico.
+Responde "quem fez, e quando" para cada passo da OS — e preserva o que a correção de custo
+apagaria. `GET /ordens-servico/:id/historico` devolve os eventos do mais antigo ao mais novo.
 
-**Decisão: Evolution API self-hosted, não a Cloud API oficial da Meta.** Não é o caminho
-"correto" — é WhatsApp Web por baixo (lib Baileys, engenharia reversa), viola os termos
-do WhatsApp e o número pode ser banido. Mas pro volume daqui (poucas mensagens por dia,
-pra 2-3 destinatários fixos que reconhecem o remetente) o risco na prática é baixo — é o
-oposto do padrão que costuma levar a ban (rajada, destinatário que não reconhece,
-conteúdo de marketing). Ganho real: zero aprovação de template pela Meta (a oficial
-exige, e leva dias, pra toda mensagem business-initiated fora da janela de 24h), texto
-livre, e roda no mesmo Docker Compose que já existe — custo marginal zero, em vez de
-mensalidade de um provedor gerenciado (Z-API e primos, ~R$60-100/mês fixos) ou do
-por-mensagem da oficial (~R$0,035/mensagem, categoria *utility*).
+- **Um evento por passo, na transação do passo** (`registrarEvento`, `ordemServicoEvento.go`):
+  `aberta` (em `criarOrdemServico`, então vale para abrir-os e direta, e no job de preventiva),
+  `iniciada`, `pausada` (`detalhes.motivo`), `retomada`, `terceiro_acionado` (id **e nome** da
+  empresa, que pode ser renomeada depois), `encerrada` e `custo_corrigido`. Passo recusado não
+  deixa evento: ele commita junto com a mudança de estado ou nenhum dos dois.
+- **Dinheiro: guarda o estado DEPOIS do passo.** `encerrada` e `custo_corrigido` levam em
+  `detalhes` o custo inteiro (itens, notas, totais, `temNotaFiscal`). A versão anterior de uma
+  correção é o evento anterior, então o lançamento original do Técnico — que `CorrigirCusto`
+  apaga de `os_custo_item`/`os_nota_fiscal` — fica no `encerrada`, sem um evento extra "de
+  lançamento". A tela calcula o "de → para" comparando snapshots consecutivos.
+- **Append-only de verdade:** `trg_os_evento_imutavel` recusa `UPDATE`. `DELETE` fica livre só
+  porque `ExcluirMaquinaDefinitivo` apaga a máquina com todo o histórico (`os_evento` entrou na
+  CTE, antes de `os_custo_item`).
+- **`usuario_id` nulo só em `aberta`** da OS de preventiva — ninguém abriu, foi o calendário
+  (`ck_os_evento_usuario`, mesmo critério de `aberta_por_id`).
+- **Quem lê:** gestor (escopo no `WHERE`, sobre o setor da solicitação), administrador e o
+  técnico dono. Fora do alcance é 404, como OS inexistente. **Solicitante não lê**: acompanha o
+  pedido, não a execução. A checagem é `ObterOrdemServicoNoEscopo`, query à parte.
+- **Retroativo:** a migration reconstituiu eventos das OS existentes e os marcou
+  `detalhes.retroativo = true`. Abertura e encerramento têm autor gravado; iniciada, pausa,
+  retomada e terceiro usam o técnico da OS — **autoria presumida**, e a tela escreve isso.
+  Correções de custo antigas não foram inventadas.
+- **Não substitui `os_pausa`:** as horas continuam saindo de `vw_os_horas`. Se um dia a
+  reatribuição de técnico existir (ponto 7 da modelagem), é um tipo novo de evento.
+- Testado: `ordemServicoEventoIntegracao_test.go` (ordem e autor de cada passo, o lançamento
+  do Técnico sobrevivendo à correção, motivo e nome da empresa, escopo dos 6 perfis, recusa sem
+  evento, append-only, abertura sem autor), mais a checagem da abertura em
+  `preventivaJobIntegracao_test.go` e `solicitacaoDiretaIntegracao_test.go`.
 
-**Requer número dedicado, nunca o do Gestor.** Quem fica banível é o número que
-autentica no Evolution API via QR (como um WhatsApp Web comum) — um chip pré-pago
-qualquer, comprado só pra isso, com WhatsApp Business instalado. O número do Gestor é só
-destinatário, nunca entra em risco.
+## Notificações (central no app + Web Push)
 
-**Infra** (`../docker-compose.yml`, repo `sistema-os-infra`, PR #1): três serviços —
-`evolution-postgres` + `evolution-redis` (estado da sessão do WhatsApp, banco e cache
-PRÓPRIOS, separados do banco da aplicação) e `evolution-api`
-(`evoapicloud/evolution-api:v2.3.7`, porta `8092` no host). Testada de ponta a ponta:
-instância criada, QR de pareamento obtido (PNG em base64 real), estado `connecting`
-sobrevivendo a um restart do container (prova que é o Postgres persistindo, não
-memória).
+**O WhatsApp saiu em 13/10/2026.** A notificação existiu via Evolution API self-hosted
+(WhatsApp Web por baixo, número dedicado banível, nunca chegou a ter o chip pareado em
+produção). Saiu por não escalar: um número só pra todos os tenants, risco de ban
+derrubando todo mundo junto, mensagem sem ação (o destinatário ainda tinha que abrir o
+sistema e achar a OS) e nenhum registro do que foi visto. O substituto é o próprio app
+como **PWA**: central de notificações dentro do sistema + Web Push no celular/desktop.
 
-**Código** (`radaptech/sistema-OSm--Back-end`, PRs #11/#14):
-- `ObterGestoresDoSetor` (`usuario.sql`) — dado um `setor_id`, todo gestor cujo escopo
-  alcança ele (mesmo `EXISTS` de `ListarSolicitacoes`), ativo, com telefone. Sem
-  telefone/desativado/administrador não aparece — não é erro, é degrade silencioso.
-- `NotificacaoService` (`notificacaoService.go`) — cliente HTTP da Evolution API
-  (`POST /message/sendText/{instancia}`, **path confirmado testando contra a instância
-  real** — a documentação pública erra, descreve o inverso). `NotificadorInterface` é o
-  que `SolicitacaoService`/`PreventivaService` dependem, nunca a struct concreta.
-  `normalizarTelefone` existe porque `usuario.telefone` é texto livre sem máscara em
-  lugar nenhum do sistema. Falha em um gestor não impede os outros (`errors.Join`, mesmo
-  espírito do job de preventiva vencida).
-- `SolicitacaoService`/`PreventivaService` ganharam um campo público
-  `Notificador NotificadorInterface` (não parâmetro de construtor — mudar a assinatura
-  quebraria todo teste que já chama `NewRepoX(pool)` direto). `nil` (o zero value, o que
-  todo teste existente continua recebendo) significa "não notifica". Plugado nos 3
-  pontos que criam uma solicitação (as duas humanas avisam o Gestor; a de preventiva, o
-  Técnico), sempre em goroutine com
-  `context.Background()` + timeout de 15s (nunca o `ctx` da request, que morre quando a
-  resposta é escrita): `CadastrarSolicitacaoMaquinario`, `CadastrarSolicitacaoReparo`
-  (`Alvo` sai de `alvoDaSolicitacao`) e `abrirSolicitacaoDaPreventiva` (relê a máquina
-  via `ObterMaquinaPorID` depois do commit, porque `ListarPreventivasVencidasRow` não
-  carrega os nomes).
-- `router.go` conecta o `NotificacaoService` real; lê `EVOLUTION_API_URL`/`_API_KEY`/
-  `_INSTANCE_NAME` do `.env` (ver `.env-example`).
+**Central de notificações (feita, migration `000018`).** Notificar é gravar **uma linha
+por destinatário** em `notificacao` — "lida" é de cada um, e é o que o sininho e o badge
+do ícone contam. `titulo`/`corpo` são o texto pronto do momento do evento (não remontados
+na leitura) e `url` é o destino do clique (o painel abre o modal daquele item). Rotas em
+`docs/api-e-rotas.md`.
 
-**Testado em 3 camadas, a última contra a Evolution API real**: puros
-(`montarTexto`/`normalizarTelefone`), `NotificacaoService` de integração contra Postgres
-+ Evolution API real, e o wiring com um fake que grava o que recebeu
-(`notificacaoWiringIntegracao_test.go`) — mais um smoke real+real (rodado e removido,
-não ficou no repo) que confirmou `CadastrarSolicitacaoMaquinario` voltando em ~12ms
-(assíncrono de verdade) com o log da falha esperada (WhatsApp não pareado) aparecendo
-~3s depois.
+| evento | onde dispara | quem recebe | `tipo` | `url` |
+|---|---|---|---|---|
+| solicitação nova (do Solicitante) | `CadastrarSolicitacaoMaquinario`/`Reparo` | gestores do setor¹ | `solicitacao_nova` | `/painel-gestor?solicitacao=N` |
+| gestor aceitou (abriu a OS da fila) | `AbrirOS` | o Solicitante | `solicitacao_aceita` | `/minhas-solicitacoes?solicitacao=N` |
+| gestor rejeitou | `Rejeitar` | o Solicitante (com o motivo) | `solicitacao_rejeitada` | `/minhas-solicitacoes?solicitacao=N` |
+| gestor abriu OS (da fila ou direta) | `AbrirOS`, `CadastrarSolicitacaoDireta` | o Técnico designado | `os_aberta` | `/painel-tecnico?os=N` |
+| preventiva vencida (job) | `abrirSolicitacaoDaPreventiva` | o Técnico da preventiva | `os_preventiva` | `/painel-tecnico?os=N` |
+| técnico encerrou a OS (qualquer origem) | `OrdemServicoService.Encerrar` | gestores do setor¹ | `os_concluida` | `/painel-gestor?os=N` |
 
-**O que falta**: só o chip — comprar, instalar WhatsApp Business, escanear o QR
-(`POST /instance/connect/sistema-os-notificacoes` contra a Evolution API). Nenhum código
-pendente.
+¹ todo gestor ativo cujo escopo alcança o setor (`ObterGestoresDoSetor`). Administrador
+não recebe — não tem escopo, e o painel dele não é de acompanhamento do dia a dia.
+
+**Não notificam, de propósito:** iniciar, pausar, retomar e acionar terceiro (aviso a cada
+passo da execução vira ruído e ninguém lê mais nenhum); a direta não avisa gestor nem
+"aceita" (quem pediu é o próprio gestor); o `AbrirOS` avisa o Técnico **antes** do
+Solicitante, na mesma goroutine — o técnico é quem tem trabalho a fazer.
+
+**Como está montado:**
+- `NotificadorInterface` (um método por evento) + `DadosNotificacao` é o que
+  `SolicitacaoService`/`PreventivaService`/`OrdemServicoService` conhecem; `NotificacaoService` (`notificacaoService.go`) é a
+  implementação e também o service das rotas. Todo envio passa por `entregar` — é ali
+  que o Web Push entra, **depois** da gravação: o push é só o aviso, a notificação de
+  verdade é a linha, que o sininho mostra mesmo se o push nunca chegar.
+- O campo público `Notificador` nos três services (não parâmetro de construtor — mudar
+  a assinatura quebraria todo teste que chama `NewRepoX(pool)` direto; `nil` = não
+  notifica), chamado sempre **depois** do commit via `emSegundoPlano` (goroutine com
+  `context.Background()` + timeout de 15s — nunca o `ctx` da request, que morre quando a
+  resposta é escrita; falha só vai pro log). `Alvo` sai de `alvoDaSolicitacao`/`alvoDaOS`;
+  nos eventos de OS, `dadosDaOS` monta tudo da própria resposta da rota, sem query a
+  mais (por isso `criarOrdemServico` passou a preencher `tecnicoNome` na resposta do
+  abrir-os — o técnico já era lido pra validar).
+- `ObterGestoresDoSetor` não filtra mais por telefone (era critério do WhatsApp).
+
+**Web Push (migration `000019`).** O aparelho se inscreve
+(`POST /push/inscricoes`, a `PushSubscription` do navegador) e vira uma linha em
+`dispositivo_push`. `entregar` grava as notificações e, **depois**, manda um push cifrado pra
+cada aparelho dos destinatários (`enviarPush`), com `MensagemPush` = `{ id, tipo, titulo,
+corpo, url, naoLidas }` — o `id` é da notificação daquele usuário (o service worker marca como
+lida no toque) e `naoLidas` já conta esta (vira o número no ícone). O lado do navegador
+(botão "Ativar" no sininho, `sw.js`, logout desinscrevendo) está em
+`../sistema-OSm--Front-end/CLAUDE.md`, "Web Push".
+- **Urgência**: `solicitacao_nova`, `os_aberta` e `os_preventiva` vão `Urgency: high` (pedem
+  ação; é o que faz o Android entregar em economia de bateria); aceita/rejeitada/concluída,
+  `normal`. **TTL de 24h**: aparelho desligado mais que isso perde o push, não a notificação.
+- **Inscrição morta** (serviço de push responde 404/410: desinstalou, revogou permissão,
+  limpou o navegador) é apagada na hora. Outras falhas vão pro log e não param os outros
+  aparelhos.
+- ⚠️ **SSRF**: o endpoint é uma URL que o cliente manda e o servidor chama. Só passa host dos
+  serviços de push dos navegadores (`hostsPush` em `pushService.go`: FCM, Mozilla, Apple,
+  Windows), sem porta, sem userinfo, `https`; checado ao salvar **e** ao enviar, e o client
+  HTTP **não segue redirect**. Navegador com outro serviço de push entra na lista.
+- **Chaves VAPID**: `VAPID_PUBLIC_KEY`/`_PRIVATE_KEY`/`_SUBJECT` (`make chaves-vapid`). Sem
+  elas `NewWebPush` devolve nil, o router loga "Web Push desligado" e o sininho segue
+  funcionando sozinho. Trocar o par invalida toda inscrição existente.
+- ⚠️ A tabela só cresce. Não há limpeza ainda; se pesar, um job apagando lidas com mais
+  de N dias resolve (a paginação e o índice parcial de não lidas já seguram a leitura).
 
 ## OS direta — Gestor/Administrador abre sem fila (`POST /solicitacoes/direta`, feito)
 
@@ -392,8 +488,9 @@ a solicitação com `origem = 'direta'` e status `Convertida`, `solicitante_id` 
 - **Origem própria (migration `000014`) por causa da foto.** `fn_check_solicitacao_tem_foto`
   cobra anexo de `origem = 'solicitante'`; a foto existe para o Gestor avaliar antes de
   aprovar, e aqui quem abre é quem aprovaria. Sem foto, corpo JSON (sem multipart).
-- **Sem WhatsApp**: a direta não chama `notificar` — avisar o gestor do que ele mesmo abriu
-  é ruído. Aviso ao Técnico continua não existindo (igual ao abrir-os da fila).
+- **Avisa só o Técnico**: a direta não chama `notificar` nem avisa "aceita" — avisar o
+  gestor do que ele mesmo abriu é ruído. O Técnico recebe `os_aberta`, igual ao abrir-os
+  da fila (ver "Notificações").
 - **Corpo**: `tipo` (`maquinario`/`reparo`), `maquinaId` (maquinário — o setor sai da
   máquina) ou `item` + `setorId` (reparo), `descricao`, `impactos` (só maquinário),
   `urgencia`, `tecnicoId`. Técnico é obrigatório. Resposta é a `OrdemServico`, igual ao
@@ -422,6 +519,7 @@ segunda aprovação a cada ciclo não decidia nada, só atrasava. O Gestor conti
 tudo pelas abas de **OS em Andamento** e **Manutenção Prev.**; ele só perdeu o passo de
 clicar em "Abrir OS".
 
+- **`GET /ordens-servico` devolve `origem`** (`solicitante`/`direta`/`preventiva`, de `solicitacao_os.origem`): é o que as telas usam para marcar a OS de preventiva em âmbar, em vez de deduzir pela ausência de solicitante. A resposta do abrir-os e da OS direta também a traz.
 - **A solicitação continua existindo, e isso não é cerimônia.** `horas_parada` é medida
   desde `solicitacao_os.criado_em` (`vw_os_horas`), `uq_os_solicitacao` exige uma
   solicitação por OS, e o card do Técnico busca a origem para mostrar o problema. Tirá-la
@@ -455,7 +553,7 @@ e `make preventivas-vencidas`. Falta **só** criar o Cron Job no Railway.
 
 Desde a fase de notificação (ver seção própria acima), `abrirSolicitacaoDaPreventiva`
 também chama `notificarPreventivaVencida` no fim — mesmo `Notificador` opcional de
-`SolicitacaoService`, mesmo motivo de rodar em goroutine (uma preventiva com WhatsApp
+`SolicitacaoService`, mesmo motivo de rodar em goroutine (uma preventiva com envio
 lento não pode atrasar as outras 200 no mesmo laço). ⚠️ **Quem recebe é o técnico
 designado, não os gestores do setor** (`NotificarOSPreventiva`): a OS já nasce atribuída,
 então o Gestor não tem ação pendente e a mensagem seria ruído diário — o caminho mais
@@ -499,8 +597,12 @@ curto para ninguém mais ler a notificação de solicitação de verdade.
 - **Configurar o Cron Job no Railway** (o que falta): mesmo repo, **Dockerfile Path
   `dockerfile`** (produção, não o `.dev`), **Custom Start Command `./main
   preventivas-vencidas`** — o comando inteiro, mesma armadilha do Cron-BACKUP (ver "Backup
-  do banco"). Variáveis: só as `DB_*` + `DB_SSLMODE`; **não precisa das `R2_*` nem da
-  `JWT_SECRET`**. Frequência: 1×/dia de manhã (`0 9 * * *` UTC = 06:00 BRT) — preventiva
+  do banco"). Variáveis: as `DB_*` + `DB_SSLMODE`; **não precisa das `R2_*`**. **Mais `VAPID_PUBLIC_KEY`/`_PRIVATE_KEY`/`_SUBJECT`, as mesmas da API**, se quiser que o aviso
+  chegue também como push no celular: sem elas o job grava a notificação (o sininho) e só não manda o push.
+  ⚠️ O job é um processo à parte da API e **monta o próprio notificador**
+  (`NewNotificacaoDoAmbiente`, também usado pelo router) e espera os avisos terminarem
+  (`AguardarAvisos`) antes de sair. Antes de 15/10/2026 ele não ligava o `Notificador` e abria a OS sem
+  avisar o técnico, e sem a espera o processo morria antes de a goroutine gravar a notificação. Frequência: 1×/dia de manhã (`0 9 * * *` UTC = 06:00 BRT) — preventiva
   vence no dia, não na hora, e rodar mais vezes não duplica nada, só não adianta.
 - O job **não roda migrations**: quem faz isso é o boot da API. O container do cron sobe o
   mesmo binário contra o mesmo banco já migrado.

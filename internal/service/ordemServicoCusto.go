@@ -73,13 +73,6 @@ func gravarItensDeCusto(
 			return agregados, fmt.Errorf("%w: a descrição do custo não pode ficar em branco", helper.ErrValidacao)
 		}
 
-		// ck_custo_item_hora_tecnico espelhado aqui, mesma razão de sempre: sem
-		// isto o CHECK do banco ainda barra, mas com mensagem genérica em vez de
-		// dizer qual campo está errado.
-		if item.CustoHoraTecnico != nil && tipo != repository.TipoOsMaquinario {
-			return agregados, fmt.Errorf("%w: custo hora do técnico só existe em OS de maquinário", helper.ErrValidacao)
-		}
-
 		var horaTecnico pgtype.Float8
 		if item.CustoHoraTecnico != nil {
 			horaTecnico = pgtype.Float8{Float64: *item.CustoHoraTecnico, Valid: true}
@@ -101,20 +94,18 @@ func gravarItensDeCusto(
 
 	agregados.Manutencao = totalManutencao
 
-	// Em maquinário a coluna existe sempre, mesmo somando zero: uma OS sem mão
-	// de obra cobrada é conserto de graça, não ausência de informação, e é o
-	// mesmo sentido que custo_hora_tecnico já tinha quando era um campo escalar
-	// obrigatório. Fora de maquinário fica Invalid (NULL), que é o que
-	// ck_custo_por_tipo exige -- ver a nota em CriarCusto.
+	// A coluna existe sempre, mesmo somando zero: uma OS sem mão de obra
+	// cobrada é conserto de graça, não ausência de informação, e é o mesmo
+	// sentido que custo_hora_tecnico já tinha quando era um campo escalar
+	// obrigatório. Em terceiros ela é a mão de obra da empresa (000016); desde
+	// a 000017 reparo também cobra.
 	//
 	// ⚠️ Não existe mais "maquinário exige hora técnica". A regra vinha de o
 	// campo ser um escalar obrigatório; com uma linha por TAREFA ela obrigava o
 	// Técnico a inventar uma tarefa só para carregar a mão de obra quando a OS
 	// tinha duas peças e nenhuma hora a cobrar. Zero diz a mesma coisa sem
 	// mentir sobre o que foi feito.
-	if tipo == repository.TipoOsMaquinario {
-		agregados.HoraTecnico = pgtype.Float8{Float64: totalHoraTecnico, Valid: true}
-	}
+	agregados.HoraTecnico = pgtype.Float8{Float64: totalHoraTecnico, Valid: true}
 
 	return agregados, nil
 }

@@ -112,7 +112,7 @@ func TestEmpresaTerceirizadaMapeiaErroParaStatus(t *testing.T) {
 	for _, c := range casos {
 		t.Run(c.nome, func(t *testing.T) {
 
-			ctrl := NewEmpresaTerceirizadaController(terceirizadaFake{err: c.err})
+			ctrl := NewEmpresaTerceirizadaController(terceirizadaFake{err: c.err}, "")
 
 			var w *httptest.ResponseRecorder
 			var ctx *gin.Context
@@ -157,7 +157,7 @@ func TestEmpresaTerceirizadaCorpo(t *testing.T) {
 		} {
 			var recebido model.NovaEmpresaTerceirizadaPayload
 			w, ctx := requisicaoTerceirizada(http.MethodPost, "", corpo)
-			NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}).Cadastrar()(ctx)
+			NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}, "").Cadastrar()(ctx)
 
 			if w.Code != http.StatusCreated {
 				t.Errorf("corpo %s: status = %d, esperado 201 (%s)", corpo, w.Code, w.Body)
@@ -173,7 +173,7 @@ func TestEmpresaTerceirizadaCorpo(t *testing.T) {
 	t.Run("especialidade preenchida chega intacta", func(t *testing.T) {
 		var recebido model.NovaEmpresaTerceirizadaPayload
 		_, ctx := requisicaoTerceirizada(http.MethodPost, "", `{"nome":"X","especialidade":"Refrigeração"}`)
-		NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}).Cadastrar()(ctx)
+		NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}, "").Cadastrar()(ctx)
 
 		if recebido.Especialidade == nil || *recebido.Especialidade != "Refrigeração" {
 			t.Fatalf("especialidade = %v", recebido.Especialidade)
@@ -184,7 +184,7 @@ func TestEmpresaTerceirizadaCorpo(t *testing.T) {
 		for _, ruim := range []string{`{"especialidade":"Refrigeração"}`, `{}`, `nao sou json`} {
 			var recebido model.NovaEmpresaTerceirizadaPayload
 			w, ctx := requisicaoTerceirizada(http.MethodPost, "", ruim)
-			NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}).Cadastrar()(ctx)
+			NewEmpresaTerceirizadaController(terceirizadaFake{recebido: &recebido}, "").Cadastrar()(ctx)
 
 			if w.Code != http.StatusBadRequest {
 				t.Errorf("corpo %s: status = %d, esperado 400", ruim, w.Code)
@@ -198,7 +198,7 @@ func TestEmpresaTerceirizadaCorpo(t *testing.T) {
 	// Lista vazia sai como [] e não null: o select do Técnico faz .map direto.
 	t.Run("lista vazia sai como array", func(t *testing.T) {
 		w, ctx := requisicaoTerceirizada(http.MethodGet, "", "")
-		NewEmpresaTerceirizadaController(terceirizadaFake{}).Listar()(ctx)
+		NewEmpresaTerceirizadaController(terceirizadaFake{}, "").Listar()(ctx)
 
 		if corpo := strings.TrimSpace(w.Body.String()); corpo != "[]" {
 			t.Errorf("corpo = %s, esperado []", corpo)
@@ -210,7 +210,7 @@ func TestEmpresaTerceirizadaCorpo(t *testing.T) {
 		ctx, _ := gin.CreateTestContext(w)
 		ctx.Request = httptest.NewRequest(http.MethodGet, "/empresas-terceirizadas", nil)
 
-		NewEmpresaTerceirizadaController(terceirizadaFake{}).Listar()(ctx)
+		NewEmpresaTerceirizadaController(terceirizadaFake{}, "").Listar()(ctx)
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, esperado 500", w.Code)

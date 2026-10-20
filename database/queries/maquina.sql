@@ -203,6 +203,7 @@ alvo_sol AS (
 alvo_os AS (
     SELECT os.id FROM ordem_servico os WHERE os.solicitacao_id IN (SELECT a.id FROM alvo_sol a)
 ),
+d_evento AS (DELETE FROM os_evento     WHERE ordem_servico_id IN (SELECT a.id FROM alvo_os a)),
 d_item  AS (DELETE FROM os_custo_item   WHERE ordem_servico_id IN (SELECT a.id FROM alvo_os a)),
 d_nf    AS (DELETE FROM os_nota_fiscal  WHERE ordem_servico_id IN (SELECT a.id FROM alvo_os a)),
 d_custo AS (DELETE FROM os_custo        WHERE ordem_servico_id IN (SELECT a.id FROM alvo_os a)),

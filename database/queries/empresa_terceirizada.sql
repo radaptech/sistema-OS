@@ -19,8 +19,9 @@
 -- Nome é único por tenant (uq_empresa_terceirizada_nome): duplicado volta 23505
 -- e vira ErrDadoDuplicado no helper, sem switch em pgErr.Code no service.
 -- especialidade e telefone são opcionais (NULL) -- o front tipa os dois como `?`.
-INSERT INTO empresa_terceirizada (tenant_id, nome, especialidade, telefone)
-VALUES ($1, $2, $3, $4)
+-- foto_chave é a KEY no R2 (bucket R2_BUCKET_NAME_IMG_TERCERIZADOS), opcional.
+INSERT INTO empresa_terceirizada (tenant_id, nome, especialidade, telefone, foto_chave)
+VALUES ($1, $2, $3, $4, sqlc.narg(foto_chave))
 RETURNING *;
 
 -- name: ObterEmpresaTerceirizadaPorID :one
@@ -46,10 +47,14 @@ ORDER BY nome;
 -- Todos os campos editáveis de uma vez (o front manda o objeto inteiro no PUT).
 -- `ativa` fica de fora: reativar não existe pela API, e desativar tem rota
 -- própria -- ver DesativarEmpresaTerceirizada.
+-- foto_chave entra como COALESCE: nil é "não mandou foto nova" e mantém a
+-- atual -- o front só sabe trocar a foto, não remover (mesmo critério de
+-- AtualizarMaquina). A antiga fica órfã no R2.
 UPDATE empresa_terceirizada
 SET nome = $3,
     especialidade = $4,
-    telefone = $5
+    telefone = $5,
+    foto_chave = COALESCE(sqlc.narg(foto_chave), foto_chave)
 WHERE id = $1 AND tenant_id = $2
 RETURNING *;
 

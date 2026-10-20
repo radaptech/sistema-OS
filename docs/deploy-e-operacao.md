@@ -162,11 +162,14 @@ bloqueio: (1) configurar o Cron Job no Railway apontando pra esse `dockerfile` (
 
 1. Variáveis no serviço da API: `DB_*` (host do **Session Pooler** do Supabase, porta
    `5432`, usuário `postgres.<project-ref>`),
-   `DB_SSLMODE`, **`JWT_SECRET` novo** (`openssl rand -base64 64` — não reaproveitar o do
-   `.env` local, que já circulou), `TRUSTED_PROXIES` com o endereço do proxy do Railway, e
+   `DB_SSLMODE` (a `JWT_SECRET` deixou de existir com a sessão no banco, migration
+   `000022` — pode ser removida do serviço), `TRUSTED_PROXIES` com o endereço do proxy do Railway, e
    os `R2_*` (sem eles o CRUD funciona e só o upload de foto responde 500 — a
-   guarda de nil em `bucketR2` evita o panic). Opcionais, cada um só desliga o próprio
-   envio: `EVOLUTION_*` (WhatsApp) e **`RESEND_API_KEY` + `URL_FRONTEND_FORMATO=https://%s.radaptech.com.br`**
+   guarda de nil em `bucketR2` evita o panic). Opcional, só desliga o próprio
+   envio: **`VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`** (Web Push — gere um
+   par **próprio de produção** com `go run . chaves-vapid` e não troque depois: todo aparelho
+   inscrito depende da pública; sem elas o push some e a notificação fica só no sininho) e
+   **`RESEND_API_KEY` + `URL_FRONTEND_FORMATO=https://%s.radaptech.com.br`**
    (recuperação de senha — sem o formato, o link do e-mail aponta pra `localhost`; e o
    domínio do remetente `contato@radaptech.com.br` precisa estar verificado no Resend).
 2. ⚠️ **A URL da API é congelada no BUILD do front**, não em runtime: o `define` do

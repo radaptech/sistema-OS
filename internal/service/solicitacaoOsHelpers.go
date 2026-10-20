@@ -115,7 +115,21 @@ func criarOrdemServico(ctx context.Context, repo *repository.Queries, tenantId, 
 		return model.OrdemServico{}, helper.TraduzErroPostgres(err)
 	}
 
-	return model.MontarOrdemServicoDaAbertura(os, sol, string(urgencia), payload.TecnicoId, afetaProducao), nil
+	if err := registrarEvento(ctx, repo, tenantId, os.ID, repository.TipoEventoOsAberta,
+		&atorId, nil, statusPtr(repository.StatusOsAberta), map[string]any{
+			"origem":    string(sol.Origem),
+			"tecnicoId": payload.TecnicoId,
+			"urgencia":  string(urgencia),
+		}); err != nil {
+		return model.OrdemServico{}, err
+	}
+
+	aberta := model.MontarOrdemServicoDaAbertura(os, sol, string(urgencia), payload.TecnicoId, afetaProducao)
+	// O técnico já foi lido acima pra validar -- de graça, sem JOIN. É o nome
+	// que o aviso ao Solicitante usa ("virou OS com Fulano").
+	aberta.TecnicoNome = &tecnico.Nome
+
+	return aberta, nil
 }
 
 // resolverSetorSolicitante busca o único setor do escopo de quem abre uma
@@ -235,7 +249,7 @@ func montarSolicitacoesEmLote(ctx context.Context, repo *repository.Queries, lin
 	return dados, nil
 }
 
-// alvoDaSolicitacao monta o "o quê" da notificação de WhatsApp -- "Forno ·
+// alvoDaSolicitacao monta o "o quê" da notificação -- "Forno ·
 // PAT-001" pra maquinário (mesmo padrão nome·patrimônio de
 // CamposMaquina.tsx/AdministradorMaquinas no front) ou o texto livre do item
 // pra reparo. Os branches de fallback (nome/código ausente) não deveriam
@@ -260,4 +274,38 @@ func alvoDaSolicitacao(sol model.SolicitacaoOS) string {
 		return nome + " · " + *sol.MaquinaCodigo
 	}
 	return nome
+}
+
+// alvoDaOS é o alvoDaSolicitacao do lado da OS: "Forno · PAT-001" quando há
+// máquina, o item quando é reparo. Mesmos fallbacks best-effort.
+func alvoDaOS(os model.OrdemServico) string {
+
+	if os.MaquinaNome != nil {
+		if os.MaquinaCodigo != nil {
+			return *os.MaquinaNome + " · " + *os.MaquinaCodigo
+		}
+		return *os.MaquinaNome
+	}
+	if os.ItemDescricao != nil {
+		return *os.ItemDescricao
+	}
+	return fmt.Sprintf("OS #%d", os.Id)
+}
+
+// dadosDaOS monta o DadosNotificacao dos eventos de OS (aberta, aceita,
+// concluída) a partir da resposta que a rota já devolve -- nenhuma query a
+// mais só pra notificar.
+func dadosDaOS(os model.OrdemServico) DadosNotificacao {
+
+	return DadosNotificacao{
+		Alvo:            alvoDaOS(os),
+		Descricao:       os.Descricao,
+		LojaNome:        os.LojaNome,
+		SetorNome:       os.SetorNome,
+		SolicitanteNome: os.SolicitanteNome,
+		TecnicoNome:     os.TecnicoNome,
+		Urgencia:        os.Urgencia,
+		SolicitacaoId:   os.SolicitacaoId,
+		OrdemServicoId:  os.Id,
+	}
 }

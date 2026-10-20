@@ -10,18 +10,18 @@ API Go/Gin, multi-tenant por subdomínio, consumida pelo front em `../sistema-OS
 | testes | `go test -race ./...` com o compose de pé (default `localhost:5431`); fora disso, `TEST_DB_DSN=...` — verde rápido demais = `t.Skip` |
 | dev | `docker compose up -d` (um nível acima) → `http://<tenant>.localhost:8090` |
 | sqlc / migration | `sqlc generate` (nunca edite `database/repository/` na mão) · `make migration nome` |
-| jobs de CLI | `make provisionar-admin ARGS="..."` · `make backup-banco` · `make preventivas-vencidas` |
+| jobs de CLI | `make provisionar-admin ARGS="..."` · `make backup-banco` · `make preventivas-vencidas` · `make chaves-vapid` (imprime um par VAPID pro .env) |
 
 ## Diretrizes rápidas
 
-- **Tenant vem do token** (`GetTenantIDToken`), nunca do header `X-tenant-ID` — só o login usa o header.
+- **Tenant vem da sessão** (`GetTenantIDToken`), nunca do header `X-tenant-ID` — só o login usa o header. A sessão mora no banco (`sessao`, migration `000022`): 14 dias sem uso / 60 desde o login; logout, desativar usuário e trocar senha a apagam — detalhes em `docs/api-e-rotas.md`.
 - **Escopo de loja/setor é `WHERE`**, nunca RBAC nem filtro do cliente. Filtro do cliente estreita, nunca amplia.
 - **401 é só "sem sessão"**; perfil/escopo errado é **403** — 401 fora de `/login` desloga o usuário.
-- **Resposta**: tags camelCase, sempre com `id`; data é `*config.DataBr` (`dd/mm/yyyy HH:MM:SS`) — valor não-ponteiro serializa `{}` calado; listagem devolve slice não-nil, `null` quebra o `.map`.
+- **Resposta**: tags camelCase, sempre com `id`; data é `*config.DataBr` (`dd/mm/yyyy HH:MM:SS`) — valor não-ponteiro serializa `{}` calado; listagem devolve slice não-nil, `null` quebra o `.map`. **Coluna `date` sai por `config.NewDataBrDeDate`, nunca `NewDataBrPtr`**: o pgx entrega meia-noite UTC e a conversão para Brasília dava o dia anterior (a preventiva de 17/10 aparecia 16/10 e cada edição da máquina a atrasava mais um dia).
 - **Erros**: `errors.Is(err, pgx.ErrNoRows)` **antes** de `TraduzErroPostgres` (senão id inexistente vira 500); sentinela na frente do `%w` (`fmt.Errorf("%w: detalhe", helper.ErrX)`).
 - **Exclusão é sempre soft delete**; coluna `ativa` (loja/máquina/preventiva) ou `ativo` (usuário/setor); query de desativar é `:execrows` e `linhas == 0` → `ErrNaoEncontrado`. Só máquina tem reativação (`POST /maquinas/:id/reativar`). Exceções: `os_custo_item` e `os_nota_fiscal` apagam de verdade (composição de um valor reescrito inteiro), e `POST /maquinas/:id/excluir` apaga a máquina com todo o histórico, com senha + patrimônio — tabela nova que aponte para máquina/solicitação/OS/preventiva **tem de entrar** em `ExcluirMaquinaDefinitivo`.
 - **Custo da OS é uma lista de TAREFAS** (`os_custo_item`, migration `000012`), cada uma com material e mão de obra; os agregados de `os_custo` são a soma que **o servidor** calcula, nunca um total vindo do cliente.
-- **Login não tem `perfil` no corpo** — quem diz o perfil é a linha do banco, e é ela que vai pro token e pra sessão.
+- **Login não tem `perfil` no corpo** — quem diz o perfil é a linha do banco, e é ela que a sessão usa a cada request.
 - **Transição de estado é `POST` em sub-recurso** (`/iniciar`, `/rejeitar`), nunca `PATCH` de `status`.
 - **Não simplifique constraint/trigger/view** sem ler o porquê em `docs/modelagem-banco-dados.md`.
 

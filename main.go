@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/radaptech/sistema-OSm--Back-end/bucketR2"
 	"github.com/radaptech/sistema-OSm--Back-end/config"
@@ -48,6 +49,13 @@ func main() {
 	}
 
 	router.Use(middleware.CorsConfig())
+	// Compressão das respostas: o JSON das listagens repete os mesmos nomes de campo
+	// e valores (loja, setor, status, técnico) em todo item e cai para ~10-15% do
+	// tamanho -- é o que pesa no 4G do celular, não o banco. O navegador descompacta
+	// sozinho (Accept-Encoding/Content-Encoding); o front não muda nada. Erro (>= 400)
+	// e imagem passam sem compressão. Antes do Timeout: o 504 que ele reescreve é
+	// erro e sai cru do mesmo jeito.
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.Timeout(30 * time.Second))
 	c := r.NewContainer(db)
 	r.ConfigurarRotas(router, c)
@@ -64,6 +72,7 @@ var subcomandos = map[string]func([]string){
 	"provisionar-admin":    executarProvisionarAdmin,
 	"backup-banco":         executarBackupBanco,
 	"preventivas-vencidas": executarPreventivasVencidas,
+	"chaves-vapid":         executarChavesVapid,
 }
 
 // despacharSubcomando roda o subcomando pedido em args[0], se for um dos

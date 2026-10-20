@@ -17,7 +17,7 @@ type EmailService struct {
 	urlFrontendFormato string
 }
 
-// NewEmailService recebe as variáveis prontas: quem lê os.Getenv é o wiring (router.go), igual NewRepoNotificacao.
+// NewEmailService recebe as variáveis prontas: quem lê os.Getenv é o wiring (router.go), não o service.
 func NewEmailService(apiKey, urlFrontendFormato string) *EmailService {
 
 	if urlFrontendFormato == "" {

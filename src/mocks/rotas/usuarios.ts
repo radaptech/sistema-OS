@@ -24,6 +24,8 @@ function paraUsuarioPublico(usuario: UsuarioInterno): Usuario {
     setoresIds: usuario.setoresIds,
     acessoTotalSetores: usuario.acessoTotalSetores,
     ativo: usuario.ativo,
+    area: usuario.perfil === 'tecnico' ? usuario.area : undefined,
+    valorHora: usuario.valorHora,
   }
 }
 
@@ -35,6 +37,7 @@ function paraTecnicoPublico(usuario: UsuarioInterno): Tecnico {
     telefone: usuario.telefone,
     area: usuario.area ?? 'Máquinas em Geral',
     lojasIds: usuario.lojasIds,
+    valorHora: usuario.valorHora,
   }
 }
 
@@ -105,6 +108,8 @@ export const rotasUsuarios: Rota[] = [
         setoresIds: dados.setoresIds,
         acessoTotalSetores: dados.acessoTotalSetores,
         area: dados.area,
+        // Como no servidor: tarifa só existe no perfil técnico.
+        valorHora: dados.perfil === 'tecnico' ? dados.valorHora : undefined,
         ativo: true,
       }
 
@@ -132,6 +137,7 @@ export const rotasUsuarios: Rota[] = [
       usuario.setoresIds = dados.setoresIds
       usuario.acessoTotalSetores = dados.acessoTotalSetores
       usuario.area = dados.area
+      usuario.valorHora = dados.perfil === 'tecnico' ? dados.valorHora : undefined
 
       if (dados.senha) {
         usuario.senha = dados.senha

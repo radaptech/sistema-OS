@@ -7,6 +7,7 @@ interface SegmentoRosca {
 
 interface GraficoRoscaProps {
   titulo: string
+  subtitulo?: string
   dados: SegmentoRosca[]
   rotuloCentral: string
   valorCentral: string
@@ -21,6 +22,7 @@ const GAP = 3
 
 export function GraficoRosca({
   titulo,
+  subtitulo,
   dados,
   rotuloCentral,
   valorCentral,
@@ -35,15 +37,20 @@ export function GraficoRosca({
   )
 
   return (
-    <div className="rounded-2xl bg-white p-4 shadow-card">
-      <h3 className="font-display text-sm font-semibold text-slate-700">{titulo}</h3>
+    <div className="shadow-card rounded-2xl bg-white p-4">
+      <h3 className="font-display text-sm font-semibold text-slate-700">
+        {titulo}
+      </h3>
+      {subtitulo && (
+        <p className="mt-0.5 text-xs text-slate-400">{subtitulo}</p>
+      )}
 
       {total === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
           Sem paradas registradas no período.
         </p>
       ) : (
-        <div className="mt-3 flex flex-col items-center gap-5 sm:flex-row sm:items-center">
+        <div className="mt-3 flex flex-col items-center gap-5 sm:flex-row sm:gap-8">
           <div
             className="relative shrink-0"
             style={{ width: TAMANHO, height: TAMANHO }}
@@ -58,7 +65,8 @@ export function GraficoRosca({
                 cy={CENTRO}
                 r={RAIO}
                 fill="none"
-                stroke="#e1e0d9"
+                // Token, não hex: no tema escuro o anel claro vazava como risco branco nos vãos.
+                stroke="var(--color-slate-100)"
                 strokeWidth={ESPESSURA}
               />
               {dados.map((item, indice) => {
@@ -89,29 +97,33 @@ export function GraficoRosca({
             </svg>
 
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <p className="font-mono text-lg font-bold text-slate-800">{valorCentral}</p>
+              <p className="font-mono text-lg font-bold text-slate-800">
+                {valorCentral}
+              </p>
               <p className="font-mono text-[10px] text-slate-400 uppercase">
                 {rotuloCentral}
               </p>
             </div>
           </div>
 
-          <ul className="flex w-full flex-col gap-1.5">
+          {/* Valor e porcentagem colados ao nome: espalhados na largura do cartão eles
+              viravam números soltos, sem dizer de qual fatia eram. */}
+          <ul className="flex w-full max-w-xs flex-col gap-3">
             {dados.map((item) => (
-              <li
-                key={item.rotulo}
-                className="flex items-center justify-between gap-3 text-xs"
-              >
-                <span className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: item.cor }}
-                  />
-                  <span className="truncate text-slate-600">{item.rotulo}</span>
-                </span>
-                <span className="shrink-0 font-mono font-semibold text-slate-800">
-                  {item.valorFormatado}
-                </span>
+              <li key={item.rotulo} className="flex items-start gap-2.5">
+                <span
+                  className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: item.cor }}
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-700">
+                    {item.rotulo}
+                  </p>
+                  <p className="font-mono text-xs text-slate-500">
+                    {item.valorFormatado} ·{' '}
+                    {Math.round((item.valor / total) * 100)}%
+                  </p>
+                </div>
               </li>
             ))}
           </ul>

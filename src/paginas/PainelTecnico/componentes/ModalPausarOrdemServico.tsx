@@ -10,11 +10,13 @@ import {
   type DadosPausarOrdemServico,
 } from '../esquemaPausarOrdemServico'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalPausarOrdemServicoProps {
   ordemServico: OrdemServico
   aoFechar: () => void
-  aoSalvar: (dados: DadosPausarOrdemServico) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosPausarOrdemServico) => Promise<void>
 }
 
 export function ModalPausarOrdemServico({
@@ -27,26 +29,34 @@ export function ModalPausarOrdemServico({
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosPausarOrdemServico>({
     resolver: zodResolver(esquemaPausarOrdemServico),
     defaultValues: { motivo: '' },
   })
 
-  function aoSalvarFormulario(dados: DadosPausarOrdemServico) {
-    aoSalvar(dados)
+  async function aoSalvarFormulario(dados: DadosPausarOrdemServico) {
+    try {
+      await aoSalvar(dados)
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Técnico
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Pausar OS · #{ordemServico.id}
             </p>
             <p className="text-xs text-white/80">{ordemServico.maquinaNome}</p>
@@ -55,6 +65,7 @@ export function ModalPausarOrdemServico({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -85,12 +96,17 @@ export function ModalPausarOrdemServico({
 
           <div className="flex gap-3">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
-              <Botao type="submit" className="flex items-center justify-center gap-2">
+              <Botao
+                type="submit"
+                carregando={isSubmitting}
+                rotuloCarregando="Pausando..."
+                className="flex items-center justify-center gap-2"
+              >
                 <PauseCircle size={16} />
                 Pausar OS
               </Botao>

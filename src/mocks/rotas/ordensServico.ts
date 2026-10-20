@@ -1,4 +1,6 @@
 import { agoraParaBackend, converterDataBackend } from '../../utilitarios/dataBackend'
+import { dataEstaNoIntervalo } from '../../utilitarios/dataEstaNoIntervalo'
+import type { ResumoOrdensServicoSetor } from '../../servicos/servicoOrdensServico'
 import type {
   AcionamentoTerceiroPayload,
   EncerramentoOrdemServicoPayload,
@@ -8,7 +10,7 @@ import type {
   StatusExecucaoOS,
   StatusRetomavel,
 } from '../../tipos/ordemServico'
-import { empresasTerceirizadas, obterUsuarioSessao, ordensServico } from '../bancoMock'
+import { empresasTerceirizadas, obterUsuarioSessao, ordensServico, type UsuarioInterno } from '../bancoMock'
 import {
   calcularFinalizada,
   calcularHorasParada,
@@ -20,7 +22,17 @@ import {
   sincronizarPreventivasVencidas,
   somarItensDeCusto,
 } from '../regrasMock'
-import { atraso, gerarId, responderBlob, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import {
+  atraso,
+  gerarId,
+  paginarLista,
+  responderBlob,
+  responderErro,
+  responderJson,
+  type Rota,
+} from '../utilidadesMock'
+import { notificarConclusao } from '../notificacoesMock'
+import { montarHistoricoMock, registrarCorrecaoDeCusto } from '../eventosMock'
 
 function gerarIdPausa(): number {
   return gerarId(ordensServico.flatMap((ordem) => ordem.pausas ?? []))
@@ -30,6 +42,111 @@ function ordenarPorAberturaDesc(lista: OrdemServico[]): OrdemServico[] {
   return [...lista].sort(
     (a, b) => converterDataBackend(b.dataAbertura).getTime() - converterDataBackend(a.dataAbertura).getTime(),
   )
+}
+
+// Os mesmos filtros e o mesmo escopo do servidor, compartilhados pela listagem e pelo resumo:
+// a soma das contagens do resumo tem que ser o total da lista, como no back.
+function filtrarOrdens(query: URLSearchParams, usuario: UsuarioInterno): OrdemServico[] {
+  let lista = [...ordensServico]
+
+  if (usuario.perfil === 'gestor') {
+    const escopos = construirEscoposGestor(usuario)
+    lista = lista.filter((ordem) => gestorTemAcesso(escopos, ordem.lojaId, ordem.setorId))
+  } else if (usuario.perfil === 'tecnico') {
+    lista = lista.filter((ordem) => ordem.tecnicoId === usuario.id)
+  }
+
+  const status = query.get('status')
+  if (status) {
+    const statusLista = status.split(',') as StatusExecucaoOS[]
+    lista = lista.filter((ordem) => statusLista.includes(ordem.statusExecucao))
+  }
+
+  const finalizada = query.get('finalizada')
+  if (finalizada) {
+    lista = lista.filter((ordem) => ordem.finalizada === (finalizada === 'true'))
+  }
+
+  const revisado = query.get('revisado')
+  if (revisado) {
+    lista = lista.filter(
+      (ordem) => (ordem.custo?.revisadoEm != null) === (revisado === 'true'),
+    )
+  }
+
+  const tipo = query.get('tipo')
+  if (tipo) {
+    lista = lista.filter((ordem) => ordem.tipo === tipo)
+  }
+
+  const lojaId = query.get('lojaId')
+  if (lojaId) {
+    lista = lista.filter((ordem) => ordem.lojaId === Number(lojaId))
+  }
+
+  const setorId = query.get('setorId')
+  if (setorId) {
+    lista = lista.filter((ordem) => ordem.setorId === Number(setorId))
+  }
+
+  const maquinaId = query.get('maquinaId')
+  if (maquinaId) {
+    lista = lista.filter((ordem) => ordem.maquinaId === Number(maquinaId))
+  }
+
+  const reparo = query.get('reparo')
+  if (reparo) {
+    lista = lista.filter((ordem) => (ordem.maquinaId === null) === (reparo === 'true'))
+  }
+
+  const tecnicoId = query.get('tecnicoId')
+  if (tecnicoId) {
+    lista = lista.filter((ordem) => ordem.tecnicoId === Number(tecnicoId))
+  }
+
+  const busca = query.get('busca')
+  if (busca) {
+    const termo = busca.toLowerCase()
+    lista = lista.filter((ordem) => {
+      const alvo = ordem.maquinaNome ?? ordem.itemDescricao ?? ''
+      return (
+        ordem.descricao.toLowerCase().includes(termo) ||
+        alvo.toLowerCase().includes(termo) ||
+        (ordem.solicitanteNome ?? '').toLowerCase().includes(termo)
+      )
+    })
+  }
+
+  // Filtros avançados do Painel do Gestor, no servidor desde que OS Finalizadas é paginada.
+  const maquina = query.get('maquina')?.trim().toLowerCase()
+  if (maquina) {
+    lista = lista.filter(
+      (ordem) =>
+        (ordem.maquinaNome ?? '').toLowerCase().includes(maquina) ||
+        (ordem.maquinaCodigo ?? '').toLowerCase().includes(maquina) ||
+        (ordem.itemDescricao ?? '').toLowerCase().includes(maquina),
+    )
+  }
+
+  const dataInicio = query.get('dataInicio') ?? ''
+  const dataFim = query.get('dataFim') ?? ''
+  if (dataInicio || dataFim) {
+    lista = lista.filter((ordem) => dataEstaNoIntervalo(ordem.dataAbertura, dataInicio, dataFim))
+  }
+
+  const valorMinimo = query.get('valorMinimo')
+  const valorMaximo = query.get('valorMaximo')
+  if (valorMinimo || valorMaximo) {
+    lista = lista.filter((ordem) => {
+      if (!ordem.custo) {
+        return false
+      }
+      const total = (ordem.custo.custoHoraTecnico ?? 0) + ordem.custo.custoManutencao
+      return (!valorMinimo || total >= Number(valorMinimo)) && (!valorMaximo || total <= Number(valorMaximo))
+    })
+  }
+
+  return lista
 }
 
 export const rotasOrdensServico: Rota[] = [
@@ -47,60 +164,55 @@ export const rotasOrdensServico: Rota[] = [
         return responderErro('Não autenticado.', 401)
       }
 
-      let lista = [...ordensServico]
+      const lista = filtrarOrdens(query, usuario)
 
-      if (usuario.perfil === 'gestor') {
-        const escopos = construirEscoposGestor(usuario)
-        lista = lista.filter((ordem) => gestorTemAcesso(escopos, ordem.lojaId, ordem.setorId))
-      } else if (usuario.perfil === 'tecnico') {
-        lista = lista.filter((ordem) => ordem.tecnicoId === usuario.id)
-      }
-
-      const status = query.get('status')
-      if (status) {
-        const statusLista = status.split(',') as StatusExecucaoOS[]
-        lista = lista.filter((ordem) => statusLista.includes(ordem.statusExecucao))
-      }
-
-      const finalizada = query.get('finalizada')
-      if (finalizada) {
-        lista = lista.filter((ordem) => ordem.finalizada === (finalizada === 'true'))
-      }
-
-      const tipo = query.get('tipo')
-      if (tipo) {
-        lista = lista.filter((ordem) => ordem.tipo === tipo)
-      }
-
-      const lojaId = query.get('lojaId')
-      if (lojaId) {
-        lista = lista.filter((ordem) => ordem.lojaId === Number(lojaId))
-      }
-
-      const setorId = query.get('setorId')
-      if (setorId) {
-        lista = lista.filter((ordem) => ordem.setorId === Number(setorId))
-      }
-
-      const tecnicoId = query.get('tecnicoId')
-      if (tecnicoId) {
-        lista = lista.filter((ordem) => ordem.tecnicoId === Number(tecnicoId))
-      }
-
-      const busca = query.get('busca')
-      if (busca) {
-        const termo = busca.toLowerCase()
-        lista = lista.filter((ordem) => {
-          const alvo = ordem.maquinaNome ?? ordem.itemDescricao ?? ''
-          return (
-            ordem.descricao.toLowerCase().includes(termo) ||
-            alvo.toLowerCase().includes(termo) ||
-            (ordem.solicitanteNome ?? '').toLowerCase().includes(termo)
-          )
-        })
+      // Mesmo contrato do back: com ?pagina= vira RespostaPaginada de 12; sem, o array.
+      const pagina = query.get('pagina')
+      if (pagina) {
+        return responderJson(paginarLista(ordenarPorAberturaDesc(lista), Number(pagina), 12))
       }
 
       return responderJson(ordenarPorAberturaDesc(lista))
+    },
+  },
+  {
+    metodo: 'GET',
+    padrao: /^\/ordens-servico\/resumo$/,
+    async tratar({ query }) {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+
+      // Uma linha por máquina do setor; os reparos do setor (sem máquina) numa só.
+      const porMaquina = new Map<string, ResumoOrdensServicoSetor>()
+      for (const ordem of filtrarOrdens(query, usuario)) {
+        const chave = `${ordem.setorId}|${ordem.maquinaId ?? ''}`
+        const atual = porMaquina.get(chave) ?? {
+          lojaId: ordem.lojaId,
+          lojaNome: ordem.lojaNome,
+          setorId: ordem.setorId,
+          setorNome: ordem.setorNome,
+          maquinaId: ordem.maquinaId,
+          maquinaNome: ordem.maquinaNome,
+          maquinaCodigo: ordem.maquinaCodigo,
+          quantidade: 0,
+          afetamProducao: 0,
+        }
+        atual.quantidade += 1
+        atual.afetamProducao += ordem.afetaProducao ? 1 : 0
+        porMaquina.set(chave, atual)
+      }
+
+      return responderJson(
+        [...porMaquina.values()].sort(
+          (a, b) =>
+            a.lojaNome.localeCompare(b.lojaNome, 'pt-BR') ||
+            a.setorNome.localeCompare(b.setorNome, 'pt-BR') ||
+            (a.maquinaNome ?? '').localeCompare(b.maquinaNome ?? '', 'pt-BR'),
+        ),
+      )
     },
   },
   {
@@ -110,6 +222,21 @@ export const rotasOrdensServico: Rota[] = [
       await atraso()
       const ordem = ordensServico.find((item) => item.id === Number(params[0]))
       return ordem ? responderJson(ordem) : responderErro('Ordem de serviço não encontrada.', 404)
+    },
+  },
+  {
+    metodo: 'GET',
+    padrao: /^\/ordens-servico\/(\d+)\/historico$/,
+    async tratar({ params }) {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+      const ordem = ordensServico.find((item) => item.id === Number(params[0]))
+      return ordem
+        ? responderJson(montarHistoricoMock(ordem))
+        : responderErro('Ordem de serviço não encontrada.', 404)
     },
   },
   {
@@ -224,6 +351,7 @@ export const rotasOrdensServico: Rota[] = [
       ordem.tipo = 'terceiros'
       ordem.empresaTerceirizadaId = empresa.id
       ordem.empresaTerceirizadaNome = empresa.nome
+      ordem.empresaTerceirizadaFotoUrl = empresa.fotoUrl
 
       return responderJson(ordem)
     },
@@ -279,6 +407,7 @@ export const rotasOrdensServico: Rota[] = [
         revisadoEm: null,
       }
       ordem.finalizada = calcularFinalizada(ordem)
+      notificarConclusao(ordem)
 
       return responderJson(ordem)
     },
@@ -316,6 +445,7 @@ export const rotasOrdensServico: Rota[] = [
         revisadoEm: agoraParaBackend(),
       }
       ordem.finalizada = calcularFinalizada(ordem)
+      registrarCorrecaoDeCusto(ordem, usuario)
 
       return responderJson(ordem)
     },

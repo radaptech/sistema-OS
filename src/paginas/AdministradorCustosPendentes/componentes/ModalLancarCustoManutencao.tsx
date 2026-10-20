@@ -1,26 +1,29 @@
 import { createPortal } from 'react-dom'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, XCircle } from 'lucide-react'
+import { Building2, CheckCircle2, XCircle } from 'lucide-react'
 import { Alternador } from '../../../componentes/Alternador'
 import { Botao } from '../../../componentes/Botao'
 import { CampoItensCusto } from '../../../componentes/CampoItensCusto'
 import { CampoNotasFiscais } from '../../../componentes/CampoNotasFiscais'
 import { CampoTextoArea } from '../../../componentes/CampoTextoArea'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../../utilitarios/formatarData'
 import { formatarHoras } from '../../../utilitarios/formatarHoras'
 import type { OrdemServico } from '../../../tipos/ordemServico'
 import {
-  criarEsquemaLancarCustoManutencao,
+  esquemaLancarCustoManutencao,
   type DadosLancarCustoManutencao,
 } from '../esquemaLancarCustoManutencao'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalLancarCustoManutencaoProps {
   ordemServico: OrdemServico
   aoFechar: () => void
-  aoSalvar: (dados: DadosLancarCustoManutencao) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosLancarCustoManutencao) => Promise<void>
 }
 
 export function ModalLancarCustoManutencao({
@@ -31,16 +34,14 @@ export function ModalLancarCustoManutencao({
   const { fechar, classeFundo, classeCartao } = useSaidaAnimada(aoFechar)
 
   const ehTerceiros = ordemServico.tipo === 'terceiros'
-  // Só "Maquinário" cobra Custo Hora Técnico — Pequenos Reparos e OS de terceiros não.
-  const mostrarCustoHoraTecnico = ordemServico.tipo === 'maquinario'
 
   const {
     register,
     control,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<DadosLancarCustoManutencao>({
-    resolver: zodResolver(criarEsquemaLancarCustoManutencao(mostrarCustoHoraTecnico)),
+    resolver: zodResolver(esquemaLancarCustoManutencao),
     defaultValues: {
       // Pré-preenchido com o que o Técnico lançou: o Administrador CONFERE contra a nota,
       // então ele precisa ver a discriminação dele, não uma tela em branco.
@@ -52,7 +53,8 @@ export function ModalLancarCustoManutencao({
         ? ordemServico.custo.itens.map((item) => ({
             descricao: item.descricao,
             custoManutencao: item.custoManutencao,
-            // null no contrato (a tarefa não cobrou hora, ou o tipo da OS proíbe) vira
+            // null no contrato (a tarefa não cobrou mão de obra, ou é um reparo anterior à
+            // migration 000017, quando o tipo proibia) vira
             // undefined no formulário: o campo tem que nascer VAZIO, não com zero.
             custoHoraTecnico: item.custoHoraTecnico ?? undefined,
           }))
@@ -74,20 +76,28 @@ export function ModalLancarCustoManutencao({
   // A lista de notas desmonta quando o alternador desliga, mas o React Hook Form guarda o
   // que foi digitado: sem esvaziar aqui, desmarcar e salvar mandaria as notas junto de
   // temNotaFiscal:false e o servidor recusaria (trg_nota_fiscal_declarada, 400).
-  function aoSalvarFormulario(dados: DadosLancarCustoManutencao) {
-    aoSalvar(dados.temNotaFiscal ? dados : { ...dados, notasFiscais: [] })
+  async function aoSalvarFormulario(dados: DadosLancarCustoManutencao) {
+    try {
+      await aoSalvar(dados.temNotaFiscal ? dados : { ...dados, notasFiscais: [] })
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Administrador
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Lançar Custos · OS #{ordemServico.id}
             </p>
             <p className="text-xs text-white/80">
@@ -98,6 +108,7 @@ export function ModalLancarCustoManutencao({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -141,20 +152,23 @@ export function ModalLancarCustoManutencao({
 
           {/* O serviço saiu de uma empresa externa: o valor a conferir é o da nota dela. */}
           {ordemServico.empresaTerceirizadaNome && (
-            <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-              Serviço executado por{' '}
-              <span className="font-semibold">
-                {ordemServico.empresaTerceirizadaNome}
-              </span>{' '}
-              — não há Custo Hora Técnico aqui, confira só o Custo de Manutenção contra a
-              nota fiscal da empresa.
-            </p>
-          )}
-
-          {ordemServico.tipo === 'reparo' && (
-            <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
-              Pequenos Reparos não têm Custo Hora Técnico — só o Custo de Manutenção.
-            </p>
+            <div className="flex items-center gap-3 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              <MiniaturaFoto
+                fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+                alt={ordemServico.empresaTerceirizadaNome}
+                Icone={Building2}
+                className="h-9 w-9 rounded-md"
+                tamanhoIcone={14}
+              />
+              <p>
+                Serviço executado por{' '}
+                <span className="font-semibold">
+                  {ordemServico.empresaTerceirizadaNome}
+                </span>{' '}
+                — confira o Valor Peças e o Valor Mão de Obra contra a nota fiscal da
+                empresa.
+              </p>
+            </div>
           )}
 
           <Controller
@@ -164,7 +178,7 @@ export function ModalLancarCustoManutencao({
               <CampoItensCusto
                 itens={field.value}
                 aoMudar={field.onChange}
-                permitirHoraTecnica={mostrarCustoHoraTecnico}
+                tipo={ordemServico.tipo}
                 erro={errors.itens?.message ?? errors.itens?.root?.message}
                 errosPorItem={field.value.map((_, indice) => ({
                   descricao: errors.itens?.[indice]?.descricao?.message,
@@ -236,13 +250,14 @@ export function ModalLancarCustoManutencao({
               cobrir a largura toda, senão o conteúdo aparece por baixo nas bordas. */}
           <div className="sticky bottom-0 -mx-6 mt-1 flex gap-3 border-t border-slate-100 bg-white px-6 pt-4 pb-6">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
                 className="flex items-center justify-center gap-2"
               >
                 <CheckCircle2 size={16} />

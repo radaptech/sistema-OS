@@ -13,7 +13,15 @@ import type {
   TipoDefeito,
 } from '../tipos/ordemServico'
 import type { EscopoAcessoGestor, SessaoUsuario } from '../tipos/autenticacao'
-import type { IndicadoresMaquina } from '../tipos/indicadorMaquina'
+import type {
+  GrupoOrdensDoPainel,
+  IndicadoresLoja,
+  IndicadoresMaquina,
+  IndicadorMensal,
+  OrdemDoPainel,
+  ResumoIndicadores,
+} from '../tipos/indicadorMaquina'
+import type { RespostaPaginada } from '../tipos/paginacao'
 import {
   maquinas,
   ordensServico,
@@ -24,7 +32,10 @@ import {
   type PreventivaInterna,
   type UsuarioInterno,
 } from './bancoMock'
-import { gerarId } from './utilidadesMock'
+import { gerarId, paginarLista } from './utilidadesMock'
+// Ciclo com notificacoesMock (que usa construirEscoposGestor daqui): inofensivo, ninguém
+// chama nada no carregamento -- ver semearNotificacoes.
+import { notificarOSPreventiva } from './notificacoesMock'
 
 function arredondar(valor: number): number {
   return Math.round(valor * 100) / 100
@@ -158,9 +169,10 @@ export function sincronizarPreventivasVencidas(): void {
     }
     solicitacoes.push(solicitacao)
 
-    ordensServico.push({
+    const ordem: OrdemServico = {
       id: gerarId(ordensServico),
       solicitacaoId: solicitacao.id,
+      origem: 'preventiva',
       tipo: 'maquinario',
       maquinaId: solicitacao.maquinaId,
       maquinaNome: solicitacao.maquinaNome,
@@ -186,7 +198,9 @@ export function sincronizarPreventivasVencidas(): void {
       dataSolicitacao: solicitacao.criadoEm,
       dataAbertura: agoraParaBackend(),
       pausas: [],
-    })
+    }
+    ordensServico.push(ordem)
+    notificarOSPreventiva(ordem)
   }
 }
 
@@ -275,16 +289,32 @@ function ordenarChaveMes(mes: string): number {
   return Number(aaaa) * 100 + Number(mm)
 }
 
-export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
-  const historico = ordensServico.filter(
-    (ordem) => ordem.maquinaId === maquinaId && ordem.statusExecucao === 'Concluída',
+// Mesma divisão do back (model/indicadorMaquina.go): um resumo do histórico inteiro e
+// um por mês de encerramento, que o painel exibe ao clicar na barra do mês.
+function resumirIndicadores(historicoBruto: OrdemServico[]): ResumoIndicadores {
+  // O pequeno reparo (sem máquina) e a manutenção preventiva ficam à parte, como no servidor:
+  // só o maquinário alimenta os cards de falha e o custo das máquinas; o reparo soma em
+  // quantidadeReparos/custoReparos e a preventiva em quantidadePreventivas/custoPreventivas.
+  const reparos = historicoBruto.filter((ordem) => ordem.maquinaId === null)
+  const preventivas = historicoBruto.filter(
+    (ordem) => ordem.maquinaId !== null && ordem.origem === 'preventiva',
   )
+  const historico = historicoBruto.filter(
+    (ordem) => ordem.maquinaId !== null && ordem.origem !== 'preventiva',
+  )
+  const somarCusto = (lista: OrdemServico[]) =>
+    arredondar(lista.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0))
+  const custoReparos = somarCusto(reparos)
 
   const horasParadaTotal = arredondar(
     historico.reduce((soma, ordem) => soma + (ordem.horasParada ?? 0), 0),
   )
 
-  const horasTrabalhadasValidas = historico
+  // MTBF e MTTR medem FALHA e conserto: a preventiva (revisão programada) já saiu acima,
+  // então o que sobrou são as falhas. Sem isso o MTBF encolheria a cada revisão.
+  const falhas = historico
+
+  const horasTrabalhadasValidas = falhas
     .map((ordem) => ordem.horasTrabalhadas)
     .filter((horas): horas is number => horas !== undefined)
 
@@ -295,22 +325,26 @@ export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
       )
     : 0
 
-  const aberturasOrdenadas = historico
-    .map((ordem) => converterDataBackend(ordem.dataAbertura).getTime())
-    .sort((a, b) => a - b)
-
-  let mtbfHoras = 0
-
-  if (aberturasOrdenadas.length >= 2) {
-    const intervalos = aberturasOrdenadas
-      .slice(1)
-      .map((instante, indice) => (instante - aberturasOrdenadas[indice]) / 3_600_000)
-    mtbfHoras = arredondar(intervalos.reduce((soma, horas) => soma + horas, 0) / intervalos.length)
+  // MTBF de um grupo (setor, loja) só mede entre OS da MESMA máquina, como o servidor
+  // (mtbf em model/indicadorMaquina.go): entre máquinas diferentes o intervalo encolheria
+  // a cada máquina cadastrada no setor. Para uma máquina só, é a conta de sempre.
+  const aberturasPorMaquina = new Map<number, number[]>()
+  for (const ordem of falhas) {
+    const chave = ordem.maquinaId ?? 0
+    aberturasPorMaquina.set(chave, [
+      ...(aberturasPorMaquina.get(chave) ?? []),
+      converterDataBackend(ordem.dataAbertura).getTime(),
+    ])
   }
+  const intervalos = [...aberturasPorMaquina.values()].flatMap((aberturas) => {
+    const ordenadas = [...aberturas].sort((a, b) => a - b)
+    return ordenadas.slice(1).map((instante, indice) => (instante - ordenadas[indice]) / 3_600_000)
+  })
+  const mtbfHoras = intervalos.length
+    ? arredondar(intervalos.reduce((soma, horas) => soma + horas, 0) / intervalos.length)
+    : 0
 
-  const custoTotal = arredondar(
-    historico.reduce((soma, ordem) => soma + (ordem.custo?.custoTotal ?? 0), 0),
-  )
+  const custoTotal = somarCusto(historico)
 
   const horasPorTipo = new Map<TipoDefeito, number>()
 
@@ -327,7 +361,179 @@ export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
     horasParada: arredondar(horasPorTipo.get(tipo) ?? 0),
   }))
 
-  const custoPorMes = new Map<string, number>()
+  return {
+    quantidadeOs: historico.length,
+    horasParadaTotal,
+    mttrHoras,
+    mtbfHoras,
+    custoTotal,
+    porTipoDefeito,
+    quantidadeReparos: reparos.length,
+    custoReparos,
+    quantidadePreventivas: preventivas.length,
+    custoPreventivas: somarCusto(preventivas),
+  }
+}
+
+export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
+  const historico = ordensServico.filter(
+    (ordem) => ordem.maquinaId === maquinaId && ordem.statusExecucao === 'Concluída',
+  )
+
+  return { maquinaId, ...resumirIndicadores(historico), porMes: resumirPorMes(historico) }
+}
+
+// GET /indicadores/lojas/:id: total, setores e máquinas da loja, recortados pelo escopo
+// de quem chama (mesmo EXISTS de ListarMaquinas no servidor). Setor da OS é o ATUAL da
+// máquina, e toda máquina/setor da lista ganha card, zerado quando não tem histórico.
+export function computarIndicadoresLoja(lojaId: number, usuario: UsuarioInterno): IndicadoresLoja {
+  const maquinasDaLoja = maquinas
+    .filter(
+      (maquina) =>
+        maquina.ativa !== false &&
+        maquina.lojaId === lojaId &&
+        usuarioAlcanca(usuario, maquina.lojaId, maquina.setorId),
+    )
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+
+  const historicoDa = (maquinaIds: number[]) =>
+    ordensServico.filter(
+      (ordem) =>
+        ordem.statusExecucao === 'Concluída' &&
+        ordem.maquinaId !== null &&
+        maquinaIds.includes(ordem.maquinaId),
+    )
+
+  // Pequenos reparos encerrados da loja, no escopo de quem chama: sem máquina, só o setor.
+  // Entram no total da loja e no setor (e nos meses deles), nunca na máquina.
+  const reparosDaLoja = ordensServico.filter(
+    (ordem) =>
+      ordem.statusExecucao === 'Concluída' &&
+      ordem.maquinaId === null &&
+      ordem.lojaId === lojaId &&
+      usuarioAlcanca(usuario, ordem.lojaId, ordem.setorId),
+  )
+
+  const historico = [
+    ...historicoDa(maquinasDaLoja.map((maquina) => maquina.id)),
+    ...reparosDaLoja,
+  ]
+  // Setor que só teve reparo (sem máquina) ganha card também, como no servidor.
+  const setoresIds = [
+    ...new Set([
+      ...maquinasDaLoja.map((maquina) => maquina.setorId),
+      ...reparosDaLoja.map((ordem) => ordem.setorId),
+    ]),
+  ]
+
+  return {
+    lojaId,
+    ...resumirIndicadores(historico),
+    porMes: resumirPorMes(historico),
+    porSetor: setoresIds.map((setorId) => {
+      const doSetor = maquinasDaLoja.filter((maquina) => maquina.setorId === setorId)
+      const reparosDoSetor = reparosDaLoja.filter((ordem) => ordem.setorId === setorId)
+      const historicoSetor = [
+        ...historicoDa(doSetor.map((maquina) => maquina.id)),
+        ...reparosDoSetor,
+      ]
+      return {
+        setorId,
+        setorNome: doSetor[0]?.setorNome ?? reparosDoSetor[0].setorNome,
+        quantidadeMaquinas: doSetor.length,
+        ...resumirIndicadores(historicoSetor),
+        porMes: resumirPorMes(historicoSetor),
+      }
+    }),
+    porMaquina: maquinasDaLoja.map((maquina) => {
+      const historicoMaquina = historicoDa([maquina.id])
+      return {
+        maquinaId: maquina.id,
+        setorId: maquina.setorId,
+        ...resumirIndicadores(historicoMaquina),
+        porMes: resumirPorMes(historicoMaquina),
+      }
+    }),
+  }
+}
+
+// GET /indicadores/lojas/:id/ordens: a lista por trás de um card de custo do painel da loja — o
+// "maquinario" (as OS de máquina, preventiva inclusa) ou os "reparos" (sem máquina, à parte).
+// Mesma definição e mesmo escopo do painel (setor ATUAL da máquina, só máquina ativa), então a
+// soma dos itens é o custo do card. `mes` é o rótulo "MM/YYYY" do gráfico (mês de encerramento).
+export function listarOrdensDoPainelMock(
+  lojaId: number,
+  usuario: UsuarioInterno,
+  grupo: GrupoOrdensDoPainel,
+  setorId: number | null,
+  maquinaId: number | null,
+  mes: string | null,
+  pagina: number,
+): RespostaPaginada<OrdemDoPainel> {
+  const rotuloDoMes = (dataFim: string | undefined) => {
+    if (!dataFim) {
+      return null
+    }
+    const data = converterDataBackend(dataFim)
+    return `${String(data.getMonth() + 1).padStart(2, '0')}/${data.getFullYear()}`
+  }
+
+  const ordens: OrdemDoPainel[] = []
+
+  for (const ordem of ordensServico) {
+    if (ordem.statusExecucao !== 'Concluída' || (mes !== null && rotuloDoMes(ordem.dataFim) !== mes)) {
+      continue
+    }
+
+    // O setor do reparo é o da solicitação; o da máquina é o ATUAL dela.
+    const maquina = ordem.maquinaId === null ? undefined : maquinas.find((m) => m.id === ordem.maquinaId)
+    const setorDaOrdem = maquina ? maquina.setorId : ordem.setorId
+    const lojaDaOrdem = maquina ? maquina.lojaId : ordem.lojaId
+
+    // Maquinário e preventivas são OS de máquina, separadas pela origem (como no servidor).
+    const doGrupo =
+      grupo === 'reparos'
+        ? ordem.maquinaId === null
+        : ordem.maquinaId !== null &&
+          maquina !== undefined &&
+          maquina.ativa !== false &&
+          (ordem.origem === 'preventiva') === (grupo === 'preventivas')
+    if (
+      !doGrupo ||
+      lojaDaOrdem !== lojaId ||
+      !usuarioAlcanca(usuario, lojaDaOrdem, setorDaOrdem) ||
+      (setorId !== null && setorDaOrdem !== setorId) ||
+      (maquinaId !== null && ordem.maquinaId !== maquinaId)
+    ) {
+      continue
+    }
+
+    ordens.push({
+      id: ordem.id,
+      item: grupo === 'reparos' ? (ordem.itemDescricao ?? '') : (ordem.maquinaNome ?? ''),
+      codigo: grupo === 'reparos' ? null : ordem.maquinaCodigo,
+      maquinaId: grupo === 'reparos' ? null : ordem.maquinaId,
+      origem: ordem.origem,
+      descricao: ordem.descricao,
+      setorId: setorDaOrdem,
+      setorNome: maquina ? maquina.setorNome : ordem.setorNome,
+      tecnicoNome: ordem.tecnicoNome ?? '—',
+      encerradaEm: ordem.dataFim ?? null,
+      custoTotal: ordem.custo?.custoTotal ?? 0,
+    })
+  }
+
+  ordens.sort(
+    (a, b) =>
+      converterDataBackend(b.encerradaEm ?? '01/01/1970').getTime() -
+      converterDataBackend(a.encerradaEm ?? '01/01/1970').getTime(),
+  )
+
+  return paginarLista(ordens, pagina, 12)
+}
+
+function resumirPorMes(historico: OrdemServico[]): IndicadorMensal[] {
+  const ordensPorMes = new Map<string, OrdemServico[]>()
 
   for (const ordem of historico) {
     if (!ordem.dataFim) {
@@ -336,21 +542,11 @@ export function computarIndicadores(maquinaId: number): IndicadoresMaquina {
 
     const data = converterDataBackend(ordem.dataFim)
     const chave = `${String(data.getMonth() + 1).padStart(2, '0')}/${data.getFullYear()}`
-    custoPorMes.set(chave, (custoPorMes.get(chave) ?? 0) + (ordem.custo?.custoTotal ?? 0))
+    ordensPorMes.set(chave, [...(ordensPorMes.get(chave) ?? []), ordem])
   }
 
-  const porMes = Array.from(custoPorMes.entries())
-    .map(([mes, custoTotalMes]) => ({ mes, custoTotal: arredondar(custoTotalMes) }))
+  return Array.from(ordensPorMes.entries())
+    .map(([mes, ordensDoMes]) => ({ mes, ...resumirIndicadores(ordensDoMes) }))
     .sort((a, b) => ordenarChaveMes(a.mes) - ordenarChaveMes(b.mes))
-    .slice(-6)
-
-  return {
-    maquinaId,
-    horasParadaTotal,
-    mttrHoras,
-    mtbfHoras,
-    custoTotal,
-    porTipoDefeito,
-    porMes,
-  }
+    .slice(-12)
 }

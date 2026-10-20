@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8,6 +8,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Botao } from '../../componentes/Botao'
 import { CampoTexto } from '../../componentes/CampoTexto'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
+import { UploadFoto } from '../../componentes/UploadFoto'
+import type { AtualizarLojaPayload } from '../../tipos/loja'
 import { useEmpresas } from '../../hooks/useEmpresas'
 import { useLojas } from '../../hooks/useLojas'
 import { servicoLojas } from '../../servicos/servicoLojas'
@@ -17,12 +19,17 @@ export function CadastrarLoja() {
   const navegar = useNavigate()
   const { id } = useParams<{ id: string }>()
   const emEdicao = Boolean(id)
+  // Foto escolhida agora, ainda não enviada. Sem ela, salvar mantém a que está no servidor.
+  const [foto, setFoto] = useState<File | null>(null)
   const queryClient = useQueryClient()
   const { data: empresas = [] } = useEmpresas()
   const { data: lojas = [] } = useLojas()
 
   const { data: lojaExistente } = useQuery({
     queryKey: ['loja', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoLojas.obterPorId(Number(id)),
     enabled: emEdicao,
   })
@@ -44,12 +51,13 @@ export function CadastrarLoja() {
   }, [lojaExistente, reset])
 
   const { mutateAsync: criar, isPending: criando } = useMutation({
-    mutationFn: servicoLojas.criar,
+    mutationFn: (dados: DadosCadastrarLoja) => servicoLojas.criar(dados, foto ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lojas'] }),
   })
 
   const { mutateAsync: atualizar, isPending: atualizando } = useMutation({
-    mutationFn: servicoLojas.atualizar,
+    mutationFn: (dados: AtualizarLojaPayload) =>
+      servicoLojas.atualizar(dados, foto ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lojas'] }),
   })
 
@@ -64,6 +72,7 @@ export function CadastrarLoja() {
     await criar(dados)
     toast.success('Loja cadastrada com sucesso.')
     reset({ nome: '' })
+    setFoto(null)
   }
 
   // Uma empresa por tenant (empresa É o tenant no back-end), então toda loja
@@ -86,6 +95,14 @@ export function CadastrarLoja() {
             noValidate
             className="flex flex-col gap-5 p-6 sm:p-8"
           >
+            <UploadFoto
+              foto={foto}
+              aoSelecionarFoto={setFoto}
+              urlExistente={lojaExistente?.fotoUrl}
+              rotulo="Foto da Loja"
+              textoAlternativo="Pré-visualização da loja"
+            />
+
             <div className="grid gap-5 sm:grid-cols-2">
               <CampoTexto
                 rotulo="Nome *"

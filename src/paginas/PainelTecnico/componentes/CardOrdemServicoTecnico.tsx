@@ -1,4 +1,7 @@
+import { BadgeOrigemOS } from '../../../componentes/BadgeOrigemOS'
+import { fundoDoCardOS, fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import {
+  Building2,
   CheckCircle2,
   Eye,
   FileSearch,
@@ -9,6 +12,7 @@ import {
 import { BadgeAfetaProducao } from '../../../componentes/BadgeAfetaProducao'
 import { BadgeStatusExecucao } from '../../../componentes/BadgeStatusExecucao'
 import { BadgeUrgencia } from '../../../componentes/BadgeUrgencia'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../../utilitarios/formatarData'
 import type { OrdemServico } from '../../../tipos/ordemServico'
@@ -63,9 +67,9 @@ export function CardOrdemServicoTecnico({
   )
 
   return (
-    <div className="shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200">
+    <div className={`shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl p-4 transition-shadow duration-200 ${fundoDoCardOS(ordemServico.origem)}`}>
       <div className="flex items-start gap-4">
-        <span className="bg-marca-600 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white ${fundoDoNumeroOS(ordemServico.origem)}`}>
           #{ordemServico.id}
         </span>
 
@@ -80,6 +84,7 @@ export function CardOrdemServicoTecnico({
               </span>
             )}
             <BadgeStatusExecucao status={ordemServico.statusExecucao} />
+            <BadgeOrigemOS origem={ordemServico.origem} />
             {ordemServico.urgencia && (
               <BadgeUrgencia urgencia={ordemServico.urgencia} />
             )}
@@ -126,9 +131,18 @@ export function CardOrdemServicoTecnico({
       </div>
 
       {ordemServico.empresaTerceirizadaNome && (
-        <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          <span className="font-semibold">Terceiro acionado:</span>{' '}
-          {ordemServico.empresaTerceirizadaNome}
+        <p className="flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <MiniaturaFoto
+            fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+            alt={ordemServico.empresaTerceirizadaNome}
+            Icone={Building2}
+            className="h-7 w-7 rounded-md"
+            tamanhoIcone={14}
+          />
+          <span>
+            <span className="font-semibold">Terceiro acionado:</span>{' '}
+            {ordemServico.empresaTerceirizadaNome}
+          </span>
         </p>
       )}
 

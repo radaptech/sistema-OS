@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
 export const esquemaManutencaoPreventiva = z.object({
+  // Preenchido só nas preventivas que vieram do servidor na edição (ver PreventivaManutencao).
+  id: z.number().int().positive().optional(),
   maquinaId: z.number().int().nonnegative(),
   // Obrigatório: ao vencer, a preventiva abre a OS direto no nome deste técnico, sem
   // passar pelo Gestor. O servidor recusa o cadastro sem ele, e também recusa técnico

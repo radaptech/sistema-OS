@@ -11,6 +11,7 @@ import type {
 import type { NovaSolicitacaoReparoPayload } from '../../tipos/reparo'
 import { lojas, maquinas, obterUsuarioSessao, ordensServico, setores, solicitacoes, usuarios } from '../bancoMock'
 import { construirEscoposGestor, gestorTemAcesso, sincronizarPreventivasVencidas } from '../regrasMock'
+import { notificarAbertura, notificarNovaSolicitacao, notificarRejeicao } from '../notificacoesMock'
 import {
   atraso,
   extrairCorpo,
@@ -92,6 +93,7 @@ export const rotasSolicitacoes: Rota[] = [
       }
 
       solicitacoes.push(nova)
+      notificarNovaSolicitacao(nova)
       return responderJson(nova, 201)
     },
   },
@@ -154,6 +156,7 @@ export const rotasSolicitacoes: Rota[] = [
       const novaOrdem: OrdemServico = {
         id: gerarId(ordensServico),
         solicitacaoId: nova.id,
+        origem: 'direta',
         tipo: nova.tipo,
         maquinaId: nova.maquinaId,
         maquinaNome: nova.maquinaNome,
@@ -179,6 +182,8 @@ export const rotasSolicitacoes: Rota[] = [
 
       solicitacoes.push(nova)
       ordensServico.push(novaOrdem)
+      // Direta: só o Técnico (quem "pediu" é o próprio Gestor).
+      notificarAbertura(novaOrdem, null)
       return responderJson(novaOrdem, 201)
     },
   },
@@ -223,6 +228,7 @@ export const rotasSolicitacoes: Rota[] = [
       }
 
       solicitacoes.push(nova)
+      notificarNovaSolicitacao(nova)
       return responderJson(nova, 201)
     },
   },
@@ -251,8 +257,40 @@ export const rotasSolicitacoes: Rota[] = [
         lista = lista.filter((item) => combinaBusca(item, termo))
       }
 
+      const maquinaId = query.get('maquinaId')
+      if (maquinaId) {
+        lista = lista.filter((item) => item.maquinaId === Number(maquinaId))
+      }
+
       const pagina = Number(query.get('pagina') ?? '1')
       return responderJson(paginarLista(ordenarPorCriadoEmDesc(lista), pagina, 10))
+    },
+  },
+  {
+    // Espelha ListarMaquinasDasMinhasSolicitacoes do back: as máquinas que aparecem
+    // nas solicitações do próprio solicitante, sem o pequeno reparo.
+    metodo: 'GET',
+    padrao: /^\/solicitacoes\/minhas\/maquinas$/,
+    async tratar() {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+
+      const porId = new Map<number, { id: number; nome: string; numeroPatrimonio?: string; fotoUrl?: string }>()
+      for (const item of solicitacoes) {
+        if (item.solicitanteId === usuario.id && item.maquinaId && !porId.has(item.maquinaId)) {
+          porId.set(item.maquinaId, {
+            id: item.maquinaId,
+            nome: item.maquinaNome ?? `Máquina ${item.maquinaId}`,
+            numeroPatrimonio: item.maquinaCodigo ?? undefined,
+            fotoUrl: item.maquinaFotoUrl,
+          })
+        }
+      }
+      const lista = [...porId.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      return responderJson(lista)
     },
   },
   {
@@ -377,6 +415,7 @@ export const rotasSolicitacoes: Rota[] = [
       const novaOrdem: OrdemServico = {
         id: gerarId(ordensServico),
         solicitacaoId: solicitacao.id,
+        origem: solicitacao.origem,
         tipo: solicitacao.tipo,
         maquinaId: solicitacao.maquinaId,
         maquinaNome: solicitacao.maquinaNome,
@@ -402,6 +441,10 @@ export const rotasSolicitacoes: Rota[] = [
 
       ordensServico.push(novaOrdem)
       solicitacao.status = 'Convertida'
+      notificarAbertura(
+        novaOrdem,
+        solicitacao.origem === 'solicitante' ? solicitacao.solicitanteId : null,
+      )
 
       return responderJson(novaOrdem, 201)
     },
@@ -430,6 +473,7 @@ export const rotasSolicitacoes: Rota[] = [
       solicitacao.status = 'Rejeitada'
       solicitacao.motivoRejeicao = dados.motivo
       solicitacao.rejeitadoPorNome = usuario.nome
+      notificarRejeicao(solicitacao)
 
       return responderJson(solicitacao)
     },

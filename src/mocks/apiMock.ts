@@ -4,11 +4,14 @@ import { rotasEmpresasTerceirizadas } from './rotas/empresasTerceirizadas'
 import { rotasIndicadores } from './rotas/indicadores'
 import { rotasLojas } from './rotas/lojas'
 import { rotasMaquinas } from './rotas/maquinas'
+import { rotasNotificacoes } from './rotas/notificacoes'
 import { rotasOrdensServico } from './rotas/ordensServico'
 import { rotasPreventivas } from './rotas/preventivas'
+import { rotasPush } from './rotas/push'
 import { rotasSetores } from './rotas/setores'
 import { rotasSolicitacoes } from './rotas/solicitacoes'
 import { rotasTecnicos, rotasUsuarios } from './rotas/usuarios'
+import './historicoMock'
 import { responderErro, type MetodoHttp, type Rota } from './utilidadesMock'
 
 const rotas: Rota[] = [
@@ -24,6 +27,8 @@ const rotas: Rota[] = [
   ...rotasSolicitacoes,
   ...rotasOrdensServico,
   ...rotasIndicadores,
+  ...rotasNotificacoes,
+  ...rotasPush,
 ]
 
 // Substitui a chamada a fetch() em api.ts quando VITE_USE_MOCKS === 'true'. Recebe o

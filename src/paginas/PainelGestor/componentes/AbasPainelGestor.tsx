@@ -1,8 +1,4 @@
-export type AbaPainelGestor =
-  | 'solicitacoes'
-  | 'os-em-andamento'
-  | 'os-finalizadas'
-  | 'manutencao-preventiva'
+import type { AbaPainelGestor } from '../abasPainelGestor'
 
 const ABAS: { chave: AbaPainelGestor; rotulo: string }[] = [
   { chave: 'solicitacoes', rotulo: 'Solicitações' },

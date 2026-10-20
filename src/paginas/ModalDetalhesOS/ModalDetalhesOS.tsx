@@ -1,16 +1,21 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Printer, XCircle } from 'lucide-react'
+import { Building2, Printer, XCircle } from 'lucide-react'
 import { Botao } from '../../componentes/Botao'
 import { BadgeStatusExecucao } from '../../componentes/BadgeStatusExecucao'
 import { BadgeTipoOS } from '../../componentes/BadgeTipoOS'
+import { BadgeOrigemOS } from '../../componentes/BadgeOrigemOS'
 import { BadgeUrgencia } from '../../componentes/BadgeUrgencia'
+import { LinhaDoTempoOS } from '../../componentes/LinhaDoTempoOS'
+import { MiniaturaFoto } from '../../componentes/MiniaturaFoto'
 import { obterNomeAlvo, obterCodigoAlvo } from '../../utilitarios/alvoOS'
 import { formatarDataHora } from '../../utilitarios/formatarData'
 import { formatarHoras } from '../../utilitarios/formatarHoras'
 import { formatarMoeda } from '../../utilitarios/formatarMoeda'
+import { rotulosCustoOS } from '../../utilitarios/rotulosCustoOS'
 import type { OrdemServico } from '../../tipos/ordemServico'
 import { useSaidaAnimada } from '../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../hooks/useDialogo'
 
 interface ModalDetalhesOSProps {
   ordemServico: OrdemServico
@@ -45,15 +50,20 @@ export function ModalDetalhesOS({
     return () => clearTimeout(temporizador)
   }, [autoImprimir])
 
+  // Na impressão o modal deixa de ser `fixed` (o navegador repete elemento fixo em toda página
+  // impressa) e vira bloco normal, sem fundo, sombra, corte nem largura máxima. Ver o
+  // `@media print` de index.css.
+  const { propsDialogo, idTitulo } = useDialogo(fechar)
+
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-lg overflow-hidden rounded-2xl bg-white`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm print:static print:block print:bg-transparent print:p-0 print:backdrop-blur-none`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-lg overflow-hidden rounded-2xl bg-white print:max-w-none print:overflow-visible print:rounded-none print:shadow-none`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4 print:hidden">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               {contexto}
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               OS #{ordemServico.id} · Detalhes
             </p>
           </div>
@@ -92,6 +102,7 @@ export function ModalDetalhesOS({
             <div className="flex flex-col items-end gap-1.5">
               <BadgeStatusExecucao status={ordemServico.statusExecucao} />
               <BadgeTipoOS tipo={ordemServico.tipo} />
+              <BadgeOrigemOS origem={ordemServico.origem} />
               {ordemServico.urgencia && (
                 <BadgeUrgencia urgencia={ordemServico.urgencia} />
               )}
@@ -144,7 +155,14 @@ export function ModalDetalhesOS({
                 <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
                   Empresa Terceirizada
                 </p>
-                <p className="text-slate-700">
+                <p className="mt-0.5 flex items-center gap-2 text-slate-700">
+                  <MiniaturaFoto
+                    fotoUrl={ordemServico.empresaTerceirizadaFotoUrl}
+                    alt={ordemServico.empresaTerceirizadaNome}
+                    Icone={Building2}
+                    className="h-8 w-8 rounded-md"
+                    tamanhoIcone={14}
+                  />
                   {ordemServico.empresaTerceirizadaNome}
                 </p>
               </div>
@@ -207,7 +225,7 @@ export function ModalDetalhesOS({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">Custo Hora Técnico</p>
+                <p className="text-xs text-slate-400">{rotulosCustoOS.custoMaoDeObra}</p>
                 <p className="font-mono font-semibold text-slate-700">
                   {custo?.custoHoraTecnico != null
                     ? formatarMoeda(custo.custoHoraTecnico)
@@ -215,7 +233,7 @@ export function ModalDetalhesOS({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">Custo Manutenção</p>
+                <p className="text-xs text-slate-400">{rotulosCustoOS.custoMaterial}</p>
                 <p className="font-mono font-semibold text-slate-700">
                   {custo ? formatarMoeda(custo.custoManutencao) : '—'}
                 </p>
@@ -238,7 +256,8 @@ export function ModalDetalhesOS({
                         <span className="font-semibold">{formatarMoeda(item.custoManutencao)}</span>
                         {item.custoHoraTecnico !== null && (
                           <span className="ml-2 text-xs text-slate-400">
-                            + {formatarMoeda(item.custoHoraTecnico)} de hora
+                            + {formatarMoeda(item.custoHoraTecnico)}{' '}
+                            {ordemServico.tipo === 'terceiros' ? 'de mão de obra' : 'de hora'}
                           </span>
                         )}
                       </span>
@@ -302,6 +321,8 @@ export function ModalDetalhesOS({
               {ordemServico.encerramento?.solucao ?? '—'}
             </p>
           </div>
+
+          <LinhaDoTempoOS ordemServicoId={ordemServico.id} />
 
           <div className="mt-1 flex gap-3 print:hidden">
             <div className="flex-1">

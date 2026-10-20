@@ -2,7 +2,7 @@
 // um item digitado na hora (pequeno reparo). Estes helpers centralizam essa escolha, para
 // os componentes não repetirem o mesmo encadeamento de fallback.
 
-interface AlvoOS {
+export interface AlvoOS {
   maquinaNome: string | null
   maquinaCodigo: string | null
   itemDescricao: string | null

@@ -13,6 +13,9 @@ export interface NovoUsuarioPayload {
   setoresIds: number[]
   acessoTotalSetores: boolean
   area?: AreaTecnico
+  // Tarifa de referência do Técnico (R$/hora), opcional. Ignorada pelo servidor nos
+  // outros perfis. O custo da OS continua sendo o lançado no encerramento (item 11).
+  valorHora?: number
 }
 
 // Usuario cobre os quatro perfis, inclusive Técnico: /usuarios é a superfície
@@ -30,6 +33,10 @@ export interface Usuario {
   setoresIds: number[]
   acessoTotalSetores: boolean
   ativo?: boolean
+  // Só Técnico: necessária para a tela de edição abrir com a área preenchida.
+  area?: AreaTecnico
+  // Só Técnico; ausente quando não há tarifa cadastrada.
+  valorHora?: number
 }
 
 // A senha só é enviada quando o Administrador quiser trocá-la; omitida, o servidor mantém

@@ -1,6 +1,15 @@
 import type { NovaLojaPayload } from '../../tipos/loja'
 import { empresas, lojas } from '../bancoMock'
-import { atraso, gerarId, responderErro, responderJson, type Rota } from '../utilidadesMock'
+import {
+  atraso,
+  extrairCorpo,
+  gerarId,
+  marcadorFoto,
+  responderErro,
+  responderJson,
+  urlArquivoEnviado,
+  type Rota,
+} from '../utilidadesMock'
 
 export const rotasLojas: Rota[] = [
   {
@@ -25,9 +34,16 @@ export const rotasLojas: Rota[] = [
     padrao: /^\/lojas$/,
     async tratar({ corpo }) {
       await atraso()
-      const dados = corpo as NovaLojaPayload
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovaLojaPayload
       // empresaId é derivado do tenant, nunca do corpo -- igual ao back.
-      const nova = { id: gerarId(lojas), nome: dados.nome, empresaId: empresas[0].id, ativa: true }
+      const nova = {
+        id: gerarId(lojas),
+        nome: dados.nome,
+        empresaId: empresas[0].id,
+        ativa: true,
+        fotoUrl: urlArquivoEnviado(arquivos, 'foto') ?? marcadorFoto(dados.nome, '#cbd5e1'),
+      }
       lojas.push(nova)
       return responderJson(nova, 201)
     },
@@ -43,8 +59,11 @@ export const rotasLojas: Rota[] = [
         return responderErro('Loja não encontrada.', 404)
       }
 
-      const dados = corpo as NovaLojaPayload
+      const { dados: bruto, arquivos } = extrairCorpo(corpo)
+      const dados = bruto as unknown as NovaLojaPayload
       loja.nome = dados.nome
+      // Sem foto nova mantém a atual, como o COALESCE do back.
+      loja.fotoUrl = urlArquivoEnviado(arquivos, 'foto') ?? loja.fotoUrl
       return responderJson(loja)
     },
   },

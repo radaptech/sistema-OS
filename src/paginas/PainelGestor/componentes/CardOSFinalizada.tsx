@@ -1,3 +1,5 @@
+import { BadgeOrigemOS } from '../../../componentes/BadgeOrigemOS'
+import { fundoDoCardOS, fundoDoNumeroOS } from '../../../utilitarios/origemOS'
 import { Eye, Printer } from 'lucide-react'
 import { BadgeTipoOS } from '../../../componentes/BadgeTipoOS'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
@@ -20,10 +22,10 @@ export function CardOSFinalizada({
     (ordemServico.custo?.custoHoraTecnico ?? 0) + (ordemServico.custo?.custoManutencao ?? 0)
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
+    <div className={`flex flex-col gap-3 rounded-2xl p-4 shadow-card sm:flex-row sm:items-center sm:justify-between ${fundoDoCardOS(ordemServico.origem)}`}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-marca-600 font-mono text-sm font-bold text-white">
+          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white ${fundoDoNumeroOS(ordemServico.origem)}`}>
             #{ordemServico.id}
           </span>
           <span className="truncate font-semibold text-slate-800">
@@ -35,6 +37,7 @@ export function CardOSFinalizada({
             </span>
           )}
           <BadgeTipoOS tipo={ordemServico.tipo} />
+          <BadgeOrigemOS origem={ordemServico.origem} />
         </div>
         <p className="mt-1 truncate font-mono text-xs text-slate-400">
           Encerrada em {ordemServico.dataFim ? formatarDataHora(ordemServico.dataFim) : '—'}

@@ -10,23 +10,15 @@
 
 ## Modo Mock (`src/mocks/`)
 - **Flag:** `VITE_USE_MOCKS=true` no `.env` (ver `.env.example`) troca, dentro de `requisitar()` em `src/servicos/api.ts`, a chamada real a `fetch()` por `simularFetch()` (`src/mocks/apiMock.ts`) — só essa chamada muda; todo o resto de `api.ts` (parsing JSON/Blob, erro 401, toast) é reaproveitado sem duplicação, porque `simularFetch` devolve um `Response` de verdade (`new Response(...)`). Para voltar à API real, basta `VITE_USE_MOCKS=false` (ou remover a variável) — nenhum código precisa ser revertido.
-- **"Banco" em memória (`bancoMock.ts`):** coleções mutáveis (empresas, lojas, setores, usuários — inclusive Técnico, mesma tabela — máquinas, preventivas, empresas terceirizadas, solicitações, ordens de serviço) com um seed inicial cobrindo os 4 perfis. Reseta a cada reload da página. Login de demonstração: `solicitante@demo.com`, `tecnico@demo.com`, `gestor@demo.com`, `administrador@demo.com`, todos com senha `123456`.
+- **"Banco" em memória (`bancoMock.ts`):** coleções mutáveis (empresas, lojas, setores, usuários — inclusive Técnico, mesma tabela — máquinas, preventivas, empresas terceirizadas, solicitações, ordens de serviço) com um seed inicial cobrindo os 4 perfis. Reseta a cada reload da página. `historicoMock.ts` acrescenta 12 meses de OS concluídas (máquinas 1–4, datas relativas a hoje) para o gráfico de custo mensal do `DashboardGestor` ter o que mostrar. Login de demonstração: `solicitante@demo.com`, `tecnico@demo.com`, `gestor@demo.com`, `administrador@demo.com`, todos com senha `123456`.
 - **Sessão mock:** sem cookie real, o "usuário logado" fica em `sessionStorage` (sobrevive a reload da aba, cai ao fechar) — mesmo efeito prático da restauração via `PortaoSessao`/`useSessao`.
 - **Regras de negócio replicadas (`regrasMock.ts`):** preventiva vencida → solicitação automática (`origem: 'preventiva'`, mesmo mecanismo do antigo `gerarSolicitacoesPreventivasVencidas`), ciclo de vida completo da OS (iniciar/pausar/retomar/acionar-terceiro/encerrar/custo), cálculo de Horas Trabalhadas/Parada, `finalizada`, escopo por perfil (Gestor por `escoposGestor`, Técnico pelo próprio `tecnicoId`) e indicadores de máquina computados do histórico real de OS `Concluída` no banco mock — nada é mais um valor fixo por máquina. `somarItensDeCusto` replica a regra do servidor de somar as tarefas em vez de aceitar um total do cliente: sem ela o modo mock inventaria uma segunda aritmética de custo, e a tela passaria em mock e falharia contra a API real.
 - **Rotas (`src/mocks/rotas/*.ts`):** um arquivo por domínio, mesma divisão de `servico*.ts`, cada um exportando uma lista de `{ metodo, padrao, tratar }` casada contra `endpoint` em `apiMock.ts`. Ao adicionar um endpoint novo num serviço real, adicione o par correspondente aqui.
+- **Notificações (`notificacoesMock.ts`):** a coleção do sininho + os mesmos 6 eventos do servidor (quem recebe, texto e url iguais), chamados dos handlers de solicitação/OS e de `sincronizarPreventivasVencidas`. `semearNotificacoes()` (chamado por `rotas/notificacoes.ts`, nunca no topo do módulo — há um ciclo de import inofensivo com `regrasMock`) gera as do seed, pra cada perfil de demonstração já abrir com o sininho preenchido.
 - **Upload nos dois modos:** os handlers mock de `maquinas`/`solicitacoes` detectam `FormData`, leem a parte `dados` (JSON) e viram a `foto`/`video` recebidos em `URL.createObjectURL(...)` — visualizável durante a sessão, sem upload real.
 
-## Tech Stack e Infraestrutura
-- **Framework & Build:** React 19+ com TypeScript, empacotado via **Vite**.
-- **Roteamento:** React Router DOM 7 (com implementação de Rotas Protegidas).
-- **Estilização:** Tailwind CSS **v4** (plugin `@tailwindcss/vite`, com `@config '../tailwind.config.ts'` declarado em `index.css`). Mobile-First obrigatório.
-- **Ícones:** Lucide React.
-- **Gerenciamento de Formulários:** React Hook Form integrado com **Zod v4** para validação de esquemas.
-- **Busca de Dados & Cache:** TanStack Query (React Query) para chamadas HTTP, cache de listas e painéis de indicadores (dashboards).
-- **Gerenciamento de Estado Global:** Zustand — `estadoAutenticacao` (espelho da sessão) e `estadoModais` (Máquina de Modais).
-- **Qualidade de Código (Linting & Formatting):** ESLint e Prettier (utilizando o plugin `prettier-plugin-tailwindcss` para ordenação automática das classes).
-- **Cliente HTTP:** Wrapper customizado nativo (Fetch API), substituindo bibliotecas de terceiros como Axios.
-- **Notificações/Alertas:** React-Toastify (Para feedback global de erros, sucesso e avisos).
+## Tech Stack
+- **Mobile-First obrigatório.** HTTP só pelo wrapper nativo `api.ts` (Fetch) — não adicione Axios. O resto da stack está no `package.json`.
 
 ## Identidade Visual (Design Tokens)
 Definidos em `tailwind.config.ts` e usados em toda a aplicação — não hardcode cores/hex nas telas.
@@ -50,16 +42,12 @@ A arquitetura do projeto deve seguir uma separação clara de responsabilidades 
 - **`/src/paginas`**: Telas completas da aplicação (ex: `PainelGestor.tsx`, `TelaLogin.tsx`). Montagem de layout e consumo de hooks/queries. Se a página for complexa, crie uma subpasta para ela com seus componentes locais (ex: `/src/paginas/PainelGestor/componentes/`) e seus esquemas Zod (ex: `esquemaRejeitarSolicitacao.ts`).
 - **`/src/servicos`**: Cliente HTTP (`api.ts`), helpers de requisição (`montarQuery.ts`, `montarMultipart.ts`) e a abstração de endpoints por domínio (`servicoMaquinas.ts`, `servicoOrdensServico.ts`, …). **Nenhum serviço guarda estado** — são funções finas sobre `api.ts`.
 - **`/src/hooks`**: Ganchos customizados, quase todos wrappers de `useQuery` (`useMaquinas.ts`, `useSessao.ts`, …). As mutações (`useMutation`) ficam nas próprias páginas, junto do `invalidateQueries` correspondente.
-- **`/src/estado`**: Estados globais (Zustand): `estadoAutenticacao` e `estadoModais`.
-- **`/src/utilitarios`**: Funções puras (`formatarData.ts`, `formatarMoeda.ts`, `dataBackend.ts`, `calcularHoras.ts`, `acessoGestor.ts`, `alvoOS.ts`, …).
-- **`/src/rotas`**: Configuração do roteamento, separando rotas públicas (`RotaPublica`) das rotas protegidas por perfil (`RotaProtegida`).
-- **`/src/tipos`**: Tipagens estritas do TypeScript, espelhando o contrato da API e o banco PostgreSQL.
 
 ## Autenticação, Segurança e Regras de Negócio (IMPORTANTE)
 - **Arquitetura Multi-Locatário (Multi-Tenant) Baseada em Subdomínio:** O sistema atende a múltiplos clientes. O `tenantId` é extraído dinamicamente do subdomínio da URL atual (`window.location.hostname.split(".")[0]`) e injetado em todas as requisições via header estrito `X-tenant-ID`.
-- **Gerenciamento de Sessão via Cookies:** O token JWT retornado pelo back-end é gerenciado via **Cookies HttpOnly**. É terminantemente proibido armazenar o JWT em `localStorage` ou variáveis globais. O cliente HTTP usa `credentials: "include"`.
+- **Gerenciamento de Sessão via Cookies:** a sessão mora **no banco do back** (migration `000022`); o cookie **HttpOnly** leva só um segredo aleatório dela. É terminantemente proibido levar a sessão para `localStorage` ou variáveis globais. O cliente HTTP usa `credentials: "include"`. **Prazos:** a sessão estica com o uso, cai depois de **14 dias sem uso** e **60 dias depois do login** mesmo com uso diário; cai na hora no "Sair" (só aquele aparelho), ao desativar o usuário e ao trocar a senha dele (todos os aparelhos). O perfil vem do banco a cada request, então trocar o perfil de alguém vale na hora.
 - **Restauração de Sessão no Bootstrap (`PortaoSessao`):** `App.tsx` envolve as rotas no `PortaoSessao` (`/src/componentes/PortaoSessao.tsx`), que chama `useSessao` (`GET /autenticacao/sessao`) antes de renderizar qualquer rota e exibe `CarregandoSessao` enquanto isso. Sem esse passo, recarregar a página derrubaria o usuário mesmo com o cookie ainda válido no servidor. O endpoint responde **401 quando não há sessão** — o que não é erro, é só "não logado" — por isso `useSessao` usa `retry: false` e `staleTime: Infinity`.
-- **Tratamento Global de Erros (401 Não Autorizado):** Se a API retornar 401 e a rota atual não for `/login`, o `api.ts` dispara um toast ("Sua sessão expirou.") e redireciona forçosamente para o Login.
+- **Tratamento Global de Erros (401 Não Autorizado):** se a API retornar 401 e a rota atual não for `/login`, o `api.ts` recarrega em `/login?motivo=expirada&voltar=<página atual>` — sem toast, que o recarregamento apagaria. **Sessão vencida e volta ao destino (`utilitarios/destinoLogin.ts`):** o 401 de uma sessão que existia e morreu vem com `codigo: 'sessao_expirada'` (sem cookie nenhum vem sem código); no boot, o 401 do `/autenticacao/sessao` com esse código marca o motivo, e a `RotaProtegida` manda para o login levando `?voltar=` (o link de notificação aberto deslogado, um F5). A `TelaLogin` mostra a faixa âmbar "Sua sessão expirou" e, depois de entrar, navega para o `voltar` — só caminho interno (`destinoSeguro`: começa com `/`, nunca `//` ou `/\`, senão o login viraria um redirecionador para qualquer site).
 - **Hierarquia Organizacional (Tenant = Empresa > Loja > Setor):** **empresa É o tenant** (decisão fechada no back-end: `loja.tenant_id` referencia `empresa (id)`, não existe coluna `empresa_id`). Consequências no front: `GET /empresas` devolve **uma lista de um item só**, `Loja.empresaId` é o `tenant_id` da própria linha (campo derivado, só leitura) e `NovaLojaPayload` **não tem** `empresaId` — em `CadastrarLoja` a empresa aparece como campo somente leitura, não como select, e o servidor a tira do token. Não reintroduza a escolha: aceitar empresa do cliente é aceitar tenant do cliente. Cada Empresa possui **Lojas** (unidades/filiais, com `empresaId`); cada Loja possui seus **Setores**. Máquinas e Ordens de Serviço pertencem sempre a uma Loja + Setor (`lojaId` + `setor`).
 - **Controle de Acesso por Loja e Setor (Gestor):** o acesso do Gestor é definido por uma lista de **escopos** (`EscopoAcessoGestor[]`, `/src/tipos/autenticacao.ts`), onde cada escopo vincula uma Loja a um conjunto de setores:
   - **Restrito a setores específicos** dentro de uma Loja (`setoresIds: number[]`) — ex: Gestor que responde apenas por "Padaria" e "Açougue" da Loja 1, enquanto outro Gestor da mesma loja responde por "Hortifruti" e "Peixaria".
@@ -78,239 +66,40 @@ Todo o tráfego HTTP passa por um wrapper nativo (`fetch`) padronizado — **nã
 - **Integração de Alertas:** captura as chaves de erro do backend (`error`, `erro`, `message`, `detalhes`) e exibe o toast automaticamente; falha de rede vira "Não foi possível conectar ao servidor.". Em **5xx** a mensagem ganha " (código: …)" com o `X-Request-ID` da resposta — é o id que o back grava em todas as linhas de log daquele request, então o usuário manda o código e o suporte acha o erro.
 - **Métodos:** `api.get/post/put/patch/delete`, todos genéricos em `<T>`.
 - **React Query (`App.tsx`):** `retry: 1` e `refetchOnWindowFocus: false` — o `api.ts` já trata 401 globalmente, repetir a requisição só atrasaria o redirecionamento.
+- **Cache do React Query:** `staleTime` padrão de **30s** (`App.tsx`) e de **10 min** nos cadastros (`useLojas`/`useSetores`/`useEmpresas`/`useEmpresasTerceirizadas`/`useTecnicos`, `hooks/tempoCache.ts`). Formulários de edição e confirmações buscam com `staleTime: 0`. O Painel do Gestor só busca a lista da aba aberta (`habilitado` nos hooks de lista). ⚠️ **Toda mutação tem que invalidar as chaves que ela altera** — antes o `staleTime: 0` escondia a falta disso (voltar para a lista refazia tudo); hoje o item salvo sumiria por até 30s. Sem cache no servidor, de propósito: para ~20 usuários o Postgres responde sobrando, e invalidar cache por escopo/tenant é onde mora o bug difícil.
 
 ## Contrato com o Back-end
 Regras transversais que valem para **todos** os serviços. Ao criar um endpoint novo, siga estas convenções em vez de inventar outra.
 
 - **Query string (`montarQuery.ts`):** monta `?a=1&b=2` descartando `undefined`/`null`/`''` (evita `?lojaId=undefined`). Arrays viram lista separada por vírgula (ex: `status=Aberta,Pausada`).
-- **Upload (`montarMultipart.ts`):** endpoints com arquivo recebem `multipart/form-data` com a parte **`dados`** carregando o JSON e as demais partes carregando os arquivos (`foto`, `video`). Usado em `POST/PUT /maquinas` e nas três criações de solicitação.
+- **Upload (`montarMultipart.ts`):** endpoints com arquivo recebem `multipart/form-data` com a parte **`dados`** carregando o JSON e as demais partes carregando os arquivos (`foto`, `video`). Usado em `POST/PUT /maquinas`, `/lojas`, `/setores`, `/empresas-terceirizadas` (foto opcional — sem ela, o `PUT` mantém a atual) e nas três criações de solicitação.
 - **Formato de data/hora (`dataBackend.ts`) — REGRA CRÍTICA:** o back-end troca datas como **`dd/mm/yyyy HH:MM:SS`** (ou `dd/mm/yyyy` sem hora). **Nunca** use `new Date(textoDaApi)` direto: o parser nativo não entende `dd/mm/yyyy` e interpreta `08/09/2026` como 8 de setembro num ambiente e 9 de agosto em outro. Use `converterDataBackend`, `formatarDataHoraBackend`, `agoraParaBackend`, `ehDataBackendValida` e — para `<input type="date">`, que trabalha em `YYYY-MM-DD` — `converterDataFormularioParaBackend` / `converterDataBackendParaFormulario`.
-- **Paginação (`RespostaPaginada<T>`, `/src/tipos/paginacao.ts`):** `{ dados, pagina, totalPaginas, total }`. Usada nos endpoints paginados **no servidor** (`GET /usuarios`, `GET /solicitacoes/minhas`). Os demais endpoints devolvem array simples e a tela pagina client-side com o componente `Paginacao` (10 por página) — ver item 12.
+- **Paginação (`RespostaPaginada<T>`, `/src/tipos/paginacao.ts`):** `{ dados, pagina, totalPaginas, total }`. Usada nos endpoints paginados **no servidor** (`GET /usuarios`, `GET /solicitacoes/minhas` e `GET /ordens-servico?pagina=` — este só quando a página é pedida, 12 por página, nas telas de histórico do Administrador; sem `pagina` ele devolve o array inteiro, que é o que Gestor e Técnico usam). Os demais endpoints devolvem array simples e a tela pagina client-side com o componente `Paginacao` (10 por página) — ver item 12.
 - **O servidor é a fonte da verdade dos fatos:** instante de criação/abertura/encerramento, autoria (`solicitanteId`, `lancadoPorNome`, `encerradoPorNome`), horas calculadas (`horasTrabalhadas`/`horasParada`), escopo de acesso e a flag `finalizada` são **derivados no servidor**. O front nunca envia esses campos; quando exibe um "Data/Hora" antes de salvar, é apenas confirmação visual do instante local.
-- **Endpoints por domínio:**
-  - `servicoAutenticacao` → `POST /autenticacao/login` (só e-mail e senha — ver item 1), `GET /autenticacao/sessao`, `POST /autenticacao/logout`
-  - `servicoEmpresas` → `GET /empresas`
-  - `servicoLojas` → CRUD em `/lojas`
-  - `servicoSetores` → CRUD em `/setores` (`?lojaId=`)
-  - `servicoUsuarios` → CRUD em `/usuarios` (`?perfil=&lojaId=&busca=&pagina=`) — **superfície única de escrita dos 4 perfis, inclusive Técnico**
-  - `servicoTecnicos` → `GET /tecnicos` (`?lojaId=`) e `GET /tecnicos/:id` — **somente leitura**
-  - `servicoMaquinas` → CRUD em `/maquinas` (`?setor=&lojaId=`), com foto + preventivas via multipart
-  - `servicoPreventivas` → CRUD em `/preventivas` (`?maquinaId=`)
-  - `servicoEmpresasTerceirizadas` → CRUD em `/empresas-terceirizadas`
-  - `servicoSolicitacoes` → `POST /solicitacoes/maquinario`, `GET /solicitacoes/minhas`, `GET /solicitacoes`, `GET /solicitacoes/:id`, `GET /solicitacoes/resumo`, `POST /solicitacoes/:id/abrir-os`, `POST /solicitacoes/:id/rejeitar`, `POST /solicitacoes/direta` (`criarDireta`, JSON, sem foto — item 10b)
-  - `servicoReparos` → `POST /solicitacoes/reparo` (payload com `item`, `tipoDefeito` e `descricao`; foto obrigatória)
-  - As três criações acima são chamadas por **um único despachante**, `servicoSolicitacoes.criarPorTipo`, alimentado pela tela unificada (item 3) — não chame os três serviços direto de uma tela nova.
-  - `servicoOrdensServico` → `GET /ordens-servico` (`?status=&finalizada=&tipo=&lojaId=&tecnicoId=&busca=&pagina=`), `GET /ordens-servico/:id`, `POST /ordens-servico/:id/iniciar|pausar|retomar|acionar-terceiro|encerrar|custo`, `GET /ordens-servico/:id/impressao` (Blob/PDF)
-  - `servicoIndicadores` → `GET /indicadores/maquinas/:maquinaId`
+- **Criação de solicitação:** `POST /solicitacoes/maquinario` e `/solicitacoes/reparo` são chamadas por **um único despachante**, `servicoSolicitacoes.criarPorTipo`, alimentado pela tela unificada (item 3) — não chame os serviços direto de uma tela nova.
 
-## Especificações de Telas
+## Especificações de Telas — uma por pasta
 
-### 1. Tela de Login (`TelaLogin`)
-- **Fundo Global:** verde sólido `bg-marca-600`, com os halos desfocados. O cartão branco no centro já é o assunto da tela; o gradiente de três paradas disputava atenção com ele.
-- **Card Central:** fundo branco, `rounded-3xl`, padding generoso, largura fixa elegante (`max-w-md`), `shadow-2xl shadow-marca-950/40` e entrada `animate-pop-in`.
-- **Cabeçalho do Card:** ícone `Wrench` num selo tingido claro (`bg-marca-100 text-marca-600`, `rounded-2xl`), título "Solicitação OS" em `font-display`, subtítulo "LOGIN DE ACESSO" em `font-mono`, caixa alta, `text-xs`, `text-slate-400`.
-- **Labels dos Campos:** "PERFIL", "LOGIN", "SENHA DE ACESSO" no rótulo padrão do sistema (`text-[10px] font-bold tracking-widest uppercase text-slate-500`).
-- **NÃO há seletor de perfil (REGRA DE NEGÓCIO — o login pede e-mail e senha, e mais nada).** Ele existiu como 4 abas aqui e foi **removido**: o servidor comparava o perfil escolhido com o do usuário e devolvia "credenciais inválidas" quando não batia, ou seja, nunca autorizou nada — quem manda no token e na `SessaoUsuario` é sempre a linha do banco. O efeito prático era transformar "cliquei na aba errada" em "e-mail ou senha inválidos", a mensagem genérica de propósito, que não tinha como explicar o erro real. `CredenciaisLogin` perdeu o campo `perfil` junto, e `model.Login` no back também. **Não recrie o seletor aqui.** O componente `SeletorPerfil` continua existindo e é usado em `CadastrarUsuario` (item 7), onde a escolha decide de verdade o que o usuário será.
-- **Campos de Input:** `CampoTexto` no estilo único do sistema (46px, branco, borda fina). **`CampoTexto`/`CampoSelecao`/`CampoTextoArea` não têm mais prop `variante`** — as variantes `padrao` e `claro` foram removidas quando todas as chamadas convergiram para o mesmo estilo. Ícone de visibilidade da senha em verde.
-- **Link Auxiliar:** "Esqueci minha senha" à direita, fonte pequena, verde.
-- **Botão Principal:** "Entrar" em verde sólido da marca, texto branco, `rounded-xl`, 46px.
-- **Rodapé do Card:** "SOLICITAÇÃO OS © {ano}" centralizado, `font-mono`, muito pequeno.
-- **Ao enviar:** `servicoAutenticacao.entrar` devolve a `SessaoUsuario` completa (perfil, `lojaId`/`setor`, `escoposGestor`, `tecnicoId`); o front guarda com `entrar(sessao)` e navega para `ROTA_POR_PERFIL[sessao.perfil]`. **O front não deriva escopo de acesso a partir do perfil escolhido na tela.**
+Cada tela tem a própria spec em `src/paginas/<Tela>/CLAUDE.md`, carregada sozinha quando o trabalho toca aquela pasta. **Antes de mexer numa tela que não é a sua pasta atual, leia a spec dela.** As specs se citam por número de item:
 
-### 2. Tela Principal do Solicitante (`HomeSolicitante`)
-- **Fundo Global:** claro (`bg-slate-50`), estruturado de ponta a ponta (barra superior branca fixa, conteúdo centralizado, footer discreto).
-- **Header Superior (`CabecalhoTopo`):** barra branca translúcida fixa no topo (`sticky bg-white/80 backdrop-blur-lg`), com o verde concentrado no selo do logo. À esquerda, "SOLICITAÇÃO OS" e a saudação "Olá, `nome do usuário logado`". À direita, ícones de Notificações (sino) e Sair (logout — chama `servicoAutenticacao.sair` e limpa o estado).
-- **Área Central:** título "O que deseja fazer?" com subtítulo descritivo.
-- **Cards de Ação (dois, desde a unificação das OS):**
-  - Cards de navegação centralizados em largura moderada (`CardAcao`, `/src/componentes/CardAcao.tsx`).
-  - "Minhas Solicitações" — `variante: 'padrao'`, cinza claro tingido (`bg-slate-50`).
-  - "Nova Solicitação" — `variante: 'destaque'`, verde tingido claro com selo de ícone verde sólido, ícone `CirclePlus`, com a descrição "Maquinário ou Pequenos Reparos" (item 3). **A Home deixou de ser um menu de caminhos:** o tipo é escolhido dentro do próprio formulário. As variantes `'reparo'` (laranja) e `'terceiros'` (azul) do `CardAcao` continuam existindo, hoje sem uso aqui.
-- **Cards de Estatísticas (Grid Inferior):** três blocos com os contadores `Abertas`, `Em andamento`, `Concluídas`, vindos de `useResumoSolicitacoes` (`GET /solicitacoes/resumo`, tipo `ResumoSolicitacoes`) — contagem feita no servidor, não somando listas no cliente.
-- **Rodapé:** "SOLICITAÇÃO OS © {ano}" discreto e centralizado.
+| item | tela (pasta em `src/paginas/`) |
+|---|---|
+| 1 | `TelaLogin` |
+| 2 | `HomeSolicitante` |
+| 3 | `NovaSolicitacao` |
+| 4 | `MinhasSolicitacoes` |
+| 5 | `CadastrarMaquina` (+ `ModalManutencaoPreventiva`) |
+| 6 | `PainelGestor` |
+| 7 | `CadastrarUsuario` |
+| 8 | `DashboardGestor` |
+| 9 | `PainelTecnico` (inclui os modais de Acionar Terceiro e Pausar) |
+| 10 | `ModalAbrirOrdemServico` |
+| 10b | `AbrirOSDireta` |
+| 11 | `ModalEncerrarOrdemServico` |
+| 12 | `PainelAdministrador` e `AdministradorCustosPendentes` |
+| 13 | `AdministradorOSFinalizadas` e `ModalDetalhesOS` |
 
-### 3. Tela Única de Nova Solicitação (`NovaSolicitacao`)
-**Uma tela para os dois tipos que o Solicitante abre.** As antigas `NovaSolicitacaoOS`, `NovaSolicitacaoReparo` e `NovaSolicitacaoOSTerceiros` foram **removidas** e substituídas por `/src/paginas/NovaSolicitacao/`, na rota `/nova-solicitacao` (`perfis={['solicitante']}`). Não recrie telas separadas por tipo.
-
-- **Acesso:** card "Nova Solicitação" na `HomeSolicitante` (item 2). As rotas antigas (`/nova-solicitacao-os`, `/nova-solicitacao-reparo`, `/nova-solicitacao-os-terceiros`) continuam registradas em `RotasPrincipais.tsx` como `<Navigate>` para `/nova-solicitacao?tipo=…`, preservando links já salvos — a de terceiros cai na tela padrão, já que o tipo deixou de existir para o Solicitante. `NovaSolicitacao` lê esse `?tipo=` no `defaultValues` (`lerTipoDaUrl`) e cai em `maquinario` quando o valor é inválido ou ausente.
-- **Só existem dois tipos abríveis (REGRA DE NEGÓCIO):** `tiposSolicitacao = ['maquinario', 'reparo']`. **`terceiros` NÃO é um tipo de pedido** — é o desfecho de uma OS que o Técnico decidiu encaminhar para uma empresa externa (item 9). Quem sabe se o caso é interno ou terceirizado é quem olha a máquina, não quem relata o problema — mesma lógica do Tipo de OS (item 11). `SolicitacaoOS.tipo` é `TipoSolicitacao`; `OrdemServico.tipo` continua `TipoOS`, com os três valores.
-- **Tipo de Solicitação \* (primeiro campo):** `SeletorTipoSolicitacao` — dois cards em `grid sm:grid-cols-2` (`Maquinário` verde/`CirclePlus`, `Pequenos Reparos` laranja/`Hammer`), com `role="radiogroup"`. Trocar o tipo chama `trocarTipo`, que dá `reset` nos campos que não se aplicam mas **preserva `tipoDefeito` e `descricao`** (truncando a descrição quando o novo limite é menor) — quem já escreveu não perde o texto ao corrigir o tipo.
-- **A cor identifica o tipo só na faixa do cartão** (`APARENCIA_POR_TIPO`, campo `cor`: `bg-marca-600` / `bg-orange-600`). O **botão primário continua sempre no verde da marca**, como manda o design system — não colorir o botão por tipo.
-- **Campos comuns aos três tipos:**
-  - **Tipo de OS (Predial/Corretiva) NÃO é escolhido aqui (REGRA DE NEGÓCIO):** na prática o Solicitante não sabe distinguir os dois — ele relata o problema, não classifica o serviço. A classificação entra no fim do fluxo, por quem executou (ver itens 11 e 12). A `SolicitacaoOS` **não tem** `tipoDefeito`; quem tem é a `OrdemServico`.
-  - **Solicitante / Setor:** somente leitura. O rótulo e a origem mudam: "Setor da Máquina" (derivado da máquina selecionada) em Maquinário, "Setor" (da sessão) em Pequenos Reparos. **Não são enviados** — o servidor os deriva.
-  - **Data/Hora:** somente leitura, capturada uma única vez na abertura da tela (`useState(() => agoraParaBackend())`). É **confirmação visual**; o instante gravado é o do servidor e não faz parte do payload.
-  - **Descrição \***: `textarea` com contador. Limites por tipo em `LIMITES_DESCRICAO`: 20–1000 para Maquinário, 10–500 para Pequenos Reparos.
-  - **Foto \* (REGRA DE NEGÓCIO):** obrigatória **nos três tipos** — sem imagem o Gestor não tem como avaliar antes de abrir a OS. `UploadFoto` (`capture="environment"` para abrir a câmera nativa no celular), controlada fora do React Hook Form (`useState<File | null>`) e validada no `aoEnviar`, bloqueando o envio com toast. O rótulo vira "Foto do Item" em Pequenos Reparos.
-- **Campos por tipo:**
-  - **Maquinário:** **Máquina \*** (`CamposMaquina` — select + `PreviaMaquina`, restrito a `useMaquinas({ setorId, lojaId })` da sessão) e **Vídeo do Defeito (opcional)** (`UploadVideo`), útil quando o defeito só se entende em movimento.
-  - **Maquinário:** **Impacto na Produção** (`CamposImpacto`) — um **único marcador, opcional**: `Afeta Produção` (`marcadoresImpacto`). Vai em `impactos` e é exibido ao Gestor no `ModalDetalhesSolicitacao` (item 6). **Não é informativo: é ele que liga o relógio de máquina parada da OS** (ver item 9) — por isso a tela explica a consequência ao lado do marcador, e por isso ele não existe nos outros dois tipos.
-  - **Pequenos Reparos:** **Item \*** — texto livre (ex: "Lâmpada de LED"), sem cadastro prévio; volta em `itemDescricao`, com `maquinaId`/`maquinaNome`/`maquinaCodigo` nulos.
-- **Validação (`esquemaNovaSolicitacao.ts`):** um esquema **plano com `superRefine`**, e não uma `z.discriminatedUnion` — o React Hook Form registra os campos antes de o tipo ser escolhido, então a obrigatoriedade de cada campo é resolvida a partir de `dados.tipo` no momento do envio. Os selects usam `setValueAs` para transformar a opção vazia em `undefined` (e não em `NaN`/`''`), fazendo o Zod responder a mensagem certa. A página distribui o formulário aos subcomponentes via `FormProvider`/`useFormContext`.
-- **Envio:** `servicoSolicitacoes.criarPorTipo(envio, foto, video?)` despacha para o endpoint do tipo — `POST /solicitacoes/maquinario` ou `/reparo`, ambos em multipart. `montarEnvio` converte o formulário plano no `EnvioNovaSolicitacao` (união discriminada por `tipo`, definida em `servicoSolicitacoes.ts`).
-- **Um pipeline só (REGRA DE NEGÓCIO):** os dois tipos aparecem na aba `Solicitações` do Gestor (item 6), recebem Técnico + Urgência via `ModalAbrirOrdemServico` (item 10), passam por `Aberta`/`Em Andamento`/`Pausada`/`Concluída` no Painel do Técnico (item 9) e só viram "Finalizada" com o custo lançado (item 12/13). **Toda OS passa pelo Técnico** — inclusive a que ele encaminha para uma empresa externa.
-
-### 4. Tela de Minhas Solicitações (`MinhasSolicitacoes`)
-- **Estrutura:** layout cinza, barra de pesquisa e filtros em badges (`Todos`, `Pendente`, `Convertida`, `Rejeitada`) — `BarraFiltros` local.
-- **Listagem & Paginação:** `useSolicitacoes({ pagina, status, busca })` → `GET /solicitacoes/minhas` devolvendo `RespostaPaginada<SolicitacaoOS>`. **Paginação e filtros são do servidor**; a tela usa `placeholderData: keepPreviousData` para não piscar entre páginas. Cards (`CardSolicitacao`) mostram número, status, tipo e descrição — e, quando `status === 'Rejeitada'`, o **motivo da rejeição** escrito pelo Gestor (item 6) em destaque vermelho.
-- O servidor restringe a listagem ao solicitante autenticado — não há parâmetro de "quem sou eu" no cliente.
-
-### 5. Tela de Cadastro de Máquinas (`CadastrarMaquina` - Administrador)
-- **Acesso:** Administrador (card "Máquinas" no Painel, item 12) — **não** faz parte do fluxo do Solicitante nem do Gestor. O Solicitante só enxerga as máquinas já cadastradas do seu setor (item 3).
-- **Foto:** área pontilhada com preview local via `URL.createObjectURL`; o arquivo sobe como parte `foto` do multipart e o servidor devolve a `fotoUrl` definitiva na `Maquina`.
-- **Campos Loja/Setor (cascata):** o Administrador escolhe a Loja e, só então, o Setor — a lista vem de `useSetores(lojaId)` e o select fica desabilitado enquanto não houver loja. **Apenas `setorId` é enviado**; a loja é derivada do setor no servidor (ver `NovaMaquinaPayload`). Trocar a loja limpa o setor escolhido, e essa limpeza fica no `onChange` do select — não num `useWatch` da loja — para não apagar o setor que o `reset()` acabou de preencher ao carregar a máquina em edição.
-- **Integração de Preventivas (REGRA DE NEGÓCIO):** o envio é bloqueado sem **pelo menos uma preventiva** (`z.array(...).min(1)`). As preventivas viajam **na mesma requisição** da máquina (parte `dados` do multipart) — o servidor grava máquina e preventivas na mesma transação. `servicoMaquinas` converte cada `proximaData` de `YYYY-MM-DD` (vindo do `<input type="date">`) para `dd/mm/yyyy` antes de enviar.
-- **Edição (`/cadastrar-maquina/:id`):** reaproveita a mesma tela; carrega a máquina (`servicoMaquinas.obterPorId`) e suas preventivas (`servicoPreventivas.listar({ maquinaId })`), preenchendo o formulário. Ao salvar, `PUT /maquinas/:id` **substitui** o conjunto de preventivas pelo enviado (não faz merge incremental).
-
-### Modal / Tela de Nova Manutenção Preventiva (`ModalManutencaoPreventiva`)
-- **Cabeçalho:** faixa verde sólida (`bg-marca-600`) com "PAINEL DO GESTOR" (letras miúdas) e "Nova Manutenção Preventiva" em destaque, com botão de fechar (X).
-- **Campos (Zod):**
-  - **MÁQUINA \***: select da máquina vinculada (`maquinaId`).
-  - **DESCRIÇÃO \***: `textarea` do procedimento ("Descreva o procedimento de manutenção...").
-  - **INTERVALO (DIAS) \***: numérico ("Ex: 30").
-  - **PRÓXIMA DATA \***: `<input type="date">` (convertido para `dd/mm/yyyy` no envio).
-  - **Status (Ativa):** `Alternador` (switch) com o texto "Preventiva habilitada no sistema".
-- **Botões:** "Cancelar" (neutro) e "Salvar" (verde com ícone).
-- **Técnico Responsável \* (REGRA DE NEGÓCIO):** select alimentado por `useTecnicos(lojaId)`, obrigatório. É ele quem recebe a OS quando a preventiva vencer, e por isso o botão "Adicionar" de `CampoPreventivas` fica desabilitado enquanto a Loja não for escolhida no formulário da máquina — sem loja o select viria vazio e o cadastro travaria num campo obrigatório sem opção. Na edição, preventiva antiga sem técnico entra como `0` e o Zod obriga a escolher um antes de salvar.
-- **Abertura Automática de OS ao Vencer (REGRA DE NEGÓCIO):** ao chegar (ou passar) a `proximaData` de uma preventiva **ativa**, o sistema abre sozinho a Solicitação **e a Ordem de Serviço**, sem ação de ninguém. A solicitação nasce com `origem: 'preventiva'` (`OrigemSolicitacao`), `preventivaId`, `solicitanteId`/`solicitanteNome` **nulos** (não houve pessoa) e status **`Convertida`**; a OS nasce `Aberta`, urgência `Baixa`, no nome do técnico escolhido no cadastro.
-  - ⚠️ **Preventiva NÃO passa pela fila do Gestor** (mudou no back-end em 04/09/2026). O trabalho já foi aprovado quando a máquina foi cadastrada, então a segunda aprovação a cada ciclo não decidia nada. O Gestor continua acompanhando pelas abas `OS em Andamento` e `Manutenção Prev.`; ele só perdeu o clique em "Abrir OS". Não devolva a preventiva para a aba `Solicitações`: ela nunca chega a existir `Pendente`.
-  - A solicitação **continua existindo** e é a origem da OS: é dela que sai `dataSolicitacao`, de onde parte o relógio de Horas Parada (item 9), e é ela que o card do Técnico busca para mostrar o problema.
-  - `afetaProducao` é sempre `false` nessas OS — não há Solicitante para marcar impacto —, então Horas Parada mostra "Não se aplica".
-  - **Isso é um job/cron do back-end**; o front só reage ao que chega. O destaque visual (`BadgeOrigemPreventiva`, borda/ícone em âmbar) segue no `CardSolicitacaoGestor` e no `ModalDetalhesSolicitacao`, e o flag `vencida` continua vindo calculado em `PreventivaListada`. No `CardOrdemServicoTecnico`, OS sem `solicitanteNome` escreve "Manutenção preventiva agendada" no lugar de "Solicitado por" vazio.
-
-### 6. Painel do Gestor (`PainelGestor`)
-- **Navegação:** abas `Solicitações`, `OS em Andamento`, `OS Finalizadas`, `Manutenção Prev.`.
-- **Fontes de dados:** `useTodasSolicitacoes` (`GET /solicitacoes`), `useOrdensServicoTodas` (`GET /ordens-servico`) e `usePreventivas` (`GET /preventivas`) — **todas já restritas ao escopo do gestor pelo servidor**.
-- **Agrupamento por Loja e Setor:** listagem separada em blocos por Loja (`BlocoLoja`, ex: "Loja: Loja 2 - Filial Sul") e, dentro de cada bloco, subdividida por Setor quando o escopo não cobre a loja inteira. Escopos com `setores: 'todos'` exibem a loja sem subdivisão. Montado por `agruparPorEscopoGestor` sobre os escopos da sessão.
-- **Fila do Gestor tem dois status (`FiltroStatusSolicitacao`):** dentro da aba `Solicitações`, um par de pílulas alterna entre **Pendentes** (esperando decisão) e **Rejeitadas** (histórico do que ele recusou), cada uma com a contagem ao lado. A contagem é do total no escopo, **sem** aplicar o filtro de tipo nem os avançados — o número precisa dizer quanto existe, não quanto sobrou do filtro atual. Em `Rejeitadas` o card fica somente leitura (só o botão de visualizar) e exibe o motivo. `Convertida` não aparece nessa fila: virou OS, e o acompanhamento passa para as abas de OS.
-- **Rejeitar (REGRA DE NEGÓCIO — a fila precisa ter saída):** na aba `Solicitações`, o `CardSolicitacaoGestor` tem um botão **Rejeitar** (vermelho discreto, ao lado do primário) que abre o `ModalRejeitarSolicitacao`. O **motivo é obrigatório** (`esquemaRejeitarSolicitacao`, 10–300 caracteres): rejeitar em silêncio devolve o Solicitante ao ponto de partida e ele reabre o mesmo pedido. Chama `servicoSolicitacoes.rejeitar` (`POST /solicitacoes/:id/rejeitar` com `RejeicaoSolicitacaoPayload`), que marca a solicitação como `Rejeitada` **sem criar `OrdemServico`**, e invalida as mesmas listas da aprovação. O motivo volta em `SolicitacaoOS.motivoRejeicao`/`rejeitadoPorNome` e é exibido ao Solicitante no `CardSolicitacao` de Minhas Solicitações (item 4) e no `ModalDetalhesSolicitacao`. Sem esse caminho, uma solicitação duplicada ou aberta por engano ficaria `Pendente` para sempre, poluindo a fila do Gestor.
-- **Ações por Solicitação:** cada `CardSolicitacaoGestor` tem um botão de visualização (ícone de olho) abrindo o `ModalDetalhesSolicitacao` — somente leitura, com máquina/item, loja, setor, solicitante, data/hora, status, descrição e o marcador Afeta Produção (sem Tipo de OS — a solicitação nasce sem classificação). Na aba `Solicitações`, o card também tem o botão **"Abrir OS"** (abre o `ModalAbrirOrdemServico`, item 10) — um só, para os dois tipos. `BadgeTipoOS` identifica Maquinário/Terceiros/Reparo nas listagens de OS.
-- **Evidências visuais no `ModalDetalhesSolicitacao`:** três blocos exibidos só quando existirem — **Foto da Máquina (cadastro)** via `solicitacao.maquinaFotoUrl` (resolvida pelo servidor, evitando uma segunda consulta só para montar o modal); **Foto do Item/Defeito** e **Vídeo do Defeito**, ambos vindos de `solicitacao.anexos` (`AnexoSolicitacao[]`, filtrados por `tipo: 'foto' | 'video'`). O rótulo da foto muda para "Foto do Item" quando `tipo === 'reparo'`. É como o Gestor avalia o problema antes de aprovar/abrir a OS.
-- **Filtro por Tipo de Solicitação:** `FiltroTipoOS` (`/src/componentes/FiltroTipoOS.tsx`) acima das abas, restringindo a `Maquinário`, `Terceiros` ou `Pequenos Reparos` (ou "Todos os tipos") — `Terceiros` aqui filtra as OS que o Técnico encaminhou (item 9). **O rótulo é "Tipo de Solicitação", não "Tipo de OS"** — este último passou a significar Predial/Corretiva (item 11), e os dois na mesma tela com o mesmo nome confundiriam. O mesmo componente é reaproveitado em `AdministradorCustosPendentes`/`AdministradorOSFinalizadas`.
-- **Filtros Avançados (`ModalFiltrosOS` + `filtrosOS.ts`):** botão em `AcoesRapidas` (com contador de filtros ativos) abre um modal com **Máquina** (texto livre + sugestões via `datalist` montado a partir das OS/solicitações carregadas), **Loja** (lista fechada), **Período** (`dataInicio`/`dataFim`, comparados por `dataEstaNoIntervalo`) e **Valor mínimo/máximo**. O filtro de valor usa o **custo total já lançado** (`custoHoraTecnico + custoManutencao`); itens sem custo definido (solicitações e OS em andamento) só "combinam" quando nenhum filtro de valor está ativo. Aplicado no cliente sobre o que o servidor já devolveu.
-- **Aba "OS em Andamento" (REGRA DE NEGÓCIO — acompanhamento, não controle):** o botão `Pausar` continua sendo do Técnico (item 9) — ele é quem está na frente do problema quando falta uma peça, e fazer o Gestor aprovar cada pausa criaria um gargalo. Esta aba dá **visibilidade em tempo real**: lista toda OS com `statusExecucao !== 'Concluída'` dentro do escopo, agrupada por Loja/Setor. Cada `CardOSEmExecucao` (somente leitura, sem botões de ação) mostra técnico responsável, quando a OS foi aberta/iniciada e — com destaque em âmbar — o motivo da pausa atual (`ordem.pausaAtual.motivo`) quando `statusExecucao === 'Pausada'`.
-- **Aba "OS Finalizadas" (REGRA DE NEGÓCIO):** só entra aqui a OS que passou por **todas as etapas com sucesso** — `statusExecucao === 'Concluída'` **e** `finalizada === true` (flag que o servidor calcula: Técnico encerrou **e** custo lançado). Não é baseada em `SolicitacaoOS.status === 'Convertida'` (uma solicitação "Convertida" só significa que uma OS foi aberta — o trabalho pode ainda estar rolando). Cada `CardOSFinalizada` tem os botões **Visualizar** (`Eye`) e **Imprimir** (`Printer`), abrindo o `ModalDetalhesOS` compartilhado com `contexto="Painel do Gestor"` (item 13).
-- **Ações Rápidas:** o Gestor ficou restrito à operação (aprovar solicitação, abrir OS, acompanhar preventivas, filtrar). Os botões em `AcoesRapidas` são `Abrir OS` (verde, `/abrir-os-direta`, item 10b), `Indicadores` (`/dashboard-gestor`, item 8) e `Filtros`. Todo cadastro/CRUD foi centralizado no Administrador (item 12); o Gestor não acessa `/cadastrar-usuario`, `/cadastrar-loja` nem `/cadastrar-setor`.
-- **Setor é cadastro dinâmico, referenciado por id (REGRA DE NEGÓCIO):** não existe lista fixa de setores — quem cadastra é o Administrador (`AdministradorSetores`/`CadastrarSetor`, item 12), com nome livre e **unicidade por loja**. A antiga union estática `setoresDisponiveis`/`Setor` foi **removida**: todo setor é um `SetorCadastrado` (`/src/tipos/setor.ts`: `id`, `nome`, `lojaId`), e todo lugar que aponta para um setor usa **`setorId`**, nunca o nome. Consequências obrigatórias ao mexer em qualquer tela:
-  - **Comparação é sempre por id.** Dois setores "Padaria" em lojas diferentes são registros distintos — comparar por nome os confunde. Vale para `gestorTemAcesso`/`filtrarPorAcessoGestor`/`agruparPorEscopoGestor` (`acessoGestor.ts`) e para `agruparPorSetorLoja`.
-  - **Nome é só para exibição, e vem denormalizado do servidor** (`setorNome` em `Maquina`, `SolicitacaoOS`, `OrdemServico`, `PreventivaListada` e na sessão), no mesmo padrão de `lojaNome`/`maquinaNome`/`tecnicoNome`. Não monte o nome buscando numa lista quando o registro já o traz.
-  - **Selects de setor são em cascata a partir da loja** (`useSetores(lojaId)`), porque a lista só faz sentido dentro de uma loja.
-  - **Exceção:** `agruparPorEscopoGestor` recebe a lista de setores (`useSetores()`) além da de lojas, porque precisa nomear o cabeçalho de um subgrupo **vazio** — nesse caso não há item de onde tirar o `setorNome`.
-
-### 7. Tela de Cadastro de Usuário (`CadastrarUsuario` - Administrador)
-- **Acesso:** card "Usuários" no Painel do Administrador, rotas `/cadastrar-usuario` (criação) e `/cadastrar-usuario/:id` (edição). É onde o Administrador cria o login de Solicitantes, Técnicos, Gestores e outros Administradores (não há auto-cadastro).
-- **Campos (Zod, `esquemaCadastrarUsuario`):**
-  - **Perfil (Role) \***: `SeletorPerfil` (compartilhado com a Tela de Login).
-  - **Nome \***, **E-mail \***, **Senha \*** (mín. 6 caracteres), **Telefone** (opcional).
-  - **Loja(s) \***: seleção entre as lojas cadastradas (`useLojas`). Solicitante vincula-se a **exatamente uma** (o esquema rejeita mais de uma); Técnico e Gestor podem ter **múltiplas**. **Não se aplica ao Administrador** — para esse perfil, `CamposAcesso` esconde Loja/Setor/Área e mostra só um aviso informativo.
-  - **Setor(es)**: **não aparece para Técnico nem Administrador**. Solicitante: seleção **única** (obrigatória). Gestor: seleção **múltipla**, com a alternância **"Acesso total aos setores"** que dispensa a seleção manual e equivale a `setoresIds: 'todos'` para todas as lojas marcadas. As opções são os setores **das lojas já selecionadas** (`useSetores()` filtrado por `lojasIds`) — com mais de uma loja marcada, o nome da loja entra no rótulo, porque setores homônimos em lojas diferentes são registros distintos. Desmarcar uma loja poda automaticamente os setores dela que estavam selecionados.
-  - **Área de Atuação \***: **somente para Técnico**, em substituição ao Setor. Seleção única entre `areasTecnico` (`Refrigeração`, `Elétrica`, `Mecânica`, `Hidráulica`, `Máquinas em Geral`). É a área exibida junto ao nome no seletor de "Técnico Responsável" (item 10). O cadastro de Técnico **não tem** Valor/Hora — o Custo Hora é informado por ele em cada encerramento (item 11).
-- **Superfície única de escrita (`servicoUsuarios`):** os quatro perfis, **inclusive Técnico**, são criados/editados/excluídos por `/usuarios`. Técnico envia `area` e tem os setores ignorados pelo servidor. No banco é a mesma tabela — manter duas superfícies de escrita permitiria o mesmo e-mail cadastrado duas vezes. `GET /tecnicos` é apenas uma **projeção somente-leitura** para o select de Técnico Responsável e para a listagem de `AdministradorTecnicos` (item 12).
-- **Senha na edição:** `AtualizarUsuarioPayload` torna `senha` opcional — omitida, o servidor mantém o hash atual.
-- **Observação de Modelagem:** o mesmo conjunto de setores/acesso-total é aplicado a todas as lojas marcadas no cadastro — ainda não há configuração de setores distintos por loja num único formulário (um Gestor com acesso parcial numa loja e total noutra exige editar depois).
-
-### 8. Painel de Indicadores de Máquinas (`DashboardGestor`)
-- **Acesso:** ação rápida "Indicadores" no Painel do Gestor (`/dashboard-gestor`, `perfis={['gestor']}`).
-- **Seletor Dinâmico:** máquinas agrupadas por Loja e, dentro dela, por Setor, respeitando os escopos do Gestor — reaproveita `agruparPorEscopoGestor` sobre `useMaquinas()`.
-- **Métricas:** `useIndicadoresMaquina(maquinaId)` → `GET /indicadores/maquinas/:id` (`IndicadoresMaquina`, `/src/tipos/indicadorMaquina.ts`), exibindo Horas Parada, MTTR, MTBF e Custo Total da máquina, além de um gráfico de rosca (paradas por Tipo de OS — Predial/Corretiva, classificação feita no encerramento, item 11) e um de barras mensais (Custo Total, últimos 6 meses). **O cálculo é todo do servidor**, a partir do histórico real de OS encerradas (datas, pausas, `custoHoraTecnico` + `custoManutencao`).
-- **Gráficos:** SVG/CSS local (`GraficoRosca`, `GraficoBarras` em `DashboardGestor/componentes/`), sem biblioteca de terceiros — consistente com a preferência do projeto por implementações nativas (ver `api.ts`). Paleta categórica fixa por Tipo de OS em `coresTipoDefeito.ts` (duas entradas: `Predial`, `Corretiva`).
-
-### 9. Tela Principal do Técnico (`PainelTecnico`)
-- **Acesso:** o login com perfil Técnico traz `tecnicoId` no payload da sessão e redireciona para `/painel-tecnico` (`perfis={['tecnico']}`). A listagem usa `useOrdensServicoTecnico(tecnicoId)` → `GET /ordens-servico?tecnicoId=` — **o servidor restringe às OS do técnico autenticado**; o id vai junto apenas para compor a chave de cache. **Toda OS passa por ele** — Maquinário, Pequenos Reparos e também as que ele mesmo encaminhou para uma empresa externa.
-- **Abas:** `OS em Aberto` (padrão — status `Aberta` e `Em Andamento`), `Pendentes / Pausadas` (status `Pausada`) e `OS Concluídas`.
-- **Aba "OS Concluídas" usa a flag `finalizada` (REGRA DE NEGÓCIO):** lista as OS com `ordem.finalizada === true`, a mesma regra de "OS Finalizada" do Gestor e do Administrador (itens 6/13). Para Maquinário/Reparo o Técnico já preenche `custoManutencao` no encerramento (item 11), então a OS costuma entrar direto nessa aba; uma OS encerrada mas ainda sem custo lançado fica invisível nas abas dele até o lançamento.
-- **Agrupamento por Setor + Loja:** dentro de cada aba, blocos por combinação de Setor e Loja (ex: "Açougue - Loja 1"), via `agruparPorSetorLoja` (`/src/utilitarios/agruparPorSetorLoja.ts`) + `BlocoSetorLoja`. É agrupamento **visual** (sem regra de acesso, diferente do `agruparPorEscopoGestor`), útil porque um Técnico pode atender múltiplas lojas.
-- **Ver a solicitação de origem:** o card tem uma ação que busca `servicoSolicitacoes.obterPorId(ordem.solicitacaoId)` e abre o `ModalDetalhesSolicitacao` — o Técnico vê a foto/vídeo do defeito e os impactos informados pelo Solicitante.
-- **Sem Valor/Hora cadastrado (REGRA DE NEGÓCIO):** o Técnico não tem `valorHora` fixo no cadastro (itens 7/12) — ele informa o Custo Hora em cada encerramento (item 11), podendo variar por OS.
-- **Acionar Terceiro (REGRA DE NEGÓCIO — terceirizar é decisão do Técnico):** o Técnico recebe **toda** OS, olha o problema e decide se resolve ou chama uma empresa externa. O botão (ícone `Truck`, azul) fica no `CardOrdemServicoTecnico` enquanto a OS não estiver `Concluída` — inclusive `Pausada`, que é onde ela costuma ficar esperando a empresa aparecer — e abre o `ModalAcionarTerceiro`, com um único campo: **Empresa Terceirizada \*** (`useEmpresasTerceirizadas`). Chama `servicoOrdensServico.acionarTerceiro` (`POST /ordens-servico/:id/acionar-terceiro`, `AcionamentoTerceiroPayload`).
-  - **Acionar não encerra nada:** a OS **continua com o Técnico**, com a mesma urgência e os mesmos dois relógios correndo. Só muda `tipo` para `'terceiros'` e ganha `empresaTerceirizadaId`. **Quem encerra continua sendo o Técnico**, quando a empresa termina o serviço — é ele quem recebe o trabalho e sabe descrever defeito/causa/solução.
-  - Se o atendimento vai demorar, o caminho é **Pausar** com o motivo — assim a espera não conta como hora trabalhada, enquanto a máquina parada segue contando (ver os dois relógios abaixo).
-  - O card mostra "Terceiro acionado: {empresa}" e o botão passa a oferecer a troca da empresa. Acionar de novo apenas substitui.
-- **Ciclo de Vida da OS (`StatusExecucaoOS`):** `Aberta` → `Em Andamento` → `Concluída`, com `Pausada` acessível a partir de `Aberta` ou `Em Andamento`. Cada transição é **uma chamada ao servidor**, que devolve a OS atualizada:
-  - **Aberta:** recém-atribuída pelo Gestor, não iniciada. Card mostra `Pausar` e `Iniciar Atendimento`.
-  - **Iniciar Atendimento:** `POST /ordens-servico/:id/iniciar` — o servidor grava `dataInicio` e abre a primeira sessão de trabalho. Card passa a mostrar `Pausar` e `Finalizar OS` (destaque verde, abre o modal do item 11).
-  - **Pausar:** abre `ModalPausarOrdemServico` (Zod + `textarea` obrigatória para o motivo, ex: "aguardando peça") e chama `POST /ordens-servico/:id/pausar` com `{ motivo }`. O servidor registra uma `PausaOrdemServico` (com `pausadaEm` e o `statusAnterior`) e o card exibe `pausaAtual.motivo`.
-  - **Retomar Atendimento:** `POST /ordens-servico/:id/retomar` — o servidor devolve a OS ao `statusAnterior` registrado na pausa, fecha a pausa (`retomadaEm`) e reabre a sessão de trabalho quando volta para `Em Andamento`.
-  - **Concluída:** somente leitura; o card tem um botão de visualização (ícone de olho) abrindo o `ModalDetalhesEncerramento` com os dados de `ordem.encerramento`.
-- **Lacuna conhecida — sem auditoria de "quem" fez cada transição:** o modelo grava **quando** (`dataInicio`, `pausadaEm`/`retomadaEm` em cada `PausaOrdemServico`) mas não **quem** iniciou, pausou ou retomou. Hoje isso só é *inferível* — `tecnicoId` é fixo na OS e o servidor só aceita `iniciar`/`pausar`/`retomar` do técnico responsável (ver RBAC) — não é uma auditoria de verdade: não é uma linha própria com ator + timestamp + de/para, e quebra no dia em que uma OS puder trocar de técnico. Não existe uma tabela de eventos genérica (`os_evento`: `status_anterior`, `status_novo`, `usuario_id`, `ocorrido_em`) cobrindo toda transição numa timeline só — ver "Pontos em aberto" em `docs/modelagem-banco-dados.md`.
-- **Horas Trabalhadas vs. Horas Parada (REGRA DE NEGÓCIO — dois relógios independentes):**
-  - **Só conta parada quem parou (REGRA DE NEGÓCIO):** o relógio de máquina parada só roda na OS marcada como **`Afeta Produção`** pelo Solicitante (item 3). O servidor deriva essa decisão na flag **`ordem.afetaProducao`**; com ela falsa, a máquina seguiu operando durante o atendimento, `horasParada` **não vem** na resposta e as telas exibem **"Não se aplica"** (nunca `0h`, que sugeriria uma parada instantânea). No Painel do Técnico, o `BadgeAfetaProducao` ("Máquina Parada", vermelho) marca no card quais OS estão nessa condição.
-  - **O relógio de parada começa na solicitação, não na abertura da OS (REGRA DE NEGÓCIO):** **Horas Parada** corre **sem interrupção** de **`ordem.dataSolicitacao`** (o `criadoEm` da solicitação de origem, denormalizado pelo servidor na OS como `maquinaNome`/`lojaNome`) até `dataFim`. A máquina já estava parada enquanto a solicitação esperava na fila do Gestor — contar a partir de `dataAbertura` esconderia justamente o tempo de espera pela aprovação, que é o que o indicador de indisponibilidade precisa expor. Também não desconta pausas do técnico, porque a máquina segue parada enquanto ele espera uma peça. `dataAbertura` continua existindo (é quando o Gestor abriu a OS), mas **não é mais o marco de nenhum dos dois relógios**.
-  - **Horas Trabalhadas** (mão-na-massa) soma apenas as sessões de trabalho, a partir de `dataInicio`, fechadas a cada pausa e reabertas a cada retomada.
-  - **Ambas são calculadas pelo servidor** a partir de `dataSolicitacao`/`dataInicio`/`dataFim` e do histórico de `pausas`, e chegam prontas em `ordem.horasTrabalhadas` / `ordem.horasParada` (só existem em OS encerrada). O utilitário `calcularHoras` (`/src/utilitarios/calcularHoras.ts`) é usado **apenas como prévia visual** no modal de encerramento, antes de o servidor responder.
-
-### Modal de Acionamento de Terceiro (`ModalAcionarTerceiro` - Técnico)
-- **Cabeçalho em azul** (`from-blue-500 to-blue-600`), a mesma cor que identifica Terceiros em `BadgeTipoOS` e no `CardAcao`.
-- **Campo único:** **Empresa Terceirizada \*** (`esquemaAcionarTerceiro`), com nome e especialidade.
-- **Aviso:** deixa explícito que a OS continua com o Técnico, que os relógios seguem correndo e que esperar a empresa deve ser registrado como **Pausa**.
-- **Botões:** `Cancelar` (neutro) e `Acionar` (azul, ícone `Truck`).
-
-### Modal de Pausa de OS (`ModalPausarOrdemServico` - Técnico)
-- **Cabeçalho:** padrão dos demais modais — faixa de cor cheia (`bg-marca-600`; vermelha nos destrutivos, azul no de terceiro), "PAINEL DO TÉCNICO" em letras miúdas e "Pausar OS · #id" em destaque.
-- **Aviso:** deixa explícito que a pausa só afeta o relógio de horas do técnico — o tempo de máquina parada continua contando.
-- **Campo:** `Motivo da Pausa *` (`textarea`, Zod obrigatório, ex: "Aguardando peça de reposição do fornecedor.").
-- **Botões:** `Cancelar` (neutro) e `Pausar OS` (verde, com ícone).
-
-### 10. Modal de Abertura de OS (`ModalAbrirOrdemServico` - Gestor)
-- **Único modal de abertura:** atende os dois tipos abríveis (`maquinario` e `reparo`) — ambos precisam de Técnico + Urgência, porque toda OS passa pelo Técnico.
-- **Nível de Urgência \***: cards coloridos (Baixa/Média/Alta → `IdUrgencia`).
-- **Técnico Responsável \***: select com os técnicos disponíveis para a loja da solicitação (`useTecnicos(lojaId)` → `GET /tecnicos?lojaId=`), exibindo nome **e área de atuação** (ex: "Roberto Alves — Refrigeração").
-- **Data/Hora:** exibida como confirmação (`new Date()` local), **não é campo editável e não é enviada** — o instante da abertura é fato do servidor.
-- O marcador **Afeta Produção** **não** é preenchido aqui — vem do Solicitante (item 3), é exibido no `ModalDetalhesSolicitacao` (item 6) e define se a OS acumula tempo de máquina parada (item 9).
-- **Ao salvar:** `servicoSolicitacoes.abrirOS` → `POST /solicitacoes/:id/abrir-os` com `{ urgencia, tecnicoId }`; o servidor cria a `OrdemServico` e marca a solicitação como `Convertida`. A tela invalida `['solicitacoes-os-todas']` e `['ordens-servico-todas']`.
-
-### 10b. OS direta (`AbrirOSDireta` - Gestor e Administrador)
-- **Para quando o Solicitante não está disponível:** o Gestor (botão `Abrir OS` em `AcoesRapidas`) ou o Administrador (card `Abrir OS` no painel) abre a OS sem passar pela fila, em `/abrir-os-direta`. Solicitação e OS nascem juntas no servidor (`POST /solicitacoes/direta`); a solicitação vem com `origem: 'direta'`, status `Convertida` e `solicitanteNome` = quem abriu. **Sem foto e sem WhatsApp.**
-- **Campos:** os da Nova Solicitação (`SeletorTipoSolicitacao`, `CamposMaquina`, `CamposImpacto`, mesmas regras via `validarCamposPorTipo`), mais **Setor \*** no reparo (o Gestor não tem setor único — o select é filtrado pelos `escoposGestor` só por organização; o servidor recusa fora do escopo com 400), **Urgência \*** (`SeletorUrgencia`, compartilhado com o item 10) e **Técnico \***.
-- **Técnico tem que atender a loja (REGRA DE NEGÓCIO, vale também para o item 10):** o select usa `useTecnicos(lojaId)` da máquina/setor escolhido e fica desabilitado até a loja ser conhecida; o servidor recusa técnico de outra loja com 400, tanto aqui quanto no `abrir-os` da fila.
-- ⚠️ **Urgência/técnico/setor são cobrados no `superRefine`** (`esquemaAbrirOSDireta`), não no objeto base: o Zod pula o `superRefine` quando o base falha, e os erros de máquina/descrição só apareceriam na segunda tentativa.
-- **Verificado no navegador (04/10/2026, modo mock):** maquinário e reparo abertos pelo Gestor, OS aparecendo em `OS em Andamento`, setor filtrado pelo escopo, técnico filtrado pela loja, todos os erros no primeiro envio. O card do Administrador não foi percorrido em tela.
-
-### 11. Modal de Encerramento de OS (`ModalEncerrarOrdemServico` - Técnico)
-- **Acesso:** botão `Finalizar OS` do card, disponível apenas com a OS `Em Andamento` (item 9).
-- **Formulário de Execução (`esquemaEncerrarOrdemServico`, todos obrigatórios):**
-  - **Tipo de OS \* (REGRA DE NEGÓCIO — quem classifica é quem executa):** `Predial` ou `Corretiva` (`tiposDefeito`). Sai daqui, e não da tela do Solicitante (item 3): só quem foi até a máquina sabe dizer se o serviço foi predial ou corretivo. Vai em `EncerramentoOrdemServicoPayload.tipoDefeito` e passa a viver em `ordem.tipoDefeito` — é a fonte do gráfico de rosca do Dashboard (item 8).
-  - **Início / Término do Atendimento:** somente leitura. `dataInicio` é o instante gravado quando o Técnico clicou em "Iniciar Atendimento"; o término é o `agoraParaBackend()` capturado na abertura do modal. São **confirmação visual** — o servidor grava os instantes definitivos.
-  - **Horas Trabalhadas** e **Horas Parada:** exibidas automaticamente, somente leitura, como **prévia local** (`calcularHoras`) para o Técnico conferir — a de parada a partir de `ordem.dataSolicitacao` (item 9), não da abertura da OS. Os valores definitivos vêm calculados pelo servidor a partir do histórico de pausas e voltam na resposta. **Horas Parada só é calculada quando `ordem.afetaProducao`** — nas demais o campo mostra "Não se aplica" e o texto de apoio explica que a máquina seguiu operando (item 9).
-  - **Custos: uma lista de TAREFAS, não dois campos (REGRA DE NEGÓCIO).** `CampoItensCusto` (`/src/componentes`) com botão **Adicionar custo** e lixeira por linha. Cada linha é um serviço feito, com **Descrição**, **Manutenção (R$) \*** e **Hora do Técnico (R$)** lado a lado — preenchidos manualmente pelo Técnico, sem cálculo automático (ele não tem `valorHora` cadastrado). Trocar o rolamento e a fita da mesma máquina são duas linhas, cada uma com sua peça e sua mão de obra.
-    - **Não existe seletor de categoria, e não recrie um.** A primeira versão era uma linha por VALOR, com um select `Manutenção`/`Hora do Técnico`: para lançar duas peças o Técnico tinha que criar uma terceira linha só para a mão de obra, e o formulário o **bloqueava** até ele fazer isso. Duas peças não são duas mãos de obra; duas tarefas é que são.
-    - **A coluna Hora do Técnico some inteira fora de `tipo === 'maquinario'`** (`criarEsquemaItensCusto(permitirHoraTecnica)`): em `terceiros` quem trabalhou foi a empresa externa, em `reparo` o serviço não cobra hora técnica, e o banco proíbe a coluna nos dois. O modal explica por quê.
-    - ⚠️ **Maquinário NÃO exige hora técnica.** A regra existia quando o custo era um campo escalar obrigatório; com uma linha por tarefa ela obrigava a inventar uma tarefa só para carregar a mão de obra. Sem hora lançada o servidor grava zero.
-    - O rodapé soma ao vivo: **Manutenção**, **Hora do Técnico** e **Custo Total** em maquinário, só o total nos outros tipos (repetir o mesmo número duas vezes é ruído). **Os totais nunca são enviados** — o servidor soma o que gravou, e o payload não carrega total nenhum.
-  - **Teve nota fiscal?** (REGRA DE NEGÓCIO — quem declara é quem executou): alternador (`Alternador` via `Controller`), `temNotaFiscal`, **padrão desmarcado**. Só o Técnico que foi até a máquina sabe se houve compra com nota (peça, material, fatura da empresa) ou se foi só mão de obra. É essa declaração que faz a **lista de notas fiscais** aparecer para o Administrador em Custos Pendentes (item 12) — os números em si **não** são pedidos aqui, quem registra é ele. Sem esse campo, "OS que não gera nota" e "nota ainda não preenchida" seriam indistinguíveis na tela do Administrador. Coluna `os_custo.tem_nota_fiscal` (migration `000011`).
-  - **Defeito Constatado \***, **Causa Raiz \*** e **Solução \***: `textarea` de 10 a 500 caracteres cada.
-- **Botões:** `Cancelar` (neutro) e `Encerrar OS` (verde, com ícone).
-- **Ao salvar:** `servicoOrdensServico.encerrar` → `POST /ordens-servico/:id/encerrar` (`EncerramentoOrdemServicoPayload`). Os textos ficam em `ordem.encerramento` (junto com `encerradoPorNome`) e os valores em `ordem.custo`, disponíveis depois no `ModalDetalhesEncerramento` (aba `OS Concluídas`) e no `ModalDetalhesOS` (item 13).
-
-### 12. Painel do Administrador (`PainelAdministrador` - 4º perfil)
-- **Perfil:** `administrador`, com acesso total ao tenant (sem escopo de Loja/Setor). Login redireciona para `/painel-administrador` (`perfis={['administrador']}`).
-- **Home do Painel:** cards de navegação (`CardAcao`) para `Usuários`, `Lojas`, `Setores`, `Máquinas`, `Empresas Terceirizadas`, `Custos Pendentes` e `OS Finalizadas` — os dois últimos voltaram à grade em 05/09/2026, quando o ciclo de vida da OS ficou completo no back (ver "Verificação pelo navegador" no fim deste arquivo); `Técnicos` nunca existiu como tela.
-- **CRUD Completo em cada entidade:** telas de listagem próprias (`AdministradorUsuarios`, `AdministradorLojas`, `AdministradorSetores`, `AdministradorTecnicos`, `AdministradorMaquinas`, `AdministradorEmpresasTerceirizadas`) com **barra de busca** (`CampoBusca`), **filtros** (por perfil/loja/setor conforme a entidade), **Editar** (ícone lápis → tela de cadastro em modo edição via `/:id`, ou `ModalEditarTecnico` no caso de Técnicos) e **Excluir** (ícone lixeira + `ModalConfirmarExclusao`). Mobile-First obrigatório: cada linha empilha em coluna (`flex-col`) até `sm`, virando linha (`sm:flex-row sm:justify-between`) a partir daí, com `min-w-0`/`truncate` para não estourar em telas estreitas.
-- **Empresas Terceirizadas:** entidade simples (`EmpresaTerceirizada`: `nome`, `especialidade?`, `telefone?`), sem vínculo de Loja/Setor — cadastrada aqui e consumida pelo **Técnico** no `ModalAcionarTerceiro` (item 9).
-- **Técnicos — leitura e escrita separadas:** `AdministradorTecnicos` **lê** de `useTecnicos` (`GET /tecnicos`) e **escreve** via `servicoUsuarios.atualizar`/`deletar` (`/usuarios`), porque Técnico é um usuário com perfil `'tecnico'` (ver item 7). O botão "Novo Técnico" leva para `/cadastrar-usuario`.
-- **Paginação — duas estratégias:**
-  - **Servidor:** `AdministradorUsuarios` passa `busca`/`perfil`/`lojaId`/`pagina` para `GET /usuarios` e usa `resposta.dados` + `resposta.totalPaginas`.
-  - **Cliente:** as demais listagens recebem array simples e paginam com `Array.slice` em blocos de **10** (`TAMANHO_PAGINA`), usando o componente compartilhado `Paginacao` (`/src/componentes/Paginacao.tsx`).
-  - Em ambos os casos, a página volta para 1 quando busca/filtros mudam — ajuste feito **durante a renderização**, comparando uma chave dos filtros com o valor anterior, e não em `useEffect` (evita `setState` dentro de efeito).
-- **Custos Pendentes (`AdministradorCustosPendentes`)** — lista **toda** OS `Concluída` (`useOrdensServicoTodas({ status: ['Concluída'], busca, lojaId, tipo })`), com ou sem custo já lançado — busca, filtro por loja e `FiltroTipoOS` são resolvidos pelo servidor. Duas abas dentro da própria tela (`FiltroRevisaoCusto`, mesmo par de pílulas com contagem do `FiltroStatusSolicitacao` do Gestor, item 6): **Pendentes** (o que falta o Administrador olhar) e **Revisadas** (o que ele já editou). A OS troca de aba assim que `POST /custo` responde com sucesso — não some da tela, vira histórico.
-  - **A aba sai de `ordem.custo.revisadoEm`, resolvido no servidor.** `POST /ordens-servico/:id/custo` grava `os_custo.custo_revisado_em` (migration `000009` do back) e `GET /ordens-servico` devolve o campo — toda passagem do Administrador pelo endpoint conta como conferência. Vale para todos os Administradores, em qualquer aparelho (antes era `localStorage`, valia só num navegador).
-  - **Maquinário:** card mostra "Encerrada em" (`dataFim`), **Custo Hora do Técnico** e **Custo de Manutenção** (`—` quando vazios). O modal abre com **Horas Trabalhadas** (somente leitura) e os campos **Custo Hora Técnico (R$)** e **Custo de Manutenção (R$) \*** (obrigatório), já pré-preenchidos pelo Técnico no encerramento (item 11) — o Administrador só edita para corrigir.
-  - **Reparo:** sem **Custo Hora Técnico** (só o Custo de Manutenção), com um aviso explicando — mesma regra do encerramento (item 11).
-  - **A itemização do Técnico abre pré-preenchida, e o Administrador CORRIGE.** O modal usa o mesmo `CampoItensCusto` do encerramento (item 11): ele confere cada tarefa contra a nota, não digita do zero. É **substituição do conjunto**, não patch — a lista que volta é a completa. ⚠️ Isso significa que a itemização original do Técnico se perde na correção; ver o ponto 2 da seção 6 de `docs/modelagem-banco-dados.md` no back.
-  - **Notas fiscais são uma LISTA (REGRA DE NEGÓCIO).** `CampoNotasFiscais` (`/src/componentes`), com botão **Adicionar nota**, **Número \*** e **Série** por linha. São várias porque duas peças compradas em lojas diferentes geram dois documentos — o par escalar antigo só comportava o primeiro. Não há vínculo entre nota e item de custo, e isso é decisão: uma nota pode cobrir as duas peças e uma peça pode não ter nota nenhuma. Nota repetida na mesma OS volta **409** (`uq_nota_fiscal_os` com `NULLS NOT DISTINCT`).
-  - **Quem decide se há nota é o Técnico, no encerramento.** O alternador **"Teve nota fiscal?"** (`temNotaFiscal`) do item 11 é o que faz a lista aparecer aqui; desmarcado, o Administrador só confere os valores. O mesmo alternador existe neste modal para ele **corrigir** a declaração — sem isso, um Técnico que esqueceu de marcar deixaria a OS sem onde lançar a nota. Desmarcar **esvazia a lista** antes de enviar (`aoSalvarFormulario`), espelhando o que `gravarNotasFiscais` faz no servidor; sem isso o RHF mandaria as notas desmontadas e o back devolveria 400. Migrations `000010` (NF deixou de depender do tipo), `000011` (`tem_nota_fiscal`) e `000012` (nota vira tabela) no back. No **card** da listagem a linha de notas só aparece quando `custo.temNotaFiscal` — aí o âmbar "ainda não informada" é pendência real, não alarme falso em OS que nunca teve compra.
-  - ⚠️ **Os dois modais têm teto de altura e rodapé fixo** (`max-h-[75vh] overflow-y-auto` no `<form>`, botões em `sticky bottom-0`). Sem o teto o cartão crescia junto com as listas e passava da tela; sem o rodapé fixo o botão de salvar saía da dobra. A `padding-bottom` mora no rodapé, e não no `<form>`, senão sobra uma fresta de conteúdo aparecendo por baixo dele.
-  - ⚠️ **Custo `0` é válido em todos os campos de valor** (serviço sem peça, conserto em garantia). Toda soma e exibição de custo usa `??`, **nunca `||`** — `custoTotal` em `PainelGestor`, `CardOSFinalizada` e `AdministradorOSFinalizadas`, e os cards desta tela comparam com `!== undefined`. Trocar por `||` faria R$ 0,00 sumir e virar `—`. Nos esquemas Zod é `nonnegative()`, e no back `binding:"gte=0"` — nunca `required`, que rejeita zero em campo numérico.
-  - **Executada por terceiro:** também sem Custo Hora Técnico, e o modal exibe um aviso com o nome da empresa lembrando de conferir o Custo de Manutenção contra a **nota fiscal** dela. É o único tipo com a **Descrição do Serviço** (até 300 caracteres, o que a empresa fez conforme a NF, guardada em `ordem.custo.descricaoServicoTerceiro`) — o campo conta o que a *empresa externa* fez, e nos outros tipos quem fez foi o Técnico, que já escreveu isso no encerramento. O back recusa a descrição fora de terceiros (`ck_custo_por_tipo`). Os textos de defeito/causa/solução **não** aparecem aqui: a OS passou pelo Técnico como qualquer outra e já chega com eles preenchidos.
-  - **Ao salvar:** `servicoOrdensServico.lancarCustoManutencao` → `POST /ordens-servico/:id/custo` (`LancamentoCustoManutencaoPayload`) envia `itens` (a lista inteira de tarefas), `temNotaFiscal`, `notasFiscais` e `descricaoServicoTerceiro`. Nenhum total viaja no payload. O esquema voltou a depender do tipo (`criarEsquemaLancarCustoManutencao(exigirHoraTecnica)`) porque a regra da hora técnica passou a valer **por linha**, e o formulário precisa conhecê-la para não oferecer um campo que o servidor vai recusar.
-- **OS Finalizadas (`AdministradorOSFinalizadas`):** ver item 13.
-
-### 13. OS Finalizadas e Impressão de OS (Administrador + Gestor)
-- **Regra de Negócio — o que conta como "finalizada":** a OS passou por **todas as etapas com sucesso**: o Técnico encerrou o atendimento (item 11) **e** o custo de manutenção foi lançado (item 12). **Essa regra é resolvida no servidor e chega pronta na flag `ordem.finalizada`** — nenhuma tela recalcula. É o complemento exato de "Custos Pendentes".
-- **Duas entradas para a mesma regra:**
-  - **Administrador** (`AdministradorOSFinalizadas`, `/administrador/os-finalizadas`): `useOrdensServicoTodas({ finalizada: true, busca, lojaId, setorId, tipo })` — **todas** as OS finalizadas do tenant, com paginação client-side (10/página). Os quatro filtros são resolvidos no servidor e cumulativos. **Loja e Setor são um par dependente** (mesmo padrão de `AdministradorMaquinas`): `useSetores(lojaId)` lista só os setores da loja escolhida, e trocar de loja **zera o setor** — sem isso o `select` ficaria com um id de outra loja, mostrando valor em branco e devolvendo zero resultados. `?setorId=` recorta pelo setor da **solicitação de origem** (a OS não tem setor próprio) e, como todo filtro do cliente, só estreita: pedir setor fora do escopo devolve lista vazia, nunca a do vizinho.
-  - **Gestor** (aba `OS Finalizadas` do `PainelGestor`, item 6): as finalizadas **dentro do seu escopo** (restringido pelo servidor), agrupadas por Loja/Setor.
-- **`ModalDetalhesOS` (compartilhado, `/src/paginas/ModalDetalhesOS/`):** modal somente leitura reaproveitado pelas duas telas (a prop `contexto` troca o rótulo do cabeçalho — "Painel do Administrador" ou "Painel do Gestor") com máquina/item, loja, setor, Tipo de OS (Predial/Corretiva), solicitante, urgência, datas de **solicitação**/abertura/início/término (a de solicitação aparece porque é dela que parte Horas Parada — item 9), Horas Trabalhadas, Custo Hora do Técnico, Custo Manutenção, a **Composição do Custo** (uma linha por tarefa, com a peça e a mão de obra dela), Custo Total, as **Notas Fiscais** e os textos de Defeito Constatado/Causa Raiz/Solução. A composição e as notas somem quando as listas vêm vazias — é o caso de OS anterior à migration `000012`, cujos totais continuam certos, só sem discriminação. "Técnico Responsável" aparece sempre; **"Empresa Terceirizada"** é um campo **adicional**, exibido só quando `empresaTerceirizadaNome` existe — terceirizar não tira a OS do Técnico. `BadgeTipoOS` identifica o tipo no cabeçalho. Cada card na listagem tem `Eye` (**Visualizar**) e `Printer` (**Imprimir**, abre o modal já disparando a impressão via prop `autoImprimir`).
-- **Impressão (atual: `@media print` no front):** o conteúdo do modal fica num contêiner com `id="area-impressao-os"`, e uma regra `@media print` global (`index.css`) esconde o resto da aplicação (`body * { visibility: hidden }`) e mostra só esse contêiner — os botões `Fechar`/`Imprimir` e o cabeçalho verde levam `print:hidden`. O endpoint de PDF do servidor já existe no contrato (`servicoOrdensServico.obterPdfImpressao` → `GET /ordens-servico/:id/impressao`, devolvendo Blob) mas **ainda não está ligado a nenhuma tela** — trocar a impressão local pelo PDF do back-end é o passo seguinte.
+Histórico do que já foi verificado no navegador: `docs/historico-verificacoes.md`.
 
 ## Repaginação visual (03/09/2026) — o sistema saiu do fundo escuro
 
@@ -340,41 +129,33 @@ desfeito por engano.
   cabeçalho, variantes `padrao` (verde) e `edicao` (âmbar), para blocos dentro de um card.
   **Ainda não é usado por nenhuma tela** — use-o ao montar formulários seccionados em vez
   de remontar o cabeçalho na mão.
-- **Verificado no navegador** (build com `VITE_USE_MOCKS=true` + `vite preview`): login e
-  `PainelGestor` com cards, badges, filtros, select e barra superior. As telas de cadastro e
-  as do Administrador **não foram vistas em tela** nessa passagem — a sessão mock reconduzia
-  para o painel do Gestor a cada troca de perfil. Elas usam os mesmos componentes já
-  conferidos, mas isso é inferência, não verificação.
 
-## Verificação pelo navegador (07/09/2026) — custo por tarefa e login sem perfil
+## Pegadinhas transversais (já corrigidas — não reintroduza)
 
-Percorrido em modo mock (`VITE_USE_MOCKS=true`), nas duas telas que escrevem custo e no login.
+- ⚠️ **Modal que chama o servidor espera a resposta antes de fechar.** `aoSalvar` é
+  `(dados) => Promise<void>`, o modal faz `await` e só chama `fechar()` se deu certo; no erro
+  fica aberto com o que foi digitado (o toast do `api.ts` já explica) e o botão mostra
+  "Salvando…" pelo `isSubmitting` do React Hook Form. Antes os seis modais de escrita (encerrar,
+  pausar, acionar terceiro, abrir OS, rejeitar, lançar custo) faziam `aoSalvar(dados); fechar()`:
+  com sinal fraco o técnico perdia o encerramento inteiro, e a promessa rejeitada virava exceção
+  solta no console. Os testes E2E (`../sistema-os-infra/e2e`) cortam a rede e conferem.
+- **Todo modal usa `useDialogo`** (`hooks/useDialogo.ts`): espalhe `propsDialogo` no cartão
+  (`role="dialog"`, `aria-modal`, `aria-labelledby`) e ponha `idTitulo` no título. Ele também
+  fecha com Esc — só o modal de cima, numa pilha, e nunca enquanto salva (`podeFechar`).
+- **`CampoTexto`/`CampoTextoArea`/`CampoSelecao` geram o `id` com `useId`**, não só com o
+  `name`: dois formulários na mesma tela (a máquina e o modal de preventiva, ambos com
+  `descricao`) repetiam o id e o rótulo de um apontava para o campo do outro; campo sem `name`
+  (os de custo, o select de área do técnico) ficava sem rótulo nenhum para o leitor de tela.
+- **O toast nasce abaixo do cabeçalho** (`hooks/useAlturaCabecalho.ts` publica a altura em
+  `--altura-cabecalho`, que o `index.css` soma ao topo do react-toastify). No topo da tela ele
+  cobria o sino, o tema e o Sair por 4s depois de cada ação. Cabeçalho novo usa o hook.
 
-- **Encerramento (Técnico):** lançadas três tarefas na mesma OS de maquinário, o total somou
-  ao vivo, e a OS encerrou. Depois o caso que motivou a mudança de forma: duas peças
-  (`rolamento` e `serra fita`) **sem nenhuma hora técnica** — antes o formulário bloqueava
-  com "OS de maquinário exige ao menos um custo de hora do técnico"; agora encerra.
-- **Custos Pendentes (Administrador):** o modal abre com a itemização do Técnico
-  pré-preenchida, o alternador de nota revela a lista, e duas notas (uma com série, outra
-  sem) persistiram — o card passou a exibir as duas e a OS trocou para a pílula "Revisadas".
-- **Login:** sem o seletor, `tecnico@demo.com` cai em `/painel-tecnico` e
-  `administrador@demo.com` em `/painel-administrador`, os dois só com e-mail e senha. Senha
-  errada devolve "E-mail ou senha inválidos", sem citar perfil.
-- ⚠️ **Achado que só apareceu na tela:** o modal do Administrador não tinha teto de altura
-  (até aqui cabiam dois campos numéricos ali) e o cartão passava da tela com as duas listas.
-  Corrigido com `max-h-[75vh]` + rodapé `sticky` nos dois modais — ver item 12.
+- ⚠️ **Custo `0` é válido em todos os campos de valor** (serviço sem peça, conserto em garantia). Toda soma e exibição de custo usa `??`, **nunca `||`** — `custoTotal` em `PainelGestor`, `CardOSFinalizada` e `AdministradorOSFinalizadas`, e os cards desta tela comparam com `!== undefined`. Trocar por `||` faria R$ 0,00 sumir e virar `—`. Nos esquemas Zod é `nonnegative()`, e no back `binding:"gte=0"` — nunca `required`, que rejeita zero em campo numérico.
+
 - ⚠️ **Achado que só apareceu rodando a API de verdade:** nota repetida devolvia **500**. O
   service já devolvia `ErrDadoDuplicado` e o teste de integração passava; faltava o `case`
   no `switch` do controller, porque até a `000011` essa rota era um `UPDATE` 1:1 e não tinha
   como colidir. O teste de integração para no service e nunca atravessa o controller.
-
-## Verificação pelo navegador (22/08/2026) — o que já foi provado e o que quebrou
-
-Os cinco cadastros do Administrador foram percorridos **na tela, contra a API real** (não
-mock, não curl): login, lojas, setores em cascata, os perfis de usuário com escopo, máquina
-com foto (multipart → R2 → URL assinada renderizando no `<img>`), preventiva com data e
-empresa terceirizada. Tudo passou. Os bugs abaixo foram achados **nessa passagem** e já
-estão corrigidos — não reintroduza.
 
 - ⚠️ **Dropdown dependente: trocar o "pai" tem que zerar o "filho".** Nos pares Loja → Setor, mudar a loja deixava o `filtroSetor` com o id de um setor da loja ANTERIOR. Esse id não casa com nenhuma das novas `<option>`, então o `select` renderiza **em branco** enquanto o filtro continua ativo — a lista volta vazia e nada na tela explica por quê. Corrigido em `AdministradorMaquinas` e `AdministradorOSFinalizadas` com um `aoMudarLoja` que faz `setFiltroSetor('')` junto. **Sempre no `onChange` do pai, nunca num `useEffect` sobre ele**: o efeito rodaria também na montagem e apagaria uma seleção legítima (é o mesmo motivo do comentário em `CadastrarMaquina`, que já resolvia assim com `setValue('setorId', 0)`). Vale para qualquer par futuro, não só Loja/Setor.
 - ⚠️ **`PortaoSessao` precisa esperar o espelhamento no estado, não só a query.** O
@@ -398,28 +179,6 @@ estão corrigidos — não reintroduza.
   preserva (o back faz `COALESCE`). Só o preview local é blob e leva `revokeObjectURL`.
 - **Card de máquina mostra `numeroPatrimonio`, não `maquina.id`**: é por ele que a busca da
   mesma tela filtra, e é o número que existe na etiqueta.
-
-**Resolvido (23/08/2026 → devolvido em 05/09/2026):** os cards "Custos Pendentes" e "OS
-Finalizadas" tinham sido removidos da Home do Painel porque chamavam `/ordens-servico`,
-que não existia no back (o admin clicava e recebia toast de erro) — as telas
-(`AdministradorCustosPendentes`, `AdministradorOSFinalizadas`) e as rotas em
-`RotasPrincipais.tsx` continuaram intactas o tempo todo, só o ponto de entrada tinha saído.
-Voltaram quando o back-end ganhou o ciclo de vida completo da Ordem de Serviço
-(`iniciar`/`pausar`/`retomar`/`acionar-terceiro`/`encerrar`/`custo` —
-`radaptech/sistema-OSm--Back-end`, `docs/fluxo-de-negocio.md`), em especial
-`POST /ordens-servico/:id/custo`, que é quem os dois cards precisavam pra funcionar de
-verdade.
-
-Verificado contra a API real (não mock, não `go test`): tenant `smoke`, login como
-Administrador, `GET /ordens-servico?status=Concluída` achando uma OS de terceiros com
-custo já lançado pelo Técnico, `POST /custo` corrigindo o valor e anexando nota fiscal —
-resposta 200, `lancadoPorNome` trocando de dono, e a linha conferida direto no Postgres
-(`select ... from os_custo`). As travas também testadas ao vivo: `custoHoraTecnico` numa
-OS de terceiros devolve 400, OS inexistente 404, sem sessão 401.
-
-**Não existe `AdministradorTecnicos`** (nem pasta, nem card, nem rota), apesar de o item 12
-descrever a tela. `GET /tecnicos` já existe no back e hoje só alimenta o
-`ModalAbrirOrdemServico`; `servicoTecnicos.obterPorId` não é chamado por ninguém.
 
 ## Domínio e build (antes de subir)
 
@@ -472,21 +231,131 @@ final é `nginx:alpine` servindo `dist/` — **94.6MB**, testado local (`docker 
   pra precisar de uma imagem própria só pra isso.
 
 ## CI
-- `.github/workflows/ci.yml` — push em `master`/`dev` e todo PR: `npm run lint`
-  (`eslint .`) e `npm run build` (`tsc -b && vite build`). Sem serviço de banco (o front
-  não fala com Postgres) e sem testes automatizados (não há Jest/Vitest configurado —
-  validação hoje é manual no navegador, ver "Verificação pelo navegador" no
-  `../sistema-OSm--Back-end/CLAUDE.md`).
+- Sem testes automatizados — validação é manual no navegador (modo mock ou API real).
 - **`npm run build`, não só `tsc --noEmit`**: pega os dois de uma vez — erro de tipo
   **e** erro que só aparece no build de produção (import quebrado, asset faltando), que
   o `vite dev` é mais tolerante e deixaria passar batido.
-- Node 22, pareado com a imagem `node:22-alpine` do `docker-compose.yml`.
+
+## PWA (app instalável)
+
+O mesmo app vira "app" no celular/desktop: ícone na tela inicial, abre sem a barra do
+navegador. Sem loja, sem build separado — e sem `vite-plugin-pwa`, de propósito (abaixo).
+
+- **`public/manifest.webmanifest`** (nome, cores, `display: standalone`, `start_url: "/"` —
+  o `/` já manda cada perfil pro próprio painel) + tags no `index.html` (manifest,
+  `apple-touch-icon`, `apple-mobile-web-app-*`). Cada subdomínio de tenant é uma origem, então
+  cada tenant vira um app instalado separado — é o que se quer.
+- **Ícones (`public/icones/`) saem de `npm run icones:pwa`** (`scripts/gerar-icones-pwa.mjs`):
+  a chave inglesa do cabeçalho em branco sobre `marca-600`, rasterizada pelo Chrome do
+  puppeteer. PNGs versionados; rode de novo só se mudar cor/desenho. `maskable` tem o desenho
+  menor (zona segura de 80% — o Android recorta em círculo); `apple-touch-icon` não tem
+  transparência (o iOS pinta de preto). O `favicon.svg` da aba continua o antigo.
+- **`public/sw.js` — service worker nosso, JS puro, fora do bundle.** Sem precache: o app não
+  funciona sem a API, e precache é o jeito clássico de prender o usuário numa versão velha.
+  Só intercepta navegação (rede primeiro; sem rede, uma página "Sem conexão" em vez do erro do
+  navegador). É onde o Web Push vai entrar.
+- **Atualização (`utilitarios/registrarServiceWorker.ts` + `componentes/AvisoNovaVersao.tsx`):**
+  o plugin `versaoServiceWorker` (`vite.config.ts`) carimba o `sw.js` com um id por build →
+  cada deploy é um service worker novo → ele instala e **espera** → o app mostra o toast "Nova
+  versão disponível" → só no clique em "Atualizar" ele assume (`PULAR_ESPERA`) e a página
+  recarrega. Nunca troca sozinho: recarregar no meio de um encerramento de OS perderia o que
+  foi digitado. Checa ao voltar pro app (aba visível) e a cada hora. ⚠️ O `controllerchange`
+  só recarrega se o usuário pediu — sem essa trava, a **primeira** instalação recarregaria a
+  tela de quem acabou de abrir o app.
+- **nginx (`nginx.conf.template`):** `sw.js`, `manifest.webmanifest` e `index.html` com
+  `Cache-Control: no-cache` (sempre revalidam — senão o app instalado abriria o HTML velho);
+  `/assets/` com hash no nome, `immutable` por 1 ano.
+- **Exige HTTPS** (ou `localhost`/`*.localhost` em dev). No iPhone só instala por Compartilhar →
+  Adicionar à Tela de Início, e só lá o push funciona (iOS 16.4+).
+- **Verificado (13/10/2026)** com a imagem de produção (`docker build` + nginx): cabeçalhos e
+  MIME acima, SW ativo controlando a página, manifest e ícones 200, aviso de versão nova
+  aparecendo após trocar o `sw.js` e "Atualizar" recarregando com o SW novo, e a página "Sem
+  conexão" com o servidor fora do ar. **Não verificado:** instalação num Android/iPhone de
+  verdade (precisa do HTTPS de produção ou homologação).
+
+## Notificações (sininho) — central do PWA
+
+O WhatsApp saiu (13/10/2026); o aviso agora mora no próprio sistema. Regra de quem recebe o
+quê está no back (`../sistema-OSm--Back-end/docs/fluxo-de-negocio.md`, "Notificações").
+
+- **`componentes/SinoNotificacoes.tsx`** (botão + selo + mutações) e **`PainelNotificacoes.tsx`**
+  (popover com a lista, "carregar mais", "marcar todas como lidas"), nos dois cabeçalhos com
+  sino (`CabecalhoTopo`/`CabecalhoPagina`). No celular o popover ocupa a largura toda abaixo
+  do cabeçalho; do `sm` pra cima ancora no botão. Fecha com clique fora ou Esc.
+- **Contrato (`servicoNotificacoes.ts`, `tipos/notificacao.ts`):** `GET /notificacoes?pagina=`
+  (`RespostaPaginada`, 20 por página), `GET /notificacoes/nao-lidas`, `POST /notificacoes/:id/lida`,
+  `POST /notificacoes/lidas`. As três últimas devolvem `{ total }` — a contagem **depois** da
+  ação, gravada direto no cache (`setQueryData`) em vez de buscar de novo.
+- **Contagem (`useContagemNaoLidas`):** `staleTime: 0`, `refetchInterval` de 60s (pausa com a
+  aba em segundo plano) e `refetchOnWindowFocus: true` — a única query do app que refaz no
+  foco: voltar pro app depois de ver o push tem que mostrar o número novo na hora.
+- **Clique numa notificação:** marca como lida e `navegar(notificacao.url)`. A url é um caminho
+  relativo gravado pelo servidor (`/painel-gestor?solicitacao=N`, `/painel-gestor?os=N`,
+  `/painel-tecnico?os=N`, `/minhas-solicitacoes?solicitacao=N`) e o **painel de destino** abre o
+  modal certo via `hooks/useIdDaUrl.ts`, que também tira o parâmetro da URL (F5/voltar não
+  reabrem). Detalhe de cada tela na spec dela (itens 4, 6, 9).
+- ⚠️ **Cores do ícone por tipo só usam pares que o tema escuro inverte** (`index.css`):
+  `sky`/`violet` e `text-marca-700` não estão lá e sairiam escuro sobre escuro.
+
+## Web Push (aviso com o app fechado)
+
+O servidor manda um push por notificação gravada; o `public/sw.js` mostra e cuida do toque.
+Contrato: `GET /push/chave-publica` (`{ chavePublica }`, **null = servidor sem VAPID**, o front
+não oferece nada), `POST /push/inscricoes` (o `subscription.toJSON()` direto, 204),
+`POST /push/inscricoes/remover` (`{ endpoint }`, 204). Payload do push:
+`{ id, tipo, titulo, corpo, url, naoLidas }`.
+
+- **Ativar (`hooks/usePush.ts` + `componentes/AtivacaoPush.tsx`, no topo do painel do sininho):**
+  a permissão **só é pedida no clique em "Ativar"** — nunca sozinha ao abrir o app (fora de
+  gesto o navegador ignora, e pedir sem contexto é o que faz o usuário negar). Estados:
+  `desativado` (botão), `ativado` (linha "Avisos ativos neste aparelho · Desativar" no pé do
+  painel), `bloqueado` (permissão negada — só se desfaz nas configurações, o texto explica onde),
+  `instalar` (iPhone fora do app instalado: passo a passo Compartilhar → Adicionar à Tela de
+  Início — no Safari comum o `PushManager` nem existe) e `indisponivel` (navegador sem push ou
+  servidor sem chave — não mostra nada).
+  ⚠️ **"Ativado" exige o servidor ter gravado a inscrição.** Se o `POST /push/inscricoes` falhar
+  (servidor recusou, rede caiu), `ativar` desfaz a inscrição no navegador e volta para
+  `desativado` — antes ele olhava só o navegador e mostrava "Avisos ativos" sem o servidor ter
+  para onde mandar. Se é o **navegador** que recusa o `subscribe` (aba anônima do Chrome, que não
+  tem Push API), `falhaNavegador` mostra uma linha explicando em vez de voltar calado.
+- **Navegador (`utilitarios/pushNavegador.ts`):** permissão, `subscribe`, número no ícone
+  (`setAppBadge`), limpar a bandeja. Inscrição feita com **outra chave VAPID** (o servidor trocou
+  o par) é desfeita e refeita — senão o serviço de push recusaria tudo o que o servidor assina.
+  Pra ler usa `getRegistration()` (imediato); só o `subscribe` espera o `ready`, com prazo de 5s.
+- **`sw.js`:** `push` → `showNotification` (ícone, `badge-96.png` monocromático pra barra do
+  Android, `tag` por id pra reentrega não duplicar) + `setAppBadge(naoLidas)` + avisa as abas
+  (`PUSH_RECEBIDO` → o sininho busca na hora). `notificationclick` → com o app aberto, foca a aba
+  e manda `ABRIR_NOTIFICACAO` (o React marca como lida e navega **sem recarregar**); fechado,
+  `openWindow(url + &notificacao=<id>)`. Só abre caminho da própria origem.
+- **`hooks/useIntegracaoPush.ts` (montado no `PortaoSessao`):** número no ícone = não lidas do
+  sininho; tudo lido → limpa a bandeja; trata as mensagens do sw.js; ao entrar (e em
+  `pushsubscriptionchange`) **reenvia a inscrição** que o navegador já tem — o servidor pode ter
+  perdido a linha, e o upsert troca o dono se outra pessoa usava o aparelho.
+- ⚠️ **`?notificacao=` é lido e tirado da URL ANTES do router montar** (`main.tsx` →
+  `utilitarios/notificacaoDoPush.ts`). Se o React Router visse o parâmetro, o primeiro
+  `setSearchParams` de uma tela (o painel consumindo `?os=`) o regravaria; um `replaceState`
+  feito depois, por fora, deixaria o router com a URL velha.
+- **Logout (`useSair`) desliga o push ANTES do `/autenticacao/logout`** (o `remover` precisa da
+  sessão): sai do navegador, zera o número do ícone e limpa a bandeja — num celular
+  compartilhado, o próximo não recebe nem vê os avisos de quem saiu. Quem entra depois ativa de
+  novo no sininho. Sessão que **expira** (sem clicar em Sair) mantém a inscrição; no próximo
+  login ela é reenviada e passa a ser de quem entrou.
+- **Mock (`mocks/rotas/push.ts`):** chave pública P-256 real (só a pública — o `subscribe` valida
+  o formato), inscrições num `Map`. Dá pra ver ativar/desativar/sair; nada chega por push.
+- **Verificado (13/10/2026) no Chrome desktop contra a API real** (`demo.localhost:8090` — `*.localhost`
+  é contexto seguro): ativar grava `dispositivo_push`; gestor abre OS → push real via FCM chega
+  em ~1s com título/corpo/url certos e o sininho atualiza sozinho; clique na notificação com o
+  app aberto marca como lida e abre o detalhe; `?notificacao=` (caminho do app fechado) idem;
+  logout remove no navegador e no banco; novo login mostra "Ativar" de novo; painel em 619px sem
+  rolagem lateral. **Não verificado:** Android/iPhone reais (precisa de HTTPS — Parte 8),
+  telas `bloqueado`/`instalar` (texto estático), e o `openWindow` em si (o clique com o app
+  fechado foi simulado abrindo a URL que ele monta).
 
 ## Helpers de Domínio (evite reimplementar)
 - **`alvoOS.ts`** — Solicitação e OS apontam ou para uma máquina cadastrada (Maquinário) ou para um item digitado na hora (Pequeno Reparo). Use `obterNomeAlvo`, `obterCodigoAlvo` e `combinaBuscaAlvo` em vez de repetir o encadeamento `maquinaNome ?? itemDescricao ?? '—'`.
 - **`dataBackend.ts`** — toda conversão de data que entra ou sai da API (ver "Contrato com o Back-end").
 - **`dataEstaNoIntervalo.ts`** — compara uma data do back-end com um intervalo vindo de `<input type="date">`, convertendo para `YYYY-MM-DD` e comparando lexicograficamente (equivale à comparação cronológica, sem construir `Date` e sem depender de fuso).
 - **`acessoGestor.ts`** — agrupamento/checagem por escopo do Gestor (organização visual; a restrição real é do servidor).
-- **`agruparPorSetorLoja.ts`** — agrupamento visual do Painel do Técnico.
+- **`navegacaoNiveis.ts`** + `hooks/useNavegacaoNiveis.ts` + `componentes/NavegacaoNiveis.tsx`/`NavegacaoLojaSetor.tsx` — navegação por cliques Loja → Setor → … com o nível na URL, usada pelos painéis do Gestor e do Técnico. Para hierarquia nova, use isto em vez de `<select>` em cascata ou lista agrupada.
 - **`calcularHoras.ts`** — prévia local de horas; os valores oficiais vêm do servidor.
 - **`formatarData.ts` / `formatarMoeda.ts`** — formatação de exibição (pt-BR / BRL).

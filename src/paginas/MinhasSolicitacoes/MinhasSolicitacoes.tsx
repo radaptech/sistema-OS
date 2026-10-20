@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Inbox, SearchX } from 'lucide-react'
 import { CabecalhoPagina } from '../../componentes/CabecalhoPagina'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useSolicitacoes } from '../../hooks/useSolicitacoes'
+import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
+import type { SolicitacaoOS } from '../../tipos/ordemServico'
+import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetalhesSolicitacao'
 import { Paginacao } from '../../componentes/Paginacao'
 import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { atrasoEntrada } from '../../utilitarios/atrasoEntrada'
 import { BarraFiltros, type FiltroStatus } from './componentes/BarraFiltros'
 import { CardSolicitacao } from './componentes/CardSolicitacao'
+import { FiltroMaquinas } from './componentes/FiltroMaquinas'
 
 const ATRASO_DEBOUNCE_BUSCA_MS = 400
 
@@ -14,7 +19,26 @@ export function MinhasSolicitacoes() {
   const [buscaInput, setBuscaInput] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState<FiltroStatus>('Todos')
+  const [maquinaId, setMaquinaId] = useState<number>()
   const [pagina, setPagina] = useState(1)
+  const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
+    useState<SolicitacaoOS | null>(null)
+
+  // Link de notificação (sininho/push): ?solicitacao=N -- o pedido que o Gestor aceitou
+  // ou rejeitou. Abre o detalhe, que mostra o status novo e, se rejeitado, o motivo.
+  const [solicitacaoDaUrl, consumirSolicitacaoDaUrl] = useIdDaUrl('solicitacao')
+
+  useEffect(() => {
+    if (solicitacaoDaUrl === null) {
+      return
+    }
+    consumirSolicitacaoDaUrl()
+    // Não encontrada: o api.ts já mostra o toast do 404.
+    servicoSolicitacoes
+      .obterPorId(solicitacaoDaUrl)
+      .then(setSolicitacaoParaVisualizar)
+      .catch(() => {})
+  }, [solicitacaoDaUrl, consumirSolicitacaoDaUrl])
 
   useEffect(() => {
     const temporizador = setTimeout(() => {
@@ -30,10 +54,16 @@ export function MinhasSolicitacoes() {
     setPagina(1)
   }
 
+  function aoSelecionarMaquina(novaMaquinaId: number | undefined) {
+    setMaquinaId(novaMaquinaId)
+    setPagina(1)
+  }
+
   const { data, isLoading, isError, isFetching } = useSolicitacoes({
     pagina,
     busca: busca || undefined,
     status: filtro === 'Todos' ? undefined : filtro,
+    maquinaId,
   })
 
   const solicitacoes = data?.dados ?? []
@@ -49,6 +79,8 @@ export function MinhasSolicitacoes() {
           filtroSelecionado={filtro}
           aoSelecionarFiltro={aoSelecionarFiltro}
         />
+
+        <FiltroMaquinas maquinaSelecionada={maquinaId} aoSelecionar={aoSelecionarMaquina} />
 
         {!isLoading && !isError && (
           <p className="text-sm text-slate-500">
@@ -75,7 +107,7 @@ export function MinhasSolicitacoes() {
 
           {!isLoading && !isError && solicitacoes.length === 0 && (
             <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
-              {busca || filtro !== 'Todos' ? (
+              {busca || filtro !== 'Todos' || maquinaId !== undefined ? (
                 <SearchX size={28} />
               ) : (
                 <Inbox size={28} />
@@ -109,6 +141,14 @@ export function MinhasSolicitacoes() {
           Solicitação OS © {new Date().getFullYear()}
         </span>
       </footer>
+
+      {solicitacaoParaVisualizar && (
+        <ModalDetalhesSolicitacao
+          solicitacao={solicitacaoParaVisualizar}
+          contexto="Minhas Solicitações"
+          aoFechar={() => setSolicitacaoParaVisualizar(null)}
+        />
+      )}
     </div>
   )
 }

@@ -17,7 +17,13 @@ interface SaidaAnimada {
 //
 // A saída é mais curta e mais discreta que a entrada de propósito: quem fechou já está
 // olhando para o que vem depois, então prolongar a despedida só atrasa a próxima ação.
-export function useSaidaAnimada(aoFechar: () => void): SaidaAnimada {
+//
+// `variante: 'folha'` é a folha inferior (bottom sheet) das telas de celular: o cartão
+// sobe da borda de baixo em vez de crescer no meio da tela.
+export function useSaidaAnimada(
+  aoFechar: () => void,
+  { variante = 'modal' }: { variante?: 'modal' | 'folha' } = {},
+): SaidaAnimada {
   const [fechando, setFechando] = useState(false)
   const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -42,6 +48,13 @@ export function useSaidaAnimada(aoFechar: () => void): SaidaAnimada {
   return {
     fechar,
     classeFundo: fechando ? 'animate-fade-out' : 'animate-fade-in',
-    classeCartao: fechando ? 'animate-pop-out' : 'animate-pop-in',
+    classeCartao:
+      variante === 'folha'
+        ? fechando
+          ? 'animate-folha-sair'
+          : 'animate-folha-entrar'
+        : fechando
+          ? 'animate-pop-out'
+          : 'animate-pop-in',
   }
 }

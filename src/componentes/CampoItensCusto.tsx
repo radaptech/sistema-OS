@@ -1,8 +1,10 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { CampoTexto } from './CampoTexto'
 import { formatarMoeda } from '../utilitarios/formatarMoeda'
+import { rotulosCustoOS } from '../utilitarios/rotulosCustoOS'
+import type { TipoOS } from '../tipos/ordemServico'
 
-// Uma TAREFA enquanto ela está no formulário: o que foi feito, o material que consumiu e
+// Uma TAREFA enquanto ela está no formulário: o que foi feito, as peças que consumiu e
 // a mão de obra que cobrou. Os dois valores convivem na mesma linha de propósito — trocar
 // duas peças são duas tarefas, não duas mãos de obra, e obrigar o Técnico a criar uma
 // linha extra só para carregar a hora era o que a primeira versão fazia.
@@ -28,9 +30,9 @@ export interface ErroItemCusto {
 interface CampoItensCustoProps {
   itens: ItemCustoFormulario[]
   aoMudar: (itens: ItemCustoFormulario[]) => void
-  // Falso em OS de terceiros e de reparo: lá quem trabalhou foi a empresa externa, ou o
-  // serviço não cobra hora técnica. A coluna some da linha, e o servidor recusa de novo.
-  permitirHoraTecnica: boolean
+  // Os campos são os mesmos em todo tipo (Valor Peças + Valor Mão de Obra); o tipo só
+  // troca a instrução — em terceiros os valores são os da nota da empresa.
+  tipo: TipoOS
   // Mensagem do array inteiro (ex: "lance ao menos uma tarefa").
   erro?: string
   errosPorItem?: (ErroItemCusto | undefined)[]
@@ -45,7 +47,7 @@ interface CampoItensCustoProps {
 export function CampoItensCusto({
   itens,
   aoMudar,
-  permitirHoraTecnica,
+  tipo,
   erro,
   errosPorItem,
   desabilitado = false,
@@ -96,9 +98,9 @@ export function CampoItensCusto({
       </div>
 
       <p className="text-xs text-slate-400">
-        {permitirHoraTecnica
-          ? 'Uma linha por serviço feito, com a peça e a mão de obra dele. Se a OS trocou duas peças, lance as duas separadas — é assim que dá para conferir cada uma contra a nota depois.'
-          : 'Uma linha por serviço feito. Se a OS consumiu dois materiais, lance os dois separados — é assim que dá para conferir cada um contra a nota depois.'}
+        {tipo === 'terceiros'
+          ? 'Uma linha por serviço da empresa, separando o valor das peças e o da mão de obra, como vem na nota fiscal dela.'
+          : 'Uma linha por serviço feito, com a peça e a mão de obra dele. Se a OS trocou duas peças, lance as duas separadas — é assim que dá para conferir cada uma contra a nota depois.'}
       </p>
 
       {itens.length === 0 && (
@@ -140,13 +142,9 @@ export function CampoItensCusto({
 
             {/* items-end: se um rótulo quebrar em duas linhas, os inputs continuam
                 alinhados pela base em vez de um descer sozinho. */}
-            <div
-              className={`grid items-end gap-3 ${
-                permitirHoraTecnica ? 'grid-cols-2' : 'grid-cols-1'
-              }`}
-            >
+            <div className="grid grid-cols-2 items-end gap-3">
               <CampoTexto
-                rotulo="Manutenção (R$) *"
+                rotulo={`${rotulosCustoOS.material} (R$) *`}
                 type="number"
                 min={0}
                 step="0.01"
@@ -161,25 +159,22 @@ export function CampoItensCusto({
                 mensagemErro={erroItem?.custoManutencao}
               />
 
-              {/* Sem asterisco: a tarefa pode ser só material, sem hora cobrada. Some
-                  inteira fora de maquinário, onde a coluna é proibida no banco. */}
-              {permitirHoraTecnica && (
-                <CampoTexto
-                  rotulo="Hora do Técnico (R$)"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="Ex: 90.00"
-                  disabled={desabilitado}
-                  value={item.custoHoraTecnico ?? ''}
-                  onChange={(evento) =>
-                    alterar(indice, {
-                      custoHoraTecnico: lerValor(evento.target.value, evento.target.valueAsNumber),
-                    })
-                  }
-                  mensagemErro={erroItem?.custoHoraTecnico}
-                />
-              )}
+              {/* Sem asterisco: a tarefa pode ser só peça, sem mão de obra cobrada. */}
+              <CampoTexto
+                rotulo={`${rotulosCustoOS.maoDeObra} (R$)`}
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="Ex: 90.00"
+                disabled={desabilitado}
+                value={item.custoHoraTecnico ?? ''}
+                onChange={(evento) =>
+                  alterar(indice, {
+                    custoHoraTecnico: lerValor(evento.target.value, evento.target.valueAsNumber),
+                  })
+                }
+                mensagemErro={erroItem?.custoHoraTecnico}
+              />
             </div>
           </div>
         )
@@ -189,22 +184,18 @@ export function CampoItensCusto({
 
       {itens.length > 0 && (
         <div className="flex flex-col gap-1 rounded-lg bg-lime-100 px-3 py-2.5">
-          {/* Os dois subtotais só aparecem onde existem os dois: em reparo e terceiros o
-              total já É a manutenção, e repetir o mesmo número duas vezes é ruído. */}
-          {permitirHoraTecnica && (
-            <>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-marca-800 font-mono tracking-wide uppercase">Manutenção</span>
-                <span className="text-marca-800 font-mono">{formatarMoeda(totalManutencao)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-marca-800 font-mono tracking-wide uppercase">
-                  Hora do Técnico
-                </span>
-                <span className="text-marca-800 font-mono">{formatarMoeda(totalHoraTecnica)}</span>
-              </div>
-            </>
-          )}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-marca-800 font-mono tracking-wide uppercase">
+              {rotulosCustoOS.material}
+            </span>
+            <span className="text-marca-800 font-mono">{formatarMoeda(totalManutencao)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-marca-800 font-mono tracking-wide uppercase">
+              {rotulosCustoOS.maoDeObra}
+            </span>
+            <span className="text-marca-800 font-mono">{formatarMoeda(totalHoraTecnica)}</span>
+          </div>
           <div className="flex items-center justify-between">
             <span className="text-marca-800 font-mono text-xs font-semibold tracking-wide uppercase">
               Custo Total

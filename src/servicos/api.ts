@@ -1,5 +1,6 @@
 import { toast } from 'react-toastify'
 import { simularFetch } from '../mocks/apiMock'
+import { marcarSessaoExpirada, montarUrlLogin } from '../utilitarios/destinoLogin'
 
 declare const process: { env: Record<string, string | undefined> }
 
@@ -87,9 +88,21 @@ function extrairMensagemErro(corpoResposta: unknown): string | null {
   return null
 }
 
+// A sessão morreu no meio do uso (prazo, senha trocada, usuário desativado). Recarrega no
+// login — o estado do app inteiro é de quem estava logado — e leva na URL o motivo e a
+// página atual, para a tela explicar e devolver a pessoa ao mesmo lugar depois de entrar.
+// Sem toast: o recarregamento o apagaria antes de alguém ler.
 function redirecionarParaLogin(): void {
-  toast.error('Sua sessão expirou.')
-  window.location.href = '/login'
+  window.location.href = montarUrlLogin(window.location.pathname + window.location.search, true)
+}
+
+// 401 com este código = havia sessão e ela não vale mais; sem código = nunca houve.
+function ehSessaoExpirada(corpoResposta: unknown): boolean {
+  return (
+    !!corpoResposta &&
+    typeof corpoResposta === 'object' &&
+    (corpoResposta as Record<string, unknown>).codigo === 'sessao_expirada'
+  )
 }
 
 async function lerCorpoResposta(
@@ -156,8 +169,12 @@ async function requisitar<T = unknown>(
     // GET /autenticacao/sessao devolve 401 toda vez que não há sessão ainda --
     // é o caminho normal de quem nunca logou (bootstrap do PortaoSessao, toda
     // carga da tela de login), não um erro. useSessao já trata via retry:false;
-    // aqui só falta não estourar o toast genérico abaixo pra esse caso.
+    // aqui só falta não estourar o toast genérico abaixo pra esse caso. Se havia uma
+    // sessão e ela venceu, a tela de login vai dizer isso (destinoLogin.ts).
     if (resposta.status === 401 && endpoint === '/autenticacao/sessao') {
+      if (ehSessaoExpirada(dados)) {
+        marcarSessaoExpirada()
+      }
       throw new Error('Sem sessão.')
     }
 

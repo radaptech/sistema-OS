@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -9,6 +9,8 @@ import { Botao } from '../../componentes/Botao'
 import { CampoTexto } from '../../componentes/CampoTexto'
 import { CampoSelecao } from '../../componentes/CampoSelecao'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
+import { UploadFoto } from '../../componentes/UploadFoto'
+import type { AtualizarSetorPayload } from '../../tipos/setor'
 import { useLojas } from '../../hooks/useLojas'
 import { useSetores } from '../../hooks/useSetores'
 import { servicoSetores } from '../../servicos/servicoSetores'
@@ -18,11 +20,16 @@ export function CadastrarSetor() {
   const navegar = useNavigate()
   const { id } = useParams<{ id: string }>()
   const emEdicao = Boolean(id)
+  // Foto escolhida agora, ainda não enviada. Sem ela, salvar mantém a que está no servidor.
+  const [foto, setFoto] = useState<File | null>(null)
   const queryClient = useQueryClient()
   const { data: lojas = [] } = useLojas()
 
   const { data: setorExistente } = useQuery({
     queryKey: ['setor', id],
+    // Formulário/confirmação: sempre o registro atual, nunca o do cache (o padrão
+    // de 30s do App.tsx reabriria a edição com o valor de antes de salvar).
+    staleTime: 0,
     queryFn: () => servicoSetores.obterPorId(Number(id)),
     enabled: emEdicao,
   })
@@ -48,12 +55,13 @@ export function CadastrarSetor() {
   const { data: setoresDaLoja = [] } = useSetores(lojaId || undefined)
 
   const { mutateAsync: criar, isPending: criando } = useMutation({
-    mutationFn: servicoSetores.criar,
+    mutationFn: (dados: DadosCadastrarSetor) => servicoSetores.criar(dados, foto ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['setores'] }),
   })
 
   const { mutateAsync: atualizar, isPending: atualizando } = useMutation({
-    mutationFn: servicoSetores.atualizar,
+    mutationFn: (dados: AtualizarSetorPayload) =>
+      servicoSetores.atualizar(dados, foto ?? undefined),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['setores'] }),
   })
 
@@ -68,6 +76,7 @@ export function CadastrarSetor() {
     await criar(dados)
     toast.success('Setor cadastrado com sucesso.')
     reset({ nome: '', lojaId: dados.lojaId })
+    setFoto(null)
   }
 
   const isPending = criando || atualizando
@@ -87,6 +96,14 @@ export function CadastrarSetor() {
             noValidate
             className="flex flex-col gap-5 p-6 sm:p-8"
           >
+            <UploadFoto
+              foto={foto}
+              aoSelecionarFoto={setFoto}
+              urlExistente={setorExistente?.fotoUrl}
+              rotulo="Foto do Setor"
+              textoAlternativo="Pré-visualização do setor"
+            />
+
             <p className="text-sm text-slate-500">
               Setores podem se repetir entre lojas diferentes — ex: "Padaria" pode existir
               na Loja 1 e na Loja 2 como cadastros independentes.

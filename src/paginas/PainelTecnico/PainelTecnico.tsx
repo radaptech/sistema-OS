@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   ClipboardCheck,
   Inbox,
@@ -8,40 +9,57 @@ import {
 import { toast } from 'react-toastify'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
-import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
+import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
+import { NavegacaoLojaSetorPaginada } from '../../componentes/NavegacaoLojaSetorPaginada'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useOrdensServicoTecnico } from '../../hooks/useOrdensServicoTecnico'
-import { useLojas } from '../../hooks/useLojas'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
 import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
 import type { OrdemServico, SolicitacaoOS } from '../../tipos/ordemServico'
-import { agruparPorSetorLoja } from '../../utilitarios/agruparPorSetorLoja'
 import { ordenarPorPrioridade } from '../../utilitarios/ordenarPrioridadeOS'
 import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetalhesSolicitacao'
 import { ModalEncerrarOrdemServico } from '../ModalEncerrarOrdemServico/ModalEncerrarOrdemServico'
 import type { EncerramentoOrdemServicoPayload } from '../../tipos/ordemServico'
-import {
-  AbasPainelTecnico,
-  type AbaPainelTecnico,
-} from './componentes/AbasPainelTecnico'
-import { BlocoSetorLoja } from './componentes/BlocoSetorLoja'
+import { ABAS_PAINEL_TECNICO, type AbaPainelTecnico } from './abasPainelTecnico'
+import { AbasPainelTecnico } from './componentes/AbasPainelTecnico'
 import { CardOrdemServicoTecnico } from './componentes/CardOrdemServicoTecnico'
 import { ModalDetalhesEncerramento } from './componentes/ModalDetalhesEncerramento'
 import { ModalPausarOrdemServico } from './componentes/ModalPausarOrdemServico'
 import { ModalAcionarTerceiro } from './componentes/ModalAcionarTerceiro'
-import { ResumoLojasTecnico } from './componentes/ResumoLojasTecnico'
 import type { DadosPausarOrdemServico } from './esquemaPausarOrdemServico'
 import type { DadosAcionarTerceiro } from './esquemaAcionarTerceiro'
 
 const CHAVE_ORDENS_SERVICO_TECNICO = 'ordens-servico-tecnico'
+const TAMANHO_PAGINA = 12
+
+// Concluídas não vêm na lista do painel: são paginadas no servidor, só da aba delas.
+type AbaEmAndamento = Exclude<AbaPainelTecnico, 'concluidas'>
+
+// Em que aba a OS aparece -- mesmo critério de `ordensPorAba` abaixo. Concluída sem
+// custo lançado não aparece em aba nenhuma (ver o comentário de `concluidas`); fica na
+// primeira, e o modal abre do mesmo jeito.
+function abaDaOrdem(ordem: OrdemServico): AbaPainelTecnico {
+  if (ordem.finalizada) {
+    return 'concluidas'
+  }
+  return ordem.statusExecucao === 'Pausada' ? 'pendentes-pausadas' : 'em-aberto'
+}
 
 export function PainelTecnico() {
   const tecnicoId = useEstadoAutenticacao((estado) => estado.tecnicoId)
-  const { data: lojas = [] } = useLojas()
   const queryClient = useQueryClient()
-  const [abaSelecionada, setAbaSelecionada] =
-    useState<AbaPainelTecnico>('em-aberto')
-  const [lojaSelecionada, setLojaSelecionada] = useState<number | null>(null)
+  // A aba mora na URL (?aba=) junto com os níveis de loja/setor (NavegacaoLojaSetor): o
+  // F5 e o voltar do navegador reabrem onde o Técnico estava, e trocar de aba começa do
+  // topo dela — uma aba não herda a loja/setor da outra.
+  const [parametros, setParametros] = useSearchParams()
+  const abaDaUrl = parametros.get('aba')
+  const abaSelecionada: AbaPainelTecnico =
+    ABAS_PAINEL_TECNICO.find((aba) => aba === abaDaUrl) ?? 'em-aberto'
+
+  function aoSelecionarAba(aba: AbaPainelTecnico) {
+    setParametros({ aba })
+  }
   const [ordemParaPausar, setOrdemParaPausar] = useState<OrdemServico | null>(
     null,
   )
@@ -54,13 +72,40 @@ export function PainelTecnico() {
   const [solicitacaoParaVisualizar, setSolicitacaoParaVisualizar] =
     useState<SolicitacaoOS | null>(null)
 
-  const { data: ordensServico = [], isLoading } =
-    useOrdensServicoTecnico(tecnicoId)
+  const { data: ordensServico = [], isLoading } = useOrdensServicoTecnico(tecnicoId)
 
+  // Link de notificação (sininho/push): ?os=N -- a OS nova no nome dele. Busca a OS por id
+  // (a lista do cache pode ser de antes dela nascer, e a concluída nem está nela), vai pra
+  // aba onde ela está e abre o detalhe da solicitação: é ali que estão a descrição e as
+  // fotos do problema.
+  const [osDaUrl] = useIdDaUrl('os')
+
+  useEffect(() => {
+    if (osDaUrl === null) {
+      return
+    }
+    servicoOrdensServico
+      .obterPorId(osDaUrl)
+      .then((ordem) => {
+        // Trocar a aba já tira o ?os= da URL (setParametros substitui a query inteira).
+        setParametros({ aba: abaDaOrdem(ordem) }, { replace: true })
+        return aoVerSolicitacao(ordem)
+      })
+      .catch(() => {
+        // Fora do escopo ou inexistente: o api.ts já mostra o toast do 404.
+        setParametros({ aba: abaSelecionada }, { replace: true })
+      })
+    // Só reage ao id da URL: as funções acima mudam a cada render e reabririam o modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [osDaUrl])
+
+  // As duas: a lista do que está em andamento, e a paginada/resumo das concluídas. Encerrar
+  // lança o custo na hora, então a OS sai de uma e entra na outra no mesmo passo.
   function invalidarOrdensServico() {
-    return queryClient.invalidateQueries({
-      queryKey: [CHAVE_ORDENS_SERVICO_TECNICO],
-    })
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: [CHAVE_ORDENS_SERVICO_TECNICO] }),
+      queryClient.invalidateQueries({ queryKey: ['ordens-servico-todas'] }),
+    ])
   }
 
   const { mutateAsync: iniciar } = useMutation({
@@ -140,26 +185,15 @@ export function PainelTecnico() {
     toast.success(`OS #${ordemParaEncerrar.id} encerrada com sucesso.`)
   }
 
-  // Um Técnico pode atender mais de uma loja (ver ResumoLojasTecnico) — o filtro se aplica
-  // antes de separar por aba, para o contador de cada aba já refletir a loja escolhida.
-  const ordensNaLojaSelecionada = lojaSelecionada
-    ? ordensServico.filter((ordem) => ordem.lojaId === lojaSelecionada)
-    : ordensServico
-
-  const ordensPorAba: Record<AbaPainelTecnico, OrdemServico[]> = {
-    'em-aberto': ordensNaLojaSelecionada.filter(
+  const ordensPorAba: Record<AbaEmAndamento, OrdemServico[]> = {
+    'em-aberto': ordensServico.filter(
       (ordem) =>
         ordem.statusExecucao === 'Aberta' ||
         ordem.statusExecucao === 'Em Andamento',
     ),
-    'pendentes-pausadas': ordensNaLojaSelecionada.filter(
+    'pendentes-pausadas': ordensServico.filter(
       (ordem) => ordem.statusExecucao === 'Pausada',
     ),
-    // Só aparece aqui depois que o Administrador lança o custo de manutenção — a mesma
-    // regra de "OS Finalizada" usada no Gestor e no Administrador (ver CLAUDE.md, item
-    // 9/13). Uma OS que o Técnico já encerrou mas ainda sem custo lançado fica "invisível"
-    // nas abas dele até esse lançamento.
-    concluidas: ordensNaLojaSelecionada.filter((ordem) => ordem.finalizada),
   }
 
   const ESTADO_VAZIO: Record<
@@ -179,10 +213,11 @@ export function PainelTecnico() {
   }
 
   // Máquina Parada primeiro, depois Urgência, depois a OS mais antiga — ver
-  // ordenarPrioridadeOS.ts. Ordena antes de agrupar para cada bloco de Setor/Loja já sair
-  // com os cards na prioridade certa.
-  const ordensExibidas = ordenarPorPrioridade(ordensPorAba[abaSelecionada])
-  const gruposExibidos = agruparPorSetorLoja(ordensExibidas, lojas)
+  // ordenarPrioridadeOS.ts. Ordena antes de navegar para a lista de cada setor já sair
+  // com os cards na prioridade certa (e a página 1 ser a mais urgente).
+  const ordensExibidas = ordenarPorPrioridade(
+    abaSelecionada === 'concluidas' ? [] : ordensPorAba[abaSelecionada],
+  )
   const { Icone: IconeVazio, mensagem: mensagemVazia } =
     ESTADO_VAZIO[abaSelecionada]
 
@@ -239,42 +274,43 @@ export function PainelTecnico() {
           </p>
         </div>
 
-        <ResumoLojasTecnico
-          ordensServico={ordensServico}
-          lojas={lojas}
-          lojaSelecionada={lojaSelecionada}
-          aoSelecionarLoja={setLojaSelecionada}
-        />
-
         <AbasPainelTecnico
           abaSelecionada={abaSelecionada}
-          aoSelecionarAba={setAbaSelecionada}
+          aoSelecionarAba={aoSelecionarAba}
         />
 
-        <div className="flex flex-col gap-6">
-          {isLoading && (
-            <EsqueletoLista quantidade={3}>
-              <EsqueletoCardOS />
-            </EsqueletoLista>
-          )}
-
-          {!isLoading && ordensExibidas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-center text-slate-400">
-              <IconeVazio size={32} className="text-slate-400" />
-              <p className="max-w-sm text-sm">{mensagemVazia}</p>
-            </div>
-          )}
-
-          {!isLoading &&
-            gruposExibidos.map((grupo) => (
-              <BlocoSetorLoja
-                key={grupo.chave}
-                grupo={grupo}
-                obterChave={(ordemServico) => ordemServico.id}
-                renderItem={renderizarCard}
-              />
-            ))}
-        </div>
+        {abaSelecionada === 'concluidas' ? (
+          // Histórico que só cresce: paginado no servidor (resumo + uma página por vez). Só
+          // aparece aqui depois que o custo foi lançado — a mesma regra de "OS Finalizada" do
+          // Gestor e do Administrador (item 9/13). Concluída sem custo fica invisível até lá.
+          // Sem selo de máquina parada: a OS já foi encerrada e o selo enganaria. Desce até a
+          // máquina, como as OS Finalizadas do Gestor: o histórico do setor junta muitas.
+          <NavegacaoLojaSetorPaginada
+            filtros={{ tecnicoId: tecnicoId ?? undefined, finalizada: true }}
+            mensagemVazio={mensagemVazia}
+            IconeVazio={IconeVazio}
+            rotuloNavegacao="Navegação das ordens de serviço"
+            porMaquina
+            renderItem={renderizarCard}
+          />
+        ) : (
+          <NavegacaoLojaSetor
+            itens={ordensExibidas}
+            carregando={isLoading}
+            mensagemVazio={mensagemVazia}
+            IconeVazio={IconeVazio}
+            rotuloNavegacao="Navegação das ordens de serviço"
+            rotuloQuantidade={(n) => (n === 1 ? '1 OS' : `${n} OS`)}
+            // Mesmo critério do BadgeAfetaProducao do card: máquina parada é o que o
+            // Técnico ataca primeiro, e o selo mostra em que loja/setor ela está.
+            ehDestaque={(ordemServico) => ordemServico.afetaProducao}
+            rotuloDestaques={(n) =>
+              n === 1 ? '1 máquina parada' : `${n} máquinas paradas`
+            }
+            tamanhoPagina={TAMANHO_PAGINA}
+            renderItem={renderizarCard}
+          />
+        )}
       </main>
 
       <footer className="py-4 text-center">

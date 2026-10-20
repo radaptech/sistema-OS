@@ -1,20 +1,20 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Inbox } from 'lucide-react'
 import { toast } from 'react-toastify'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CabecalhoTopo } from '../../componentes/CabecalhoTopo'
 import { FiltroTipoOS } from '../../componentes/FiltroTipoOS'
-import { EsqueletoLista, EsqueletoCardOS } from '../../componentes/Esqueleto'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
+import { useIdDaUrl } from '../../hooks/useIdDaUrl'
 import { useTodasSolicitacoes } from '../../hooks/useTodasSolicitacoes'
 import { useOrdensServicoTodas } from '../../hooks/useOrdensServicoTodas'
 import { usePreventivas } from '../../hooks/usePreventivas'
 import { useLojas } from '../../hooks/useLojas'
-import { useSetores } from '../../hooks/useSetores'
 import { servicoSolicitacoes } from '../../servicos/servicoSolicitacoes'
-import { agruparPorEscopoGestor } from '../../utilitarios/acessoGestor'
+import { servicoOrdensServico } from '../../servicos/servicoOrdensServico'
 import { dataEstaNoIntervalo } from '../../utilitarios/dataEstaNoIntervalo'
-import { obterNomeAlvo } from '../../utilitarios/alvoOS'
+import { combinaBuscaAlvo, type AlvoOS } from '../../utilitarios/alvoOS'
 import type {
   OrdemServico,
   SolicitacaoOS,
@@ -24,27 +24,34 @@ import { ModalAbrirOrdemServico } from '../ModalAbrirOrdemServico/ModalAbrirOrde
 import type { DadosAbrirOrdemServico } from '../ModalAbrirOrdemServico/esquemaAbrirOrdemServico'
 import { ModalDetalhesOS } from '../ModalDetalhesOS/ModalDetalhesOS'
 import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetalhesSolicitacao'
-import {
-  AbasPainelGestor,
-  type AbaPainelGestor,
-} from './componentes/AbasPainelGestor'
+import { AbasPainelGestor } from './componentes/AbasPainelGestor'
+import { ABAS_PAINEL_GESTOR, type AbaPainelGestor } from './abasPainelGestor'
 import { AcoesRapidas } from './componentes/AcoesRapidas'
-import { BlocoLoja } from './componentes/BlocoLoja'
 import { CardSolicitacaoGestor } from './componentes/CardSolicitacaoGestor'
 import {
   FiltroStatusSolicitacao,
   type StatusFilaGestor,
 } from './componentes/FiltroStatusSolicitacao'
 import { CardOSEmExecucao } from './componentes/CardOSEmExecucao'
-import { CardOSFinalizada } from './componentes/CardOSFinalizada'
-import { CardPreventiva } from './componentes/CardPreventiva'
+import { OSFinalizadasGestor } from './componentes/OSFinalizadasGestor'
 import { ModalRejeitarSolicitacao } from './componentes/ModalRejeitarSolicitacao'
+import { SeletorPreventivas } from './componentes/SeletorPreventivas'
+import { NavegacaoLojaSetor } from '../../componentes/NavegacaoLojaSetor'
 import type { DadosRejeitarSolicitacao } from './esquemaRejeitarSolicitacao'
 import { ModalFiltrosOS } from './componentes/ModalFiltrosOS'
 import {
   FILTROS_AVANCADOS_OS_VAZIOS,
   type FiltrosAvancadosOS,
 } from './filtrosOS'
+
+function rotuloOS(quantidade: number) {
+  return quantidade === 1 ? '1 OS' : `${quantidade} OS`
+}
+
+// Selo vermelho dos cards de loja/setor: máquina parada é o que o Gestor ataca primeiro.
+function rotuloAfetaProducao(quantidade: number) {
+  return quantidade === 1 ? '1 afeta produção' : `${quantidade} afetam produção`
+}
 
 interface SelecaoOS {
   ordem: OrdemServico
@@ -56,10 +63,18 @@ export function PainelGestor() {
   const escoposGestor =
     useEstadoAutenticacao((estado) => estado.escoposGestor) ?? []
   const { data: lojas = [] } = useLojas()
-  // Resolve o nome do setor no cabeçalho de cada subgrupo, inclusive quando ele está vazio.
-  const { data: setores = [] } = useSetores()
-  const [abaSelecionada, setAbaSelecionada] =
-    useState<AbaPainelGestor>('solicitacoes')
+  // A aba mora na URL (?aba=), junto com os níveis de loja/setor das abas navegáveis
+  // (utilitarios/navegacaoNiveis.ts): o F5 e o voltar do navegador reabrem onde o Gestor estava, e
+  // duas abas usando `loja`/`setor` não herdam o caminho uma da outra.
+  const [parametros, setParametros] = useSearchParams()
+  const abaDaUrl = parametros.get('aba')
+  const abaSelecionada: AbaPainelGestor =
+    ABAS_PAINEL_GESTOR.find((aba) => aba === abaDaUrl) ?? 'solicitacoes'
+
+  // Trocar de aba começa do topo dela: os níveis da aba anterior não valem aqui.
+  function aoSelecionarAba(aba: AbaPainelGestor) {
+    setParametros({ aba })
+  }
   const [filtroTipo, setFiltroTipo] = useState<TipoOS | ''>('')
   const [filtroStatus, setFiltroStatus] = useState<StatusFilaGestor>('Pendente')
   const [filtrosAvancados, setFiltrosAvancados] = useState<FiltrosAvancadosOS>(
@@ -74,12 +89,49 @@ export function PainelGestor() {
     useState<SolicitacaoOS | null>(null)
   const [selecaoOS, setSelecaoOS] = useState<SelecaoOS | null>(null)
 
+  // Só a lista da aba aberta é buscada: abrir o painel não baixa as quatro de uma vez.
+  // A que já foi vista fica no cache, então voltar a uma aba é instantâneo. OS Finalizadas
+  // não usa esta lista: é histórico, e a aba busca o resumo e uma página por vez no servidor
+  // (OSFinalizadasGestor).
   const { data: solicitacoes = [], isLoading: carregandoSolicitacoes } =
-    useTodasSolicitacoes()
+    useTodasSolicitacoes({}, abaSelecionada === 'solicitacoes')
   const { data: ordensServico = [], isLoading: carregandoOrdensServico } =
-    useOrdensServicoTodas()
+    useOrdensServicoTodas({}, abaSelecionada === 'os-em-andamento')
   const { data: preventivas = [], isLoading: carregandoPreventivas } =
-    usePreventivas()
+    usePreventivas(undefined, abaSelecionada === 'manutencao-preventiva')
+
+  // Link de notificação (sininho/push): ?solicitacao=N abre o detalhe do pedido na aba
+  // de solicitações; ?os=N abre o detalhe da OS (a concluída, que o Técnico acabou de
+  // encerrar). O parâmetro sai da URL antes da busca: o modal abre uma vez só.
+  const [solicitacaoDaUrl] = useIdDaUrl('solicitacao')
+  const [osDaUrl, consumirOSDaUrl] = useIdDaUrl('os')
+
+  useEffect(() => {
+    if (solicitacaoDaUrl === null) {
+      return
+    }
+    // Trocar pra aba de solicitações já tira o ?solicitacao= (setParametros substitui
+    // a query inteira): o card do pedido fica atrás do modal, pronto pra Abrir OS.
+    setParametros({ aba: 'solicitacoes' }, { replace: true })
+    // Não encontrada (fora do escopo, já apagada): o api.ts já mostra o toast do 404.
+    servicoSolicitacoes
+      .obterPorId(solicitacaoDaUrl)
+      .then(setSolicitacaoParaVisualizar)
+      .catch(() => {})
+  }, [solicitacaoDaUrl, setParametros])
+
+  useEffect(() => {
+    if (osDaUrl === null) {
+      return
+    }
+    consumirOSDaUrl()
+    // Uma OS só, buscada na hora (versão de depois do encerramento). Fora do escopo ou
+    // inexistente: o api.ts já mostra o toast do 404.
+    servicoOrdensServico
+      .obterPorId(osDaUrl)
+      .then((ordem) => setSelecaoOS({ ordem, imprimir: false }))
+      .catch(() => {})
+  }, [osDaUrl, consumirOSDaUrl])
 
   async function invalidarSolicitacoesEOrdens() {
     await Promise.all([
@@ -137,16 +189,14 @@ export function PainelGestor() {
   // Custo de Manutenção) — itens sem custo definido (solicitações e OS ainda em
   // andamento) só "combinam" quando nenhum filtro de valor está ativo.
   function combinaFiltrosAvancados(
-    maquinaNome: string,
+    alvo: AlvoOS,
     lojaId: number,
     dataReferencia: string,
     valorTotal?: number,
   ): boolean {
-    const combinaMaquina =
-      !filtrosAvancados.maquina ||
-      maquinaNome
-        .toLowerCase()
-        .includes(filtrosAvancados.maquina.trim().toLowerCase())
+    // Nome ou patrimônio: máquinas iguais têm o mesmo nome, e é pelo patrimônio
+    // (maquinaCodigo) que o Gestor chega numa só.
+    const combinaMaquina = combinaBuscaAlvo(alvo, filtrosAvancados.maquina)
     const combinaLoja =
       !filtrosAvancados.loja || lojaId === Number(filtrosAvancados.loja)
     const combinaData = dataEstaNoIntervalo(
@@ -171,7 +221,7 @@ export function PainelGestor() {
       solicitacao.status === filtroStatus &&
       (!filtroTipo || solicitacao.tipo === filtroTipo) &&
       combinaFiltrosAvancados(
-        obterNomeAlvo(solicitacao),
+        solicitacao,
         solicitacao.lojaId,
         solicitacao.criadoEm,
       ),
@@ -184,22 +234,6 @@ export function PainelGestor() {
     Rejeitada: solicitacoes.filter((item) => item.status === 'Rejeitada')
       .length,
   }
-  // Só é "OS Finalizada" para o Gestor quando ela passou por todas as etapas com
-  // sucesso: Técnico encerrou (Concluída) e o Administrador já lançou o custo de
-  // manutenção — ver regra de negócio no CLAUDE.md (item 11/12/13).
-  const ordensFinalizadas = ordensServico.filter(
-    (ordem) =>
-      ordem.statusExecucao === 'Concluída' &&
-      ordem.finalizada &&
-      (!filtroTipo || ordem.tipo === filtroTipo) &&
-      combinaFiltrosAvancados(
-        obterNomeAlvo(ordem),
-        ordem.lojaId,
-        ordem.dataAbertura,
-        (ordem.custo?.custoHoraTecnico ?? 0) +
-          (ordem.custo?.custoManutencao ?? 0),
-      ),
-  )
   // Acompanhamento em tempo real do que o Técnico está fazendo (Aberta/Em Andamento/
   // Pausada) — o botão de pausa continua com o Técnico (ele é quem está na frente do
   // problema), mas o Gestor enxerga aqui o motivo de cada pausa para dar visibilidade
@@ -211,47 +245,14 @@ export function PainelGestor() {
       ordem.statusExecucao !== 'Concluída' &&
       (!filtroTipo || ordem.tipo === filtroTipo) &&
       combinaFiltrosAvancados(
-        obterNomeAlvo(ordem),
+        ordem,
         ordem.lojaId,
         ordem.dataAbertura,
       ),
   )
 
-  const maquinasDisponiveis = [
-    ...new Set(
-      [...solicitacoes, ...ordensServico]
-        .map((item) => item.maquinaNome)
-        .filter((maquinaNome): maquinaNome is string => Boolean(maquinaNome)),
-    ),
-  ].sort((a, b) => a.localeCompare(b, 'pt-BR'))
-
   const quantidadeFiltrosAtivos =
     Object.values(filtrosAvancados).filter(Boolean).length
-
-  const gruposSolicitacoesDaFila = agruparPorEscopoGestor(
-    solicitacoesDaFila,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-  const gruposOSEmExecucao = agruparPorEscopoGestor(
-    ordensEmExecucao,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-  const gruposOSFinalizadas = agruparPorEscopoGestor(
-    ordensFinalizadas,
-    escoposGestor,
-    lojas,
-    setores,
-  )
-  const gruposPreventivas = agruparPorEscopoGestor(
-    preventivas,
-    escoposGestor,
-    lojas,
-    setores,
-  )
 
   return (
     <div className="flex min-h-svh flex-col bg-slate-50">
@@ -275,7 +276,7 @@ export function PainelGestor() {
 
         <AbasPainelGestor
           abaSelecionada={abaSelecionada}
-          aoSelecionarAba={setAbaSelecionada}
+          aoSelecionarAba={aoSelecionarAba}
         />
 
         {abaSelecionada !== 'manutencao-preventiva' && (
@@ -302,121 +303,72 @@ export function PainelGestor() {
         )}
 
         {abaSelecionada === 'solicitacoes' && (
-          <div className="flex flex-col gap-6">
-            {carregandoSolicitacoes && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
+          <NavegacaoLojaSetor
+            itens={solicitacoesDaFila}
+            carregando={carregandoSolicitacoes}
+            mensagemVazio={
+              filtroStatus === 'Pendente'
+                ? 'Nenhuma solicitação pendente.'
+                : 'Nenhuma solicitação rejeitada.'
+            }
+            rotuloNavegacao="Navegação das solicitações"
+            rotuloQuantidade={(n) =>
+              n === 1 ? '1 solicitação' : `${n} solicitações`
+            }
+            ehDestaque={(solicitacao) =>
+              solicitacao.impactos.includes('Afeta Produção')
+            }
+            rotuloDestaques={rotuloAfetaProducao}
+            renderItem={(solicitacao) => (
+              <CardSolicitacaoGestor
+                solicitacao={solicitacao}
+                // Rejeitada é histórico: sobra só o botão de visualizar.
+                aoAbrirOS={
+                  filtroStatus === 'Pendente'
+                    ? setSolicitacaoParaAbrirOS
+                    : undefined
+                }
+                aoRejeitar={
+                  filtroStatus === 'Pendente'
+                    ? setSolicitacaoParaRejeitar
+                    : undefined
+                }
+                aoVisualizar={setSolicitacaoParaVisualizar}
+              />
             )}
-
-            {!carregandoSolicitacoes &&
-              gruposSolicitacoesDaFila.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio={
-                    filtroStatus === 'Pendente'
-                      ? 'Nenhuma solicitação pendente.'
-                      : 'Nenhuma solicitação rejeitada.'
-                  }
-                  obterChave={(solicitacao) => solicitacao.id}
-                  renderItem={(solicitacao) => (
-                    <CardSolicitacaoGestor
-                      solicitacao={solicitacao}
-                      // Rejeitada é histórico: sobra só o botão de visualizar.
-                      aoAbrirOS={
-                        filtroStatus === 'Pendente'
-                          ? setSolicitacaoParaAbrirOS
-                          : undefined
-                      }
-                      aoRejeitar={
-                        filtroStatus === 'Pendente'
-                          ? setSolicitacaoParaRejeitar
-                          : undefined
-                      }
-                      aoVisualizar={setSolicitacaoParaVisualizar}
-                    />
-                  )}
-                />
-              ))}
-          </div>
+          />
         )}
 
         {abaSelecionada === 'os-em-andamento' && (
-          <div className="flex flex-col gap-6">
-            {carregandoOrdensServico && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
+          <NavegacaoLojaSetor
+            itens={ordensEmExecucao}
+            carregando={carregandoOrdensServico}
+            mensagemVazio="Nenhuma OS em aberto, em andamento ou pausada no momento."
+            rotuloNavegacao="Navegação das OS em andamento"
+            rotuloQuantidade={rotuloOS}
+            ehDestaque={(ordemServico) => ordemServico.afetaProducao}
+            rotuloDestaques={rotuloAfetaProducao}
+            renderItem={(ordemServico) => (
+              <CardOSEmExecucao ordemServico={ordemServico} />
             )}
-
-            {!carregandoOrdensServico &&
-              gruposOSEmExecucao.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma OS em aberto, em andamento ou pausada no momento."
-                  obterChave={(ordemServico) => ordemServico.id}
-                  renderItem={(ordemServico) => (
-                    <CardOSEmExecucao ordemServico={ordemServico} />
-                  )}
-                />
-              ))}
-          </div>
+          />
         )}
 
         {abaSelecionada === 'os-finalizadas' && (
-          <div className="flex flex-col gap-6">
-            {carregandoOrdensServico && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
-            )}
-
-            {!carregandoOrdensServico &&
-              gruposOSFinalizadas.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma OS finalizada ainda — a OS só aparece aqui depois que o Técnico encerra o atendimento e o Administrador lança o custo de manutenção."
-                  obterChave={(ordemServico) => ordemServico.id}
-                  renderItem={(ordemServico) => (
-                    <CardOSFinalizada
-                      ordemServico={ordemServico}
-                      aoVisualizar={(ordem) =>
-                        setSelecaoOS({ ordem, imprimir: false })
-                      }
-                      aoImprimir={(ordem) =>
-                        setSelecaoOS({ ordem, imprimir: true })
-                      }
-                    />
-                  )}
-                />
-              ))}
-          </div>
+          <OSFinalizadasGestor
+            filtroTipo={filtroTipo}
+            filtrosAvancados={filtrosAvancados}
+            aoVisualizar={(ordem) => setSelecaoOS({ ordem, imprimir: false })}
+            aoImprimir={(ordem) => setSelecaoOS({ ordem, imprimir: true })}
+          />
         )}
 
         {abaSelecionada === 'manutencao-preventiva' && (
-          <div className="flex flex-col gap-6">
-            {carregandoPreventivas && (
-              <EsqueletoLista quantidade={3}>
-                <EsqueletoCardOS />
-              </EsqueletoLista>
-            )}
-
-            {!carregandoPreventivas &&
-              gruposPreventivas.map((grupo) => (
-                <BlocoLoja
-                  key={grupo.loja.id}
-                  grupo={grupo}
-                  mensagemVazio="Nenhuma preventiva cadastrada."
-                  obterChave={(preventiva) => preventiva.id}
-                  renderItem={(preventiva) => (
-                    <CardPreventiva preventiva={preventiva} />
-                  )}
-                />
-              ))}
-          </div>
+          <SeletorPreventivas
+            preventivas={preventivas}
+            lojas={lojas}
+            carregando={carregandoPreventivas}
+          />
         )}
       </main>
 
@@ -462,7 +414,6 @@ export function PainelGestor() {
       {modalFiltrosAberto && (
         <ModalFiltrosOS
           lojas={lojas}
-          maquinas={maquinasDisponiveis}
           filtros={filtrosAvancados}
           aoFechar={() => setModalFiltrosAberto(false)}
           aoAplicar={(novosFiltros) => {

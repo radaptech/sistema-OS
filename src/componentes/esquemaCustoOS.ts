@@ -9,8 +9,8 @@ import { z } from 'zod'
 // `positive` porque 0 é valor de negócio legítimo (peça em garantia, serviço sem
 // material) — o mesmo motivo de o binding do back ser `gte=0` e nunca `required`.
 //
-// `custoHoraTecnico` é opcional: a tarefa pode ser só material. Quem barra a hora fora de
-// maquinário é `criarEsquemaItensCusto` abaixo, porque a regra depende do tipo da OS.
+// `custoHoraTecnico` é opcional: a tarefa pode ser só peça. É a mão de obra da tarefa —
+// do Técnico, ou da empresa em terceiros. Vale em todo tipo de OS (migration 000017).
 export const esquemaItemCusto = z.object({
   descricao: z
     .string()
@@ -28,35 +28,14 @@ export const esquemaItemCusto = z.object({
     .optional(),
 })
 
-// `permitirHoraTecnica` é true só em OS de maquinário: nos outros dois tipos a hora do
-// técnico é proibida (em terceiros quem trabalhou foi a empresa externa, em reparo o
-// serviço não cobra hora). O servidor repete a regra — aqui é só para o erro aparecer no
-// campo em vez de num toast.
-//
 // ⚠️ NÃO existe "maquinário exige hora técnica". A regra existia quando o custo era um
 // campo escalar obrigatório e, com uma linha por tarefa, ela obrigava o Técnico a inventar
 // uma tarefa só para carregar a mão de obra numa OS que trocou duas peças e não cobrou
 // hora nenhuma. Sem hora lançada o servidor grava zero, que diz a mesma coisa sem mentir
 // sobre o que foi feito.
-export function criarEsquemaItensCusto(permitirHoraTecnica: boolean) {
-  return z
-    .array(esquemaItemCusto)
-    .min(1, 'Lance ao menos um custo.')
-    .superRefine((itens, ctx) => {
-      if (permitirHoraTecnica) {
-        return
-      }
-      itens.forEach((item, indice) => {
-        if (item.custoHoraTecnico !== undefined) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [indice, 'custoHoraTecnico'],
-            message: 'Só OS de maquinário cobra hora do técnico.',
-          })
-        }
-      })
-    })
-}
+export const esquemaItensCusto = z
+  .array(esquemaItemCusto)
+  .min(1, 'Lance ao menos um custo.')
 
 // Série fica sem `min`: nota de consumidor costuma não ter série, e o servidor converte a
 // string vazia em ausência. O número, esse sim, é o que identifica o documento.

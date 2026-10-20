@@ -3,6 +3,8 @@ export interface Loja {
   nome: string
   empresaId: number
   ativa?: boolean
+  // URL assinada pelo servidor (a foto mora no R2); ausente = sem foto cadastrada.
+  fotoUrl?: string
 }
 
 // Sem empresaId: empresa É o tenant, que o servidor tira do token. O campo

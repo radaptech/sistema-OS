@@ -1,3 +1,5 @@
+import type { StatusExecucaoOS } from './ordemServico'
+
 export const niveisCriticidade = ['Baixa', 'Média', 'Alta'] as const
 
 export type NivelCriticidade = (typeof niveisCriticidade)[number]
@@ -21,6 +23,10 @@ export interface Maquina {
   ativa?: boolean
 }
 
+// GET /solicitacoes/minhas/maquinas: as máquinas que aparecem nas solicitações do próprio
+// Solicitante (opções do filtro de Minhas Solicitações) — só o que o chip mostra.
+export type MaquinaDasMinhasSolicitacoes = Pick<Maquina, 'id' | 'nome' | 'numeroPatrimonio' | 'fotoUrl'>
+
 // GET /maquinas/:id/historico — o que a exclusão definitiva leva junto. emAberto é
 // solicitação pendente ou OS não concluída: é o que impede a desativação.
 export interface HistoricoMaquina {
@@ -32,6 +38,9 @@ export interface HistoricoMaquina {
 }
 
 export interface PreventivaManutencao {
+  // Só na edição da máquina: a preventiva que já existia volta com o id e o servidor a
+  // atualiza no lugar, mantendo o histórico de ciclos. Sem id, é preventiva nova.
+  id?: number
   maquinaId: number
   // Quem recebe a OS quando esta preventiva vencer. A preventiva não passa mais pela fila
   // do Gestor: ao vencer, o servidor abre a OS já atribuída a este técnico. Por isso o
@@ -46,6 +55,10 @@ export interface PreventivaManutencao {
 export interface PreventivaListada extends PreventivaManutencao {
   id: number
   maquinaNome: string
+  // Máquinas iguais têm o mesmo nome: é o patrimônio (com a foto) que diz ao Gestor qual
+  // delas é, na aba "Manutenção Prev.". A URL da foto vem assinada pelo servidor.
+  maquinaPatrimonio?: string
+  maquinaFotoUrl?: string
   setorId: number
   setorNome: string
   lojaId: number
@@ -56,6 +69,19 @@ export interface PreventivaListada extends PreventivaManutencao {
   tecnicoNome?: string
   // Calculado no servidor: a preventiva venceu e já gerou solicitação automática.
   vencida?: boolean
+}
+
+// Um ciclo de GET /preventivas/:id/historico: a OS que o servidor abriu quando a
+// preventiva venceu (`id` é o da OS). "Feito" é `status === 'Concluída'` — derivado na
+// tela, não um booleano a mais que poderia discordar do status. `dataAbertura` é quando
+// o ciclo venceu; `dataFim` só existe na OS encerrada.
+export interface CicloPreventiva {
+  id: number
+  status: StatusExecucaoOS
+  dataAbertura: string
+  dataInicio?: string
+  dataFim?: string
+  tecnicoNome: string
 }
 
 // A loja não é enviada: ela é derivada do setor no servidor, evitando um par

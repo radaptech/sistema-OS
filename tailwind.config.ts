@@ -69,6 +69,17 @@ export default {
           from: { opacity: '1', transform: 'scale(1) translateY(0)' },
           to: { opacity: '0', transform: 'scale(0.98) translateY(2px)' },
         },
+        // Folha inferior (bottom sheet, telas de celular): sobe da borda de baixo, de
+        // onde o polegar está. Sai descendo só um pouco e sumindo -- a saída é sempre
+        // mais fraca que a entrada.
+        'folha-entrar': {
+          from: { transform: 'translateY(100%)' },
+          to: { transform: 'translateY(0)' },
+        },
+        'folha-sair': {
+          from: { opacity: '1', transform: 'translateY(0)' },
+          to: { opacity: '0', transform: 'translateY(16px)' },
+        },
         // Entrada padrão de conteúdo (cards, blocos de lista): opacidade + subida curta
         // + desfoque, o que disfarça o "salto" de um item aparecendo do nada.
         'surgir': {
@@ -88,6 +99,8 @@ export default {
         'pop-in': 'pop-in 0.18s cubic-bezier(0.32, 0.72, 0, 1)',
         'fade-out': 'fade-out 0.12s cubic-bezier(0.4, 0, 1, 1) forwards',
         'pop-out': 'pop-out 0.12s cubic-bezier(0.4, 0, 1, 1) forwards',
+        'folha-entrar': 'folha-entrar 0.24s cubic-bezier(0.32, 0.72, 0, 1)',
+        'folha-sair': 'folha-sair 0.12s cubic-bezier(0.4, 0, 1, 1) forwards',
         surgir: 'surgir 0.2s cubic-bezier(0.22, 1, 0.36, 1) both',
         varrer: 'varrer 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },

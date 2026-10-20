@@ -1,68 +1,140 @@
-import { useState } from 'react'
-import {
-  Activity,
-  Clock,
-  Gauge,
-  PackageSearch,
-  Timer,
-  Wrench,
-  CircleDollarSign,
-} from 'lucide-react'
+import { Gauge, PackageSearch } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { CabecalhoSubpagina } from '../../componentes/CabecalhoSubpagina'
 import { Esqueleto } from '../../componentes/Esqueleto'
 import { useEstadoAutenticacao } from '../../estado/estadoAutenticacao'
 import { useMaquinas } from '../../hooks/useMaquinas'
-import { useIndicadoresMaquina } from '../../hooks/useIndicadoresMaquina'
 import { useLojas } from '../../hooks/useLojas'
 import { useSetores } from '../../hooks/useSetores'
 import { agruparPorEscopoGestor } from '../../utilitarios/acessoGestor'
-import { formatarHoras } from '../../utilitarios/formatarHoras'
-import { formatarMoeda } from '../../utilitarios/formatarMoeda'
 import type { Maquina } from '../../tipos/maquina'
-import { CORES_TIPO_DEFEITO } from './coresTipoDefeito'
-import { CardIndicador } from './componentes/CardIndicador'
-import { GraficoBarras } from './componentes/GraficoBarras'
-import { GraficoRosca } from './componentes/GraficoRosca'
-import { SeletorMaquinaDashboard } from './componentes/SeletorMaquinaDashboard'
+import {
+  PainelIndicadoresLoja,
+  type SetorComMaquinas,
+} from './componentes/PainelIndicadoresLoja'
+import { PainelIndicadoresMaquina } from './componentes/PainelIndicadoresMaquina'
+import { SeletorLoja, type ResumoLoja } from './componentes/SeletorLoja'
+import {
+  TrilhaNavegacao,
+  type EtapaTrilha,
+} from './componentes/TrilhaNavegacao'
 
+// Três etapas: Lojas → Loja (total, setores e máquinas com os indicadores de cada um)
+// → Indicadores de uma máquina. A etapa vive na URL
+// (?loja=&maquina=), e não em useState, para o botão "voltar" do navegador e o F5
+// devolverem o Gestor para onde ele estava.
 export function DashboardGestor() {
   const escoposGestor =
     useEstadoAutenticacao((estado) => estado.escoposGestor) ?? []
   const { data: lojas = [] } = useLojas()
   const { data: setores = [] } = useSetores()
-  const [maquinaSelecionadaId, setMaquinaSelecionadaId] = useState<number | null>(null)
-
   const { data: maquinas = [], isLoading: carregandoMaquinas } = useMaquinas()
+  const [parametros, setParametros] = useSearchParams()
+
   const grupos = agruparPorEscopoGestor(maquinas, escoposGestor, lojas, setores)
 
-  const maquinasDisponiveis = grupos
-    .flatMap((grupo) => grupo.subgrupos)
-    .flatMap((subgrupo) => subgrupo.itens)
+  // Setores de cada loja com as máquinas dentro. Escopo 'todos' chega como um subgrupo
+  // só (sem setor) e é aberto aqui pelos setores cadastrados da loja — inclusive os sem
+  // máquina, para o Gestor ver que o setor existe e está vazio.
+  const setoresPorLoja = new Map<number, SetorComMaquinas[]>(
+    grupos.map((grupo) => {
+      const lista = grupo.subgrupos.flatMap((subgrupo) =>
+        subgrupo.setorId === null
+          ? setores
+              .filter((setor) => setor.lojaId === grupo.loja.id)
+              .map((setor) => ({
+                setorId: setor.id,
+                setorNome: setor.nome,
+                fotoUrl: setor.fotoUrl,
+                maquinas: subgrupo.itens.filter(
+                  (maquina) => maquina.setorId === setor.id,
+                ),
+              }))
+          : [
+              {
+                setorId: subgrupo.setorId,
+                setorNome: subgrupo.setorNome ?? `Setor ${subgrupo.setorId}`,
+                fotoUrl: setores.find((setor) => setor.id === subgrupo.setorId)?.fotoUrl,
+                maquinas: subgrupo.itens,
+              },
+            ],
+      )
+      lista.sort((a, b) => a.setorNome.localeCompare(b.setorNome, 'pt-BR'))
+      return [grupo.loja.id, lista]
+    }),
+  )
 
+  const resumosLojas: ResumoLoja[] = grupos.map((grupo) => {
+    const setoresDaLoja = setoresPorLoja.get(grupo.loja.id) ?? []
+    const maquinasDaLoja = setoresDaLoja.flatMap((setor) => setor.maquinas)
+    return {
+      loja: grupo.loja,
+      quantidadeMaquinas: maquinasDaLoja.length,
+      quantidadeSetores: setoresDaLoja.length,
+      quantidadeCriticas: maquinasDaLoja.filter(
+        (maquina) => maquina.criticidade === 'Alta',
+      ).length,
+      acessoTotal: grupo.subgrupos.some(
+        (subgrupo) => subgrupo.setorId === null,
+      ),
+    }
+  })
+
+  const maquinasDisponiveis = [...setoresPorLoja.values()]
+    .flat()
+    .flatMap((setor) => setor.maquinas)
+
+  // Parâmetro inválido (máquina fora do escopo, id digitado à mão) cai na etapa
+  // anterior em vez de mostrar uma tela vazia.
   const maquinaSelecionada: Maquina | null =
     maquinasDisponiveis.find(
-      (maquina) => maquina.id === maquinaSelecionadaId,
-    ) ??
-    maquinasDisponiveis[0] ??
-    null
+      (maquina) => maquina.id === Number(parametros.get('maquina')),
+    ) ?? null
+  const umaLojaSo = resumosLojas.length === 1
+  const lojaSelecionada =
+    resumosLojas.find(
+      (resumo) =>
+        resumo.loja.id ===
+        (maquinaSelecionada?.lojaId ?? Number(parametros.get('loja'))),
+    ) ?? (umaLojaSo ? resumosLojas[0] : null)
 
-  const { data: indicadores, isLoading: carregandoIndicadores } =
-    useIndicadoresMaquina(maquinaSelecionada?.id ?? null)
+  function irPara(lojaId: number | null, maquinaId: number | null = null) {
+    const novos = new URLSearchParams()
+    if (lojaId !== null) novos.set('loja', String(lojaId))
+    if (maquinaId !== null) novos.set('maquina', String(maquinaId))
+    setParametros(novos)
+    window.scrollTo({ top: 0 })
+  }
 
-  const segmentosRosca =
-    indicadores?.porTipoDefeito.map((item) => ({
-      rotulo: item.tipoDefeito,
-      valor: item.horasParada,
-      valorFormatado: formatarHoras(item.horasParada),
-      cor: CORES_TIPO_DEFEITO[item.tipoDefeito],
-    })) ?? []
+  const trilha: EtapaTrilha[] = []
+  if (!umaLojaSo) {
+    trilha.push({
+      rotulo: 'Lojas',
+      aoClicar: lojaSelecionada ? () => irPara(null) : undefined,
+    })
+  }
+  if (lojaSelecionada) {
+    trilha.push({
+      rotulo: lojaSelecionada.loja.nome,
+      aoClicar: maquinaSelecionada
+        ? () => irPara(lojaSelecionada.loja.id)
+        : undefined,
+    })
+  }
+  if (maquinaSelecionada) {
+    trilha.push({ rotulo: maquinaSelecionada.nome })
+  }
 
-  const barrasMensais =
-    indicadores?.porMes.map((item) => ({
-      rotulo: item.mes,
-      valor: item.custoTotal,
-      valorFormatado: formatarMoeda(item.custoTotal),
-    })) ?? []
+  const titulo = maquinaSelecionada
+    ? 'Indicadores da Máquina'
+    : lojaSelecionada
+      ? lojaSelecionada.loja.nome
+      : 'Indicadores de Máquinas'
+  const subtitulo = maquinaSelecionada
+    ? 'Horas Parada, MTTR, MTBF e Custo Total a partir das OS encerradas.'
+    : lojaSelecionada
+      ? 'Horas Parada, MTTR, MTBF e Custo Total por setor. Clique numa máquina para ver o detalhe dela.'
+      : 'Escolha a loja para ver os indicadores dos setores e das máquinas.'
 
   return (
     <div className="flex min-h-svh flex-col bg-slate-50">
@@ -73,122 +145,73 @@ export function DashboardGestor() {
       />
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-6 sm:px-8">
-        <div>
-          <h1 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-            Indicadores de Máquinas
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Selecione uma máquina para ver Horas Parada, MTTR, MTBF e Custo
-            Total.
-          </p>
+        <div className="flex flex-col gap-2">
+          {trilha.length > 1 && <TrilhaNavegacao etapas={trilha} />}
+          <div>
+            <h1 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+              {titulo}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">{subtitulo}</p>
+          </div>
         </div>
 
         {carregandoMaquinas && (
           <div
             role="status"
             aria-busy="true"
-            aria-label="Carregando máquinas"
-            className="shadow-card flex flex-col gap-3 rounded-2xl bg-white p-4"
+            aria-label="Carregando lojas"
+            className="grid gap-3 sm:grid-cols-2"
           >
-            <Esqueleto className="h-3 w-32" />
-            <div className="flex flex-wrap gap-2">
-              {Array.from({ length: 4 }, (_, indice) => (
-                <Esqueleto key={indice} className="h-9 w-36 rounded-xl" />
-              ))}
-            </div>
+            {Array.from({ length: 2 }, (_, indice) => (
+              <div
+                key={indice}
+                className="shadow-card flex flex-col gap-4 rounded-2xl bg-white p-5"
+              >
+                <div className="flex items-center gap-3">
+                  <Esqueleto className="h-11 w-11 rounded-xl" />
+                  <div className="flex flex-col gap-2">
+                    <Esqueleto className="h-4 w-32" />
+                    <Esqueleto className="h-3 w-24" />
+                  </div>
+                </div>
+                <Esqueleto className="h-14 w-full rounded-xl" />
+              </div>
+            ))}
           </div>
         )}
 
-        {!carregandoMaquinas && grupos.length === 0 && (
+        {!carregandoMaquinas && resumosLojas.length === 0 && (
           <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
             <PackageSearch size={28} className="text-slate-400" />
-            <p className="text-sm">Nenhuma máquina disponível nos seus setores/lojas.</p>
+            <p className="text-sm">Nenhuma loja vinculada ao seu acesso.</p>
           </div>
         )}
 
-        {!carregandoMaquinas && grupos.length > 0 && (
-          <SeletorMaquinaDashboard
-            grupos={grupos}
-            maquinaSelecionadaId={maquinaSelecionada?.id ?? null}
-            aoSelecionar={(maquina) => setMaquinaSelecionadaId(maquina.id)}
+        {!carregandoMaquinas && !lojaSelecionada && resumosLojas.length > 0 && (
+          <SeletorLoja
+            lojas={resumosLojas}
+            aoSelecionar={(lojaId) => irPara(lojaId)}
+          />
+        )}
+
+        {!carregandoMaquinas && lojaSelecionada && !maquinaSelecionada && (
+          <PainelIndicadoresLoja
+            // key: mês, busca e filtro de setor são da loja; trocar de loja zera os três.
+            key={lojaSelecionada.loja.id}
+            lojaId={lojaSelecionada.loja.id}
+            acessoTotal={lojaSelecionada.acessoTotal}
+            setores={setoresPorLoja.get(lojaSelecionada.loja.id) ?? []}
+            aoSelecionarMaquina={(maquina) =>
+              irPara(maquina.lojaId, maquina.id)
+            }
           />
         )}
 
         {maquinaSelecionada && (
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200/60 pb-2">
-              <Wrench size={16} className="shrink-0 text-emerald-300" />
-              <h2 className="min-w-0 font-display text-sm font-bold break-words text-slate-800">
-                {maquinaSelecionada.nome}
-              </h2>
-              <span className="shrink-0 font-mono text-xs text-slate-400">
-                · {maquinaSelecionada.setorNome}
-              </span>
-            </div>
-
-            {/* Esqueleto no formato exato do painel (4 indicadores + rosca + barras):
-                quando os números chegam nada muda de lugar. */}
-            {carregandoIndicadores && (
-              <div role="status" aria-busy="true" aria-label="Carregando indicadores">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {Array.from({ length: 4 }, (_, indice) => (
-                    <div key={indice} className="shadow-card rounded-2xl bg-white p-4">
-                      <Esqueleto className="h-4 w-4 rounded" />
-                      <Esqueleto className="mt-3 h-3 w-20" />
-                      <Esqueleto className="mt-2 h-5 w-16" />
-                    </div>
-                  ))}
-                </div>
-                <div className="shadow-card mt-4 flex flex-col items-center gap-4 rounded-2xl bg-white p-5">
-                  <Esqueleto className="h-3 w-44" />
-                  <Esqueleto className="h-40 w-40 rounded-full" />
-                </div>
-                <div className="shadow-card mt-4 rounded-2xl bg-white p-5">
-                  <Esqueleto className="h-3 w-52" />
-                  <Esqueleto className="mt-4 h-40 w-full rounded-lg" />
-                </div>
-              </div>
-            )}
-
-            {indicadores && (
-              <>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <CardIndicador
-                    Icone={Clock}
-                    rotulo="Horas Parada"
-                    valor={formatarHoras(indicadores.horasParadaTotal)}
-                  />
-                  <CardIndicador
-                    Icone={Timer}
-                    rotulo="MTTR"
-                    valor={formatarHoras(indicadores.mttrHoras)}
-                  />
-                  <CardIndicador
-                    Icone={Activity}
-                    rotulo="MTBF"
-                    valor={formatarHoras(indicadores.mtbfHoras)}
-                  />
-                  <CardIndicador
-                    Icone={CircleDollarSign}
-                    rotulo="Custo Total"
-                    valor={formatarMoeda(indicadores.custoTotal)}
-                  />
-                </div>
-
-                <GraficoRosca
-                  titulo="Paradas por Tipo de OS"
-                  dados={segmentosRosca}
-                  rotuloCentral="Total"
-                  valorCentral={formatarHoras(indicadores.horasParadaTotal)}
-                />
-
-                <GraficoBarras
-                  titulo="Custo Mensal (últimos 6 meses)"
-                  dados={barrasMensais}
-                />
-              </>
-            )}
-          </div>
+          <PainelIndicadoresMaquina
+            key={maquinaSelecionada.id}
+            maquina={maquinaSelecionada}
+          />
         )}
       </main>
     </div>

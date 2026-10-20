@@ -1,9 +1,10 @@
 import { createPortal } from 'react-dom'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Truck, XCircle } from 'lucide-react'
+import { Building2, Truck, XCircle } from 'lucide-react'
 import { Botao } from '../../../componentes/Botao'
 import { CampoSelecao } from '../../../componentes/CampoSelecao'
+import { MiniaturaFoto } from '../../../componentes/MiniaturaFoto'
 import { useEmpresasTerceirizadas } from '../../../hooks/useEmpresasTerceirizadas'
 import { obterNomeAlvo } from '../../../utilitarios/alvoOS'
 import type { OrdemServico } from '../../../tipos/ordemServico'
@@ -12,11 +13,13 @@ import {
   type DadosAcionarTerceiro,
 } from '../esquemaAcionarTerceiro'
 import { useSaidaAnimada } from '../../../hooks/useSaidaAnimada'
+import { useDialogo } from '../../../hooks/useDialogo'
 
 interface ModalAcionarTerceiroProps {
   ordemServico: OrdemServico
   aoFechar: () => void
-  aoSalvar: (dados: DadosAcionarTerceiro) => void
+  // Promise: o modal espera o servidor e só fecha se deu certo.
+  aoSalvar: (dados: DadosAcionarTerceiro) => Promise<void>
 }
 
 export function ModalAcionarTerceiro({
@@ -31,7 +34,8 @@ export function ModalAcionarTerceiro({
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    control,
+    formState: { errors, isSubmitting },
   } = useForm<DadosAcionarTerceiro>({
     resolver: zodResolver(esquemaAcionarTerceiro),
     defaultValues: {
@@ -39,20 +43,33 @@ export function ModalAcionarTerceiro({
     },
   })
 
-  function aoSalvarFormulario(dados: DadosAcionarTerceiro) {
-    aoSalvar(dados)
+  // Prévia da escolhida (foto, especialidade, telefone): o select só cabe o nome, e é
+  // pela foto/logo que o Técnico confere que pegou a empresa certa.
+  const empresaEscolhidaId = useWatch({ control, name: 'empresaTerceirizadaId' })
+  const empresaEscolhida = empresas.find((empresa) => empresa.id === empresaEscolhidaId)
+
+  async function aoSalvarFormulario(dados: DadosAcionarTerceiro) {
+    try {
+      await aoSalvar(dados)
+    } catch {
+      // O toast do api.ts já disse o que deu errado. O modal fica aberto com o que foi
+      // digitado, para tentar de novo -- fechar antes da resposta perdia tudo.
+      return
+    }
     fechar()
   }
 
+  const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
+
   return createPortal(
     <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
         <div className="flex items-start justify-between bg-blue-600 px-6 py-4">
           <div>
             <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
               Painel do Técnico
             </p>
-            <p className="font-display text-lg font-bold text-white">
+            <p id={idTitulo} className="font-display text-lg font-bold text-white">
               Acionar Terceiro · OS #{ordemServico.id}
             </p>
             <p className="text-xs text-white/80">
@@ -63,6 +80,7 @@ export function ModalAcionarTerceiro({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
+            disabled={isSubmitting}
             className="text-white/90 transition hover:text-white"
           >
             <XCircle size={22} />
@@ -107,15 +125,38 @@ export function ModalAcionarTerceiro({
             ))}
           </CampoSelecao>
 
+          {empresaEscolhida && (
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200/60 bg-slate-50 p-3">
+              <MiniaturaFoto
+                fotoUrl={empresaEscolhida.fotoUrl}
+                alt={empresaEscolhida.nome}
+                Icone={Building2}
+                className="h-14 w-14 rounded-lg"
+                tamanhoIcone={20}
+              />
+              <div className="min-w-0 text-sm">
+                <p className="truncate font-semibold text-slate-800">{empresaEscolhida.nome}</p>
+                {empresaEscolhida.especialidade && (
+                  <p className="truncate text-xs text-slate-500">{empresaEscolhida.especialidade}</p>
+                )}
+                {empresaEscolhida.telefone && (
+                  <p className="font-mono text-xs text-slate-500">{empresaEscolhida.telefone}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="mt-1 flex gap-3">
             <div className="flex-1">
-              <Botao type="button" variante="secundario" onClick={fechar}>
+              <Botao type="button" variante="secundario" onClick={fechar} disabled={isSubmitting}>
                 Cancelar
               </Botao>
             </div>
             <div className="flex-1">
               <Botao
                 type="submit"
+                carregando={isSubmitting}
+                rotuloCarregando="Acionando..."
                 className="flex items-center justify-center gap-2 bg-blue-600"
               >
                 <Truck size={16} />

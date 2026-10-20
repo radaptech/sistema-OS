@@ -7,7 +7,7 @@ import type {
 } from '../tipos/autenticacao'
 
 export const servicoAutenticacao = {
-  // O JWT volta em cookie HttpOnly; o corpo traz o escopo de acesso do usuário.
+  // A sessão volta em cookie HttpOnly; o corpo traz o escopo de acesso do usuário.
   entrar: (credenciais: CredenciaisLogin) =>
     api.post<SessaoUsuario>('/autenticacao/login', credenciais),
 

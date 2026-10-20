@@ -15,6 +15,8 @@ export interface Tecnico {
   telefone?: string
   area: AreaTecnico
   lojasIds: number[]
+  // Tarifa de referência cadastrada pelo Administrador; ausente quando não há.
+  valorHora?: number
 }
 
 export interface NovoTecnicoPayload {

@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/radaptech/sistema-OSm--Back-end/config"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/helper"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/model"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/service"
@@ -47,6 +49,8 @@ type ordemServicoFake struct {
 	pagina *int32
 	// o que ListarOrdensDoPainelDaLoja recebeu, como "grupo=,setor=,maquina=,mes=,pagina=".
 	painelRecebido *string
+	// mês (YYYY-MM) recebido por ObterCustosDoMes.
+	mesRecebido *string
 }
 
 func (o ordemServicoFake) ListarOrdensServicoPaginada(ctx context.Context, tenantId, usuarioId int64, perfil string, f service.FiltrosOrdemServico, pagina int32) (model.RespostaPaginada[model.OrdemServico], error) {
@@ -1218,5 +1222,73 @@ func TestOrdensDoPainelDaLojaFiltrosChegamNoService(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"dados":[]`) {
 		t.Errorf("corpo = %s, esperado dados [] (nunca null)", rec.Body.String())
+	}
+}
+
+func (o ordemServicoFake) ObterCustosDoMes(_ context.Context, _, _ int64, _, mes string) (model.CustosDoMes, error) {
+	if o.mesRecebido != nil {
+		*o.mesRecebido = mes
+	}
+	if o.err != nil {
+		return model.CustosDoMes{}, o.err
+	}
+	return model.MontarCustosDoMes(mes[5:7]+"/"+mes[0:4], nil), nil
+}
+
+func contextoCustosDoMes(consulta url.Values) (*gin.Context, *httptest.ResponseRecorder) {
+	ctx, rec := contextoIndicadores("")
+	ctx.Params = nil
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/indicadores/custos?"+consulta.Encode(), nil)
+	return ctx, rec
+}
+
+func TestCustosDoMesStatus(t *testing.T) {
+
+	casos := []struct {
+		nome     string
+		consulta url.Values
+		err      error
+		esperar  int
+	}{
+		{"mês informado", url.Values{"mes": {"07/2026"}}, nil, http.StatusOK},
+		{"sem mês (o corrente)", nil, nil, http.StatusOK},
+		{"mês em formato errado", url.Values{"mes": {"2026-07"}}, nil, http.StatusBadRequest},
+		{"mês impossível", url.Values{"mes": {"13/2026"}}, nil, http.StatusBadRequest},
+		{"erro do banco", nil, errors.New("connection refused"), http.StatusInternalServerError},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			ctx, rec := contextoCustosDoMes(caso.consulta)
+			NewOrdemServicoController(ordemServicoFake{err: caso.err}, "").CustosDoMes()(ctx)
+			if rec.Code != caso.esperar {
+				t.Errorf("status = %d, esperado %d (corpo: %s)", rec.Code, caso.esperar, rec.Body.String())
+			}
+		})
+	}
+}
+
+// O mês chega como MM/AAAA e vai ao service como AAAA-MM; sem ele, é o mês de hoje em
+// Brasília. O corpo leva porTecnico [] (nunca null) e o rótulo do mês de volta.
+func TestCustosDoMesMesChegaNoService(t *testing.T) {
+
+	var recebido string
+	ctx, rec := contextoCustosDoMes(url.Values{"mes": {"07/2026"}})
+	NewOrdemServicoController(ordemServicoFake{mesRecebido: &recebido}, "").CustosDoMes()(ctx)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	if recebido != "2026-07" {
+		t.Errorf("service recebeu %q, esperado 2026-07", recebido)
+	}
+	if !strings.Contains(rec.Body.String(), `"mes":"07/2026"`) || !strings.Contains(rec.Body.String(), `"porTecnico":[]`) {
+		t.Errorf("corpo = %s", rec.Body.String())
+	}
+
+	ctx, _ = contextoCustosDoMes(nil)
+	NewOrdemServicoController(ordemServicoFake{mesRecebido: &recebido}, "").CustosDoMes()(ctx)
+	if hoje := time.Now().In(config.Brasilia).Format("2006-01"); recebido != hoje {
+		t.Errorf("sem ?mes= o service recebeu %q, esperado o mês corrente %q", recebido, hoje)
 	}
 }

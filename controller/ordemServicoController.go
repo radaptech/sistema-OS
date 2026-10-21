@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/radaptech/sistema-OSm--Back-end/config"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/helper"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/model"
 	"github.com/radaptech/sistema-OSm--Back-end/internal/service"
@@ -43,6 +44,8 @@ type OrdemServicoServiceInterface interface {
 	ObterOrdemServico(ctx context.Context, tenantId, usuarioId int64, perfil string, id int64) (model.OrdemServico, error)
 	// A lista por trás de um card de custo do painel da loja (maquinário ou pequenos reparos).
 	ListarOrdensDoPainelDaLoja(ctx context.Context, tenantId, lojaId, usuarioId int64, perfil, grupo string, filtros service.FiltrosOrdensDoPainel, pagina int32) (model.RespostaPaginada[model.OrdemDoPainel], error)
+	// O card "Custos do mês" do Painel do Gestor. `mes` é YYYY-MM.
+	ObterCustosDoMes(ctx context.Context, tenantId, usuarioId int64, perfil, mes string) (model.CustosDoMes, error)
 }
 
 // OrdemServicoController guarda só o bucket das fotos de empresa terceirizada
@@ -598,6 +601,43 @@ func (o *OrdemServicoController) OrdensDoPainelDaLoja() gin.HandlerFunc {
 
 // mesValido é o rótulo MM/AAAA do gráfico mensal.
 var mesValido = regexp.MustCompile(`^(0[1-9]|1[0-2])/[0-9]{4}$`)
+
+// CustosDoMes é GET /indicadores/custos -- o card "Custos do mês" do Painel do Gestor.
+// `?mes=MM/AAAA` escolhe o mês; sem ele, o mês corrente em Brasília (o card abre no
+// mês de hoje, e a OS encerrada às 22h do dia 31 já é do mês seguinte em UTC).
+func (o *OrdemServicoController) CustosDoMes() gin.HandlerFunc {
+
+	return func(ctx *gin.Context) {
+
+		tenantId, ok := tenantDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		usuarioId, perfil, ok := atorDaRota(ctx)
+		if !ok {
+			return
+		}
+
+		mes := time.Now().In(config.Brasilia).Format("2006-01")
+		if bruto := ctx.Query("mes"); bruto != "" {
+			if !mesValido.MatchString(bruto) {
+				ctx.JSON(http.StatusBadRequest, gin.H{"error": "mes inválido (use MM/AAAA)"})
+				return
+			}
+			mes = bruto[3:7] + "-" + bruto[0:2]
+		}
+
+		custos, err := o.service.ObterCustosDoMes(ctx.Request.Context(), tenantId, usuarioId, perfil, mes)
+		if err != nil {
+			slog.ErrorContext(ctx.Request.Context(), "custos do mês", "mes", mes, "tenant", tenantId, "err", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "erro ao obter os custos do mês"})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, custos)
+	}
+}
 
 // Iniciar é POST /ordens-servico/:id/iniciar -- Aberta -> Em Andamento.
 // Sem corpo. 200, não 201: atualiza uma OS que já existe (quem cria é

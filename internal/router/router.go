@@ -289,6 +289,11 @@ func ConfigurarRotas(r *gin.Engine, c *Container) {
 	// (?grupo=), paginada, com os recortes de setor, máquina e mês que a tela mostra. Mesmo
 	// RBAC e mesmo escopo.
 	api.GET("/indicadores/lojas/:id/ordens", c.autenticacao, middleware.Permitir("gestor", "administrador"), c.OrdemOS.OrdensDoPainelDaLoja())
+	// GET /indicadores/custos?mes=MM/AAAA -- o card "Custos do mês" do Painel do Gestor:
+	// mão de obra dos técnicos, terceiros e peças das OS encerradas no mês, e a lista por
+	// técnico. Mesmo RBAC dos outros indicadores; o escopo é o WHERE, sem loja na URL
+	// (o card soma todos os setores de quem chama).
+	api.GET("/indicadores/custos", c.autenticacao, middleware.Permitir("gestor", "administrador"), c.OrdemOS.CustosDoMes())
 
 	// Central de notificações (o sininho): qualquer perfil logado, sempre só
 	// as do próprio usuário -- o id vem do token, nunca da URL.

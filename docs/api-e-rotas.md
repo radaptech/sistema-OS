@@ -151,6 +151,7 @@ Leia antes de registrar rota nova, mexer em middleware ou montar corpo de respos
   | `GET /indicadores/maquinas/:id` | gestor, administrador (escopo no `WHERE`, 404 fora dele) |
   | `GET /indicadores/lojas/:id/ordens` | gestor, administrador (a lista por trás de um card de custo: `?grupo=maquinario|reparos|preventivas` obrigatório, `&setorId=&maquinaId=&mes=MM/AAAA&pagina=`; `maquinaId` não vale em reparos; loja fora do escopo é 404) |
   | `GET /indicadores/lojas/:id` | gestor, administrador (loja fora dos escopos é 404; o `WHERE` recorta os setores) |
+  | `GET /indicadores/custos` | gestor, administrador (card "Custos do mês" do Painel do Gestor: `?mes=MM/AAAA`, sem ele o mês corrente em Brasília; OS encerradas no mês, escopo pelo setor da solicitação no `WHERE`. A OS de terceiros vai inteira para `terceiros`; as dos técnicos se dividem em `maoDeObraTecnicos` e `pecas`; `porTecnico` só com as OS que o técnico fez) |
   | `GET /notificacoes`, `/notificacoes/nao-lidas`, `POST /notificacoes/lidas`, `/notificacoes/:id/lida` | **qualquer perfil autenticado** (sempre só as do próprio usuário) |
   | `GET /push/chave-publica`, `POST /push/inscricoes`, `/push/inscricoes/remover` | **qualquer perfil autenticado** (o aparelho fica do usuário do token) |
 

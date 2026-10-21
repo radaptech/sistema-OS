@@ -642,6 +642,26 @@ type Querier interface {
 	// DELETE as chaves somem e os objetos ficariam órfãos no R2 sem ninguém
 	// saber quais eram. Quem apaga do R2 é o controller, depois do commit.
 	ListarChavesAnexosDaMaquina(ctx context.Context, arg ListarChavesAnexosDaMaquinaParams) ([]string, error)
+	// GET /indicadores/custos -- o card "Custos do mês" do Painel do Gestor. Uma
+	// linha por OS encerrada no mês (YYYY-MM, America/Sao_Paulo, mesmo critério de
+	// mes_encerramento no painel de indicadores); MontarCustosDoMes separa em mão de
+	// obra dos técnicos, terceiros e peças, e agrupa por técnico, em Go -- mesmo
+	// motivo das queries de histórico: laço simples, testável sem Postgres.
+	//
+	// os.tipo separa quem recebeu o dinheiro: em 'terceiros' a OS inteira
+	// (custo_manutencao + custo_hora_tecnico) é a fatura da empresa (000016), nos
+	// outros dois tipos a hora técnica é do Técnico e a manutenção é peça.
+	//
+	// Diferente do painel de indicadores, aqui entra TUDO o que custou no mês:
+	// maquinário, preventiva, pequeno reparo e máquina já desativada -- o dinheiro
+	// saiu do mesmo jeito. Escopo pelo setor da SOLICITAÇÃO, mesmo EXISTS de
+	// ListarOrdensServico (o reparo não tem máquina para dar o setor).
+	//
+	// LEFT JOIN os_custo: OS encerrada sem custo (caso raro desde a revisão 4)
+	// conta na quantidade e nas horas do técnico, com custo nulo.
+	//
+	// ⚠️ horas_* e custo_* CRUAS, mesma nota de ListarHistoricoOsDaMaquina.
+	ListarCustosDoMes(ctx context.Context, arg ListarCustosDoMesParams) ([]ListarCustosDoMesRow, error)
 	// Todos os aparelhos dos destinatários de um evento, numa ida só.
 	ListarDispositivosPushDosUsuarios(ctx context.Context, arg ListarDispositivosPushDosUsuariosParams) ([]ListarDispositivosPushDosUsuariosRow, error)
 	// Só as ativas: a lista alimenta o select do ModalAcionarTerceiro, e oferecer

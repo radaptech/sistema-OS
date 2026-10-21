@@ -67,6 +67,69 @@ services:
       - postgres
 
 
+  # Estado da Evolution API (sessão/instância do WhatsApp) -- banco e cache
+  # próprios, separados do banco da aplicação de propósito: não é dado do
+  # domínio, é estado interno de uma peça de infra que pode ser trocada.
+  evolution-postgres:
+    image: postgres:16-alpine
+    container_name: evolution_postgres_container-sistema-OS
+    restart: always
+    environment:
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=evolution
+      - POSTGRES_DB=evolution
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution_redis_container-sistema-OS
+    restart: always
+    volumes:
+      - evolution_redis_data:/data
+
+  # WhatsApp não-oficial (protocolo do WhatsApp Web, lib Baileys) pra
+  # notificar Gestor/Técnico quando uma Solicitação abre -- ver
+  # back-end/CLAUDE.md, "Notificação de solicitação por WhatsApp". Fica
+  # pronto pra usar: falta só comprar o chip dedicado e escanear o QR
+  # (POST /instance/connect) quando ele chegar -- nenhum código do backend
+  # depende disto rodando ainda.
+  #
+  # AUTHENTICATION_API_KEY aqui é valor de dev, igual postgres/postgres
+  # acima -- gere um de verdade (openssl rand -base64 32) antes de subir em
+  # produção, e troque também no .env do back-end (EVOLUTION_API_KEY),
+  # onde o NotificacaoService vai ler pra autenticar as chamadas.
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: evolution_api_container-sistema-OS
+    restart: on-failure:5
+    depends_on:
+      evolution-postgres:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_started
+    environment:
+      - AUTHENTICATION_API_KEY=evolution-dev-key-troque-em-producao
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:evolution@evolution-postgres:5432/evolution?schema=public
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://evolution-redis:6379/6
+      - CACHE_LOCAL_ENABLED=false
+      # Localhost serve pra dev: só usada por webhook/callback interno da
+      # própria Evolution API, e o backend não expõe rota nenhuma pra ela
+      # chamar de volta ainda. Revisitar quando for pra produção (Railway).
+      - SERVER_URL=http://localhost:8092
+    ports:
+      - "8092:8080"
+    volumes:
+      - evolution_instances:/evolution/instances
+
   api:
     container_name: api_sistema-OS
     restart: on-failure:5
@@ -121,6 +184,9 @@ services:
 
 volumes:
   postgres_data:
+  evolution_postgres_data:
+  evolution_redis_data:
+  evolution_instances:
 
 # Sub-rede declarada (172.29 estava livre) só pra o traefik poder ter IP fixo --
 # ver TRUSTED_PROXIES na api.

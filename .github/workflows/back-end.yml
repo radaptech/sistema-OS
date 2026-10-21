@@ -1,9 +1,12 @@
-name: CI
+name: Back-end
 
+# Monorepo: só roda quando o back (ou este arquivo) muda.
 on:
   push:
     branches: [master, dev]
+    paths: ['sistema-OSm--Back-end/**', '.github/workflows/back-end.yml']
   pull_request:
+    paths: ['sistema-OSm--Back-end/**', '.github/workflows/back-end.yml']
 
 jobs:
   test:
@@ -24,6 +27,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+    defaults:
+      run:
+        working-directory: sistema-OSm--Back-end
+
     env:
       TEST_DB_DSN: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
 
@@ -32,8 +39,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          cache: true
+          go-version-file: sistema-OSm--Back-end/go.mod
+          cache-dependency-path: sistema-OSm--Back-end/go.sum
 
       - name: gofmt
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)

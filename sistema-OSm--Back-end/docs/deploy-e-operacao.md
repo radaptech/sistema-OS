@@ -292,8 +292,8 @@ UPDATE preventiva p
 
 1. Drenar as solicitações de preventiva `Pendente` (query acima), pela tela.
 2. Rodar o diagnóstico e guardar o resultado — é a lista de trabalho do passo 6.
-3. Deploy do **front** (merge para `master` no repo do front).
-4. Deploy do **back** (merge para `master`); a migration roda no boot.
+3. Deploy do **front** (merge para `master`, serviço do front no Railway).
+4. Deploy do **back** (serviço da api no Railway); a migration roda no boot.
 5. Rodar o backfill.
 6. Administrador completa o técnico das preventivas que sobraram, pela edição da máquina.
 7. Só então deixar o Cron rodar. Para conferir antes, `railway run ./main

@@ -26,13 +26,12 @@ Leia quando algo não subir, a porta não conectar ou o teste de integração pu
   Postgres escuta **só na 5432** (imagem `postgres:16-alpine` sem `-p`). O compose já disse
   `5431:5431`: a porta publicada não tinha ninguém do outro lado e `localhost:5431` dava
   `connection reset by peer`. Com `5431:5432` o default de `TEST_DB_DSN` conecta do host.
-  (A correção está no `docker-compose.yml` do repo `sistema-os-infra` — confira se foi
-  commitada antes de estranhar um clone novo.)
+  (A correção está no `docker-compose.yml` da raiz do repositório.)
 - Sintoma de o banco não estar alcançável: `go test ./...` **verde sem ter rodado a
   integração** (`t.Skip` silencioso) — exatamente o que o job de CI existe pra evitar.
   Alternativa sem depender da porta publicada: o IP do container,
   `TEST_DB_DSN='postgres://postgres:postgres@172.29.0.3:5432/postgres?sslmode=disable'`.
-- O compose (`../docker-compose.yml`, um nível acima deste repo) sobe **front + api atrás
+- O compose (`../docker-compose.yml`, na raiz do repositório) sobe **front + api atrás
   de um traefik**: `http://<tenant>.localhost:8090` serve o Vite, e `/api` cai na api.
   Dashboard do traefik em `:8091`, pgadmin em `:5051`. **`api` e `front` não publicam
   porta** — quem publica é o traefik.

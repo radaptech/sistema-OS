@@ -138,7 +138,7 @@ desfeito por engano.
   "Salvando…" pelo `isSubmitting` do React Hook Form. Antes os seis modais de escrita (encerrar,
   pausar, acionar terceiro, abrir OS, rejeitar, lançar custo) faziam `aoSalvar(dados); fechar()`:
   com sinal fraco o técnico perdia o encerramento inteiro, e a promessa rejeitada virava exceção
-  solta no console. Os testes E2E (`../sistema-os-infra/e2e`) cortam a rede e conferem.
+  solta no console. Os testes E2E (`../e2e`) cortam a rede e conferem.
 - **Todo modal usa `useDialogo`** (`hooks/useDialogo.ts`): espalhe `propsDialogo` no cartão
   (`role="dialog"`, `aria-modal`, `aria-labelledby`) e ponha `idTitulo` no título. Ele também
   fecha com Esc — só o modal de cima, numa pilha, e nunca enquanto salva (`podeFechar`).

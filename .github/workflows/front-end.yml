@@ -1,0 +1,34 @@
+name: Front-end
+
+# Monorepo: só roda quando o front (ou este arquivo) muda.
+on:
+  push:
+    branches: [master, dev]
+    paths: ['sistema-OSm--Front-end/**', '.github/workflows/front-end.yml']
+  pull_request:
+    paths: ['sistema-OSm--Front-end/**', '.github/workflows/front-end.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: sistema-OSm--Front-end
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sistema-OSm--Front-end/package-lock.json
+
+      - run: npm ci
+
+      - name: lint
+        run: npm run lint
+
+      - name: build
+        run: npm run build

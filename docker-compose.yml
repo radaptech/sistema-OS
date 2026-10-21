@@ -1,4 +1,4 @@
-# Nome do projeto fixo: sem ele o compose usa o nome da pasta ("sistema-os-infra"),
+# Nome do projeto fixo: sem ele o compose usa o nome da pasta do clone,
 # e o traefik abaixo só aceita containers com o label de projeto "sistema-os" --
 # todas as rotas sumiam e /api respondia 404. Também é o que dá nome à rede
 # (sistema-os_default) que o --providers.docker.network aponta.
@@ -126,9 +126,6 @@ services:
 
 volumes:
   postgres_data:
-  evolution_postgres_data:
-  evolution_redis_data:
-  evolution_instances:
 
 # Sub-rede declarada (172.31 estava livre nesta máquina) só pro traefik poder ter IP
 # fixo -- ver TRUSTED_PROXIES na api. Mudou a sub-rede, muda o TRUSTED_PROXIES junto.

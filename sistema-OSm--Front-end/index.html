@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- PWA (instalável). O manifest descreve o app; os ícones saem de
+         scripts/gerar-icones-pwa.mjs. O iPhone ignora os ícones do manifest e lê o
+         apple-touch-icon, e só deixa instalar pelo "Adicionar à Tela de Início". -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icones/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Solicitação OS" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <title>Solicitação OS</title>
+    <meta
+      name="description"
+      content="Abertura e acompanhamento de ordens de serviço: solicitação, execução pelo técnico e custo, num fluxo só."
+    />
+
+    <!-- Prévia de link (WhatsApp, Slack, etc). Sem estas tags o WhatsApp usa o próprio
+         domínio como título e repete a URL como descrição -- foi o que apareceu no
+         cartão feio de 23/08/2026. Só HTML estático conta aqui: o crawler não roda o
+         JS do SPA, então o que ele lê é este arquivo, não o React.
+
+         __ORIGEM__ é trocado por https://$host pelo nginx (sub_filter, ver
+         nginx.conf.template). og:image PRECISA ser URL absoluta -- WhatsApp ignora
+         caminho relativo -- e o host não pode ser fixo: cada tenant tem o seu
+         subdomínio, e um deploy só serve todos eles. Em dev o placeholder fica cru no
+         HTML, o que não incomoda: prévia de link só existe em produção. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Solicitação OS" />
+    <meta property="og:title" content="Solicitação OS" />
+    <meta
+      property="og:description"
+      content="Abertura e acompanhamento de ordens de serviço: solicitação, execução pelo técnico e custo, num fluxo só."
+    />
+    <meta property="og:image" content="__ORIGEM__/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Solicitação OS" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#0f2916" />
+
+    <!-- Tema claro/escuro. Roda antes da primeira pintura, senão a página nasce
+         branca e pisca no escuro ao montar o React. A preferência do usuário
+         (AlternadorTema) vence; sem ela vale a do sistema operacional. -->
+    <script>
+      try {
+        var tema = localStorage.getItem('tema')
+        document.documentElement.dataset.tema =
+          tema ||
+          (matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'escuro'
+            : 'claro')
+      } catch (e) {
+        document.documentElement.dataset.tema = 'claro'
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

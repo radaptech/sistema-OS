@@ -1,0 +1,8 @@
+> Spec da tela, carregada só quando o trabalho toca esta pasta. Referências "item N" apontam para as outras telas — o índice está no `CLAUDE.md` da raiz do repo.
+
+### 13. OS Finalizadas e Impressão de OS (Administrador + Gestor)
+- **Regra de Negócio — o que conta como "finalizada":** a OS passou por **todas as etapas com sucesso**: o Técnico encerrou o atendimento (item 11) **e** o custo de manutenção foi lançado (item 12). **Essa regra é resolvida no servidor e chega pronta na flag `ordem.finalizada`** — nenhuma tela recalcula. É o complemento exato de "Custos Pendentes".
+- **Duas entradas para a mesma regra:**
+  - **Administrador** (`AdministradorOSFinalizadas`, `/administrador/os-finalizadas`): **todas** as OS finalizadas do tenant, **navegadas Loja → Setor por cliques** (`NavegacaoLojaSetorPaginada` com `emGrade`, pedido do usuário em 20/10/2026 — antes eram dois `<select>` em cascata). Os cards saem de `GET /ordens-servico/resumo?finalizada=true` e só o setor aberto busca a página (`GET /ordens-servico?finalizada=true&setorId=&pagina=`, 12 por página, `RespostaPaginada` — é histórico que só cresce). Busca e tipo vão ao servidor nas duas chamadas; o total "N OS finalizada(s)" é a soma do resumo (mesma chave da navegação, vem do cache). `?setorId=` recorta pelo setor da **solicitação de origem** (a OS não tem setor próprio). Sem o nível de máquina do Gestor: o usuário pediu loja e setor.
+  - **Gestor** (aba `OS Finalizadas` do `PainelGestor`, item 6): as finalizadas **dentro do seu escopo** (restringido pelo servidor), agrupadas por Loja/Setor.
+- O modal de detalhe/impressão é o `ModalDetalhesOS` — spec em `src/paginas/ModalDetalhesOS/CLAUDE.md`.

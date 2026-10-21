@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/paginas/PainelGestor/componentes/CardOSEmExecucao.tsx"
+        ],
+        "createdAt": "2026-08-09T04:52:35.129Z",
+        "reason": "Usuario confirmou: destaque ambar sinaliza OS pausada, mesmo padrao do BadgeOrigemPreventiva"
+      }
+    ]
+  }
+}

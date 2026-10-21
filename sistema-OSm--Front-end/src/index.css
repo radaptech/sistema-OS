@@ -1,0 +1,223 @@
+@import 'tailwindcss';
+@config '../tailwind.config.ts';
+
+body {
+  font-family: 'IBM Plex Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: #4bae70;
+  color: #ffffff;
+}
+
+/* Scrollbar discreta e coerente com a identidade verde do produto. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4bae70 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #8ed3a4;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #4bae70;
+}
+
+/* Anel de foco visível e consistente para navegação via teclado, sem depender
+   de cada componente reimplementar `focus-visible` manualmente. */
+:focus-visible {
+  outline: 2px solid #4bae70;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    /* Sem zerar o delay, um card com entrada escalonada (animationDelay inline, ver
+       `surgir`) ficaria preso no estado inicial — invisível — pelo tempo do atraso,
+       mesmo com a animação já "desligada". */
+    animation-delay: 0.001ms !important;
+    transition-delay: 0.001ms !important;
+  }
+}
+
+/* Impressão de OS: mostra só o conteúdo marcado com #area-impressao-os (ver ModalDetalhesOS).
+
+   ⚠️ O resto da aplicação sai do layout com `display: none`, NÃO com `visibility: hidden`.
+   `visibility` esconde mas mantém o espaço: o painel por trás (cabeçalho, abas, cards)
+   continuava ocupando páginas invisíveis, e o modal é `position: fixed` -- o navegador repete
+   elemento fixo em TODA página impressa, então a OS saía igual em duas ou mais páginas.
+   O modal vive num portal em <body>, fora do #root, por isso esconder o #root basta; e na
+   impressão o modal vira fluxo normal (classes `print:` do próprio componente), uma página
+   só e o conteúdo quebrando no lugar certo se for longo. */
+@media print {
+  #root {
+    display: none !important;
+  }
+
+  /* Restos fixos de fora do #root (toast) não podem repetir em cada página. */
+  body > *:not(:has(#area-impressao-os)) {
+    display: none !important;
+  }
+
+  #area-impressao-os {
+    position: static;
+    padding: 24px;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Tema escuro.
+
+   Nenhuma tela tem classe `dark:`. Todas as superfícies do sistema saem de
+   `bg-white`/`bg-slate-*` e todo texto de `text-slate-*`, e no Tailwind v4 cada
+   uma dessas classes resolve para uma variável (`var(--color-slate-50)`) — então
+   redefinir as variáveis aqui vira tema escuro nas ~670 ocorrências de uma vez,
+   sem tocar em componente nenhum. O preço é este bloco: onde um token serve a
+   dois papéis (`marca-600` é fundo de botão E cor de texto sobre selo claro), a
+   variável fica como está e a classe é corrigida na mão logo abaixo.
+
+   `@media screen` de propósito: a impressão de OS (ver `@media print` acima) sai
+   sempre no tema claro, senão o PDF sairia com fundo preto.
+   --------------------------------------------------------------------------- */
+@media screen {
+  :root[data-tema='escuro'] {
+    /* `dark` liga o desenho nativo do navegador: select, scrollbar, date picker. */
+    color-scheme: dark;
+
+    /* Neutros invertidos. O cartão (`--color-white`) é mais claro que a página
+       (`--color-slate-50`) — no escuro é a elevação que separa as superfícies,
+       já que a borda fina quase some. */
+    --color-white: #171c1b;
+    --color-slate-50: #0e1211;
+    --color-slate-100: #212827;
+    --color-slate-200: #2c3433;
+    --color-slate-300: #3b4544;
+    --color-slate-400: #7d8b88;
+    --color-slate-500: #96a29f;
+    --color-slate-600: #b1bcb9;
+    --color-slate-700: #c9d2cf;
+    --color-slate-800: #dee5e3;
+    --color-slate-900: #eef2f1;
+    --color-slate-950: #f7faf9;
+
+    /* Fundos tingidos de badge/aviso. Só aparecem como fundo ou borda, nunca como
+       cor de texto, então dá pra escurecer direto na variável. */
+    --color-red-50: #2a1618;
+    --color-red-100: #3a1d20;
+    --color-orange-50: #2d1a11;
+    --color-orange-100: #3d2415;
+    --color-amber-50: #2a2110;
+    --color-amber-100: #392c14;
+    --color-emerald-50: #0f2620;
+    --color-emerald-100: #143327;
+    --color-sky-100: #16283a;
+    --color-blue-50: #14212e;
+    --color-blue-100: #1a2c3d;
+    --color-marca-100: #12281b;
+
+    /* Toast (react-toastify) tem paleta própria, fora do Tailwind. */
+    --toastify-color-light: #171c1b;
+    --toastify-text-color-light: #dee5e3;
+  }
+
+  /* Texto que precisa continuar claro: vive sobre botão/selo de cor cheia
+     (`bg-marca-600`, `bg-red-600`), que não escurece. Pega `text-white` e as
+     variações com opacidade (`text-white/80`). */
+  :root[data-tema='escuro'] [class*='text-white'] {
+    color: #eef2f1;
+  }
+
+  /* Texto sobre os tingidos acima: no claro é o tom 600/700/800 (escuro sobre
+     fundo claro); invertido o fundo, sobe pro tom 300/400. */
+  :root[data-tema='escuro'] .text-red-600,
+  :root[data-tema='escuro'] .text-red-700 {
+    color: var(--color-red-300);
+  }
+  :root[data-tema='escuro'] .text-orange-700,
+  :root[data-tema='escuro'] .text-orange-800 {
+    color: #fdba74;
+  }
+  :root[data-tema='escuro'] .text-amber-600,
+  :root[data-tema='escuro'] .text-amber-700 {
+    color: #fcd34d;
+  }
+  :root[data-tema='escuro'] .text-emerald-600,
+  :root[data-tema='escuro'] .text-emerald-700 {
+    color: var(--color-emerald-300);
+  }
+  :root[data-tema='escuro'] .text-blue-700,
+  :root[data-tema='escuro'] .text-blue-800 {
+    color: #93c5fd;
+  }
+  :root[data-tema='escuro'] .text-marca-600,
+  :root[data-tema='escuro'] .text-marca-800 {
+    color: #8ed3a4;
+  }
+
+  /* A paleta `marca` vem do tailwind.config.ts, e cor de config em JS o Tailwind v4
+     escreve como hex literal, não como variável — então estas três não dá pra virar
+     no bloco de tokens acima; só na classe. `marca-100` é o selo/cartão tingido claro,
+     e `marca-900` é o texto que vive em cima dele. */
+  :root[data-tema='escuro'] .bg-marca-100 {
+    background-color: #12281b;
+  }
+  :root[data-tema='escuro'] .text-marca-900 {
+    color: #8ed3a4;
+  }
+  :root[data-tema='escuro'] .hover\:bg-marca-300\/30:hover {
+    background-color: #1a3a25;
+  }
+
+  /* Os três tokens de sombra carregam um anel de 1px escuro (ver tailwind.config.ts):
+     sobre fundo escuro esse anel é invisível e o cartão perde o contorno. Aqui o anel
+     vira claro e a sombra fica mais funda. */
+  :root[data-tema='escuro'] .shadow-card {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.07),
+      0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+  :root[data-tema='escuro'] .shadow-card-hover {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.11),
+      0 4px 12px -4px rgba(0, 0, 0, 0.6);
+  }
+  :root[data-tema='escuro'] .shadow-pop {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 24px 60px -24px rgba(0, 0, 0, 0.8);
+  }
+}
+
+/* Toast logo abaixo do cabeçalho, que é sticky: no topo da tela ele cobria o sino, o tema
+   e o Sair por 4s depois de cada ação. --altura-cabecalho vem de useAlturaCabecalho (0
+   sem cabeçalho, como no login). O :root na frente é para ganhar do CSS que o
+   react-toastify 11 injeta pelo JS, DEPOIS deste arquivo; a regra do celular repete a
+   dele, que no mesmo breakpoint cola o toast em env(safe-area-inset-top). */
+:root .Toastify__toast-container--top-left,
+:root .Toastify__toast-container--top-center,
+:root .Toastify__toast-container--top-right {
+  top: calc(var(--altura-cabecalho, 0px) + var(--toastify-toast-top));
+}
+@media only screen and (max-width: 480px) {
+  :root .Toastify__toast-container--top-left,
+  :root .Toastify__toast-container--top-center,
+  :root .Toastify__toast-container--top-right {
+    top: calc(var(--altura-cabecalho, 0px) + env(safe-area-inset-top));
+  }
+}

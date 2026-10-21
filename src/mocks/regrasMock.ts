@@ -13,6 +13,7 @@ import type {
   TipoDefeito,
 } from '../tipos/ordemServico'
 import type { EscopoAcessoGestor, SessaoUsuario } from '../tipos/autenticacao'
+import type { CustoTecnicoDoMes, CustosDoMes } from '../tipos/custosDoMes'
 import type {
   GrupoOrdensDoPainel,
   IndicadoresLoja,
@@ -549,4 +550,79 @@ function resumirPorMes(historico: OrdemServico[]): IndicadorMensal[] {
     .map(([mes, ordensDoMes]) => ({ mes, ...resumirIndicadores(ordensDoMes) }))
     .sort((a, b) => ordenarChaveMes(a.mes) - ordenarChaveMes(b.mes))
     .slice(-12)
+}
+
+// GET /indicadores/custos: o card "Custos do mês" do Painel do Gestor, com a mesma divisão do
+// servidor (model/custosDoMes.go) — a OS de terceiros vai INTEIRA para `terceiros`; as dos
+// técnicos se dividem em mão de obra e peças, e só elas entram na lista por técnico. Toda OS
+// encerrada no mês e no escopo conta: maquinário, preventiva e pequeno reparo. `mes` é MM/AAAA.
+export function computarCustosDoMes(mes: string, usuario: UsuarioInterno): CustosDoMes {
+  const custos: CustosDoMes = {
+    mes,
+    custoTotal: 0,
+    maoDeObraTecnicos: 0,
+    terceiros: 0,
+    pecas: 0,
+    quantidadeOs: 0,
+    quantidadeOsTerceiros: 0,
+    porTecnico: [],
+  }
+  const porTecnico = new Map<number, CustoTecnicoDoMes>()
+
+  for (const ordem of ordensServico) {
+    if (
+      ordem.statusExecucao !== 'Concluída' ||
+      !ordem.dataFim ||
+      !usuarioAlcanca(usuario, ordem.lojaId, ordem.setorId)
+    ) {
+      continue
+    }
+    const data = converterDataBackend(ordem.dataFim)
+    if (`${String(data.getMonth() + 1).padStart(2, '0')}/${data.getFullYear()}` !== mes) {
+      continue
+    }
+
+    custos.quantidadeOs++
+    const maoDeObra = ordem.custo?.custoHoraTecnico ?? 0
+    const pecas = ordem.custo?.custoManutencao ?? 0
+    if (ordem.tipo === 'terceiros') {
+      custos.quantidadeOsTerceiros++
+      custos.terceiros += maoDeObra + pecas
+      continue
+    }
+    custos.maoDeObraTecnicos += maoDeObra
+    custos.pecas += pecas
+
+    const tecnicoId = ordem.tecnicoId ?? 0
+    const tecnico = porTecnico.get(tecnicoId) ?? {
+      tecnicoId,
+      tecnicoNome: ordem.tecnicoNome ?? '—',
+      quantidadeOs: 0,
+      horasTrabalhadas: 0,
+      maoDeObra: 0,
+    }
+    tecnico.quantidadeOs++
+    tecnico.horasTrabalhadas += ordem.horasTrabalhadas ?? 0
+    tecnico.maoDeObra += maoDeObra
+    porTecnico.set(tecnicoId, tecnico)
+  }
+
+  custos.maoDeObraTecnicos = arredondar(custos.maoDeObraTecnicos)
+  custos.terceiros = arredondar(custos.terceiros)
+  custos.pecas = arredondar(custos.pecas)
+  custos.custoTotal = arredondar(custos.maoDeObraTecnicos + custos.terceiros + custos.pecas)
+  custos.porTecnico = [...porTecnico.values()]
+    .map((tecnico) => ({
+      ...tecnico,
+      horasTrabalhadas: arredondar(tecnico.horasTrabalhadas),
+      maoDeObra: arredondar(tecnico.maoDeObra),
+    }))
+    .sort(
+      (a, b) =>
+        b.maoDeObra - a.maoDeObra ||
+        a.tecnicoNome.localeCompare(b.tecnicoNome, 'pt-BR') ||
+        a.tecnicoId - b.tecnicoId,
+    )
+
+  return custos
 }

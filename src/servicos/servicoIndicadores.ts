@@ -6,6 +6,7 @@ import type {
   GrupoOrdensDoPainel,
   OrdemDoPainel,
 } from '../tipos/indicadorMaquina'
+import type { CustosDoMes } from '../tipos/custosDoMes'
 import type { RespostaPaginada } from '../tipos/paginacao'
 
 // Qual card (grupo) e os recortes que o painel está mostrando: o setor escolhido, a máquina (maquinário
@@ -30,4 +31,8 @@ export const servicoIndicadores = {
     api.get<RespostaPaginada<OrdemDoPainel>>(
       `/indicadores/lojas/${lojaId}/ordens${montarQuery(filtros)}`,
     ),
+  // O card "Custos do mês" do Painel do Gestor, no escopo de quem chama. `mes` é "MM/AAAA";
+  // sem ele, o servidor responde o mês corrente.
+  obterCustosDoMes: (mes?: string) =>
+    api.get<CustosDoMes>(`/indicadores/custos${montarQuery({ mes })}`),
 }

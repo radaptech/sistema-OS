@@ -1,5 +1,7 @@
 import { obterUsuarioSessao } from '../bancoMock'
+import { agoraParaBackend } from '../../utilitarios/dataBackend'
 import {
+  computarCustosDoMes,
   computarIndicadores,
   computarIndicadoresLoja,
   construirEscoposGestor,
@@ -76,6 +78,23 @@ export const rotasIndicadores: Rota[] = [
           Number(query.get('pagina') ?? 1),
         ),
       )
+    },
+  },
+  {
+    metodo: 'GET',
+    padrao: /^\/indicadores\/custos$/,
+    async tratar({ query }) {
+      await atraso()
+      const usuario = obterUsuarioSessao()
+      if (!usuario) {
+        return responderErro('Não autenticado.', 401)
+      }
+      // Sem ?mes=, o mês corrente — "dd/mm/yyyy HH:MM:SS" → "mm/yyyy".
+      const mes = query.get('mes') ?? agoraParaBackend().slice(3, 10)
+      if (!/^(0[1-9]|1[0-2])\/\d{4}$/.test(mes)) {
+        return responderErro('mes inválido (use MM/AAAA)', 400)
+      }
+      return responderJson(computarCustosDoMes(mes, usuario))
     },
   },
 ]

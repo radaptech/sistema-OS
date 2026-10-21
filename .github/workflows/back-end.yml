@@ -7,6 +7,8 @@ on:
     paths: ['sistema-OSm--Back-end/**', '.github/workflows/back-end.yml']
   pull_request:
     paths: ['sistema-OSm--Back-end/**', '.github/workflows/back-end.yml']
+  # Rodar à mão pela aba Actions.
+  workflow_dispatch:
 
 jobs:
   test:

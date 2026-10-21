@@ -780,6 +780,98 @@ func (q *Queries) IniciarOrdemServico(ctx context.Context, arg IniciarOrdemServi
 	return i, err
 }
 
+const listarCustosDoMes = `-- name: ListarCustosDoMes :many
+SELECT
+    os.tecnico_id,
+    u.nome AS tecnico_nome,
+    os.tipo,
+    h.horas_trabalhadas,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc           ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+JOIN usuario u          ON u.tenant_id = os.tenant_id AND u.id = os.tecnico_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = $1
+  AND to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $2::text
+  AND (
+    $3::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = $3
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+ORDER BY u.nome, os.tecnico_id
+`
+
+type ListarCustosDoMesParams struct {
+	TenantID        int64
+	Mes             string
+	EscopoUsuarioID *int64
+}
+
+type ListarCustosDoMesRow struct {
+	TecnicoID        int64
+	TecnicoNome      string
+	Tipo             TipoOs
+	HorasTrabalhadas pgtype.Float8
+	CustoHoraTecnico pgtype.Float8
+	CustoManutencao  pgtype.Float8
+}
+
+// GET /indicadores/custos -- o card "Custos do mês" do Painel do Gestor. Uma
+// linha por OS encerrada no mês (YYYY-MM, America/Sao_Paulo, mesmo critério de
+// mes_encerramento no painel de indicadores); MontarCustosDoMes separa em mão de
+// obra dos técnicos, terceiros e peças, e agrupa por técnico, em Go -- mesmo
+// motivo das queries de histórico: laço simples, testável sem Postgres.
+//
+// os.tipo separa quem recebeu o dinheiro: em 'terceiros' a OS inteira
+// (custo_manutencao + custo_hora_tecnico) é a fatura da empresa (000016), nos
+// outros dois tipos a hora técnica é do Técnico e a manutenção é peça.
+//
+// Diferente do painel de indicadores, aqui entra TUDO o que custou no mês:
+// maquinário, preventiva, pequeno reparo e máquina já desativada -- o dinheiro
+// saiu do mesmo jeito. Escopo pelo setor da SOLICITAÇÃO, mesmo EXISTS de
+// ListarOrdensServico (o reparo não tem máquina para dar o setor).
+//
+// LEFT JOIN os_custo: OS encerrada sem custo (caso raro desde a revisão 4)
+// conta na quantidade e nas horas do técnico, com custo nulo.
+//
+// ⚠️ horas_* e custo_* CRUAS, mesma nota de ListarHistoricoOsDaMaquina.
+func (q *Queries) ListarCustosDoMes(ctx context.Context, arg ListarCustosDoMesParams) ([]ListarCustosDoMesRow, error) {
+	rows, err := q.db.Query(ctx, listarCustosDoMes, arg.TenantID, arg.Mes, arg.EscopoUsuarioID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarCustosDoMesRow
+	for rows.Next() {
+		var i ListarCustosDoMesRow
+		if err := rows.Scan(
+			&i.TecnicoID,
+			&i.TecnicoNome,
+			&i.Tipo,
+			&i.HorasTrabalhadas,
+			&i.CustoHoraTecnico,
+			&i.CustoManutencao,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listarHistoricoOsDaLoja = `-- name: ListarHistoricoOsDaLoja :many
 SELECT
     m.id AS maquina_id,

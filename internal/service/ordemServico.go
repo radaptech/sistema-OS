@@ -1158,3 +1158,22 @@ func (s *OrdemServicoService) ObterIndicadoresDaLoja(ctx context.Context, tenant
 
 	return model.MontarIndicadoresLoja(lojaId, maquinas, historico, reparos), nil
 }
+
+// ObterCustosDoMes é GET /indicadores/custos -- o card "Custos do mês" do Painel do
+// Gestor: tudo o que as OS encerradas no mês custaram, dentro do escopo de quem
+// chama (o Gestor vê os setores dele, o administrador o tenant inteiro). `mes` é
+// YYYY-MM, já validado pelo controller. Mês sem OS devolve zeros, não 404.
+func (s *OrdemServicoService) ObterCustosDoMes(ctx context.Context, tenantId, usuarioId int64, perfil, mes string) (model.CustosDoMes, error) {
+
+	linhas, err := repository.New(s.Pool).ListarCustosDoMes(ctx, repository.ListarCustosDoMesParams{
+		TenantID:        tenantId,
+		Mes:             mes,
+		EscopoUsuarioID: escopoDe(usuarioId, perfil),
+	})
+	if err != nil {
+		return model.CustosDoMes{}, helper.TraduzErroPostgres(err)
+	}
+
+	// YYYY-MM -> MM/AAAA, o rótulo que o front exibe e devolve.
+	return model.MontarCustosDoMes(mes[5:7]+"/"+mes[0:4], linhas), nil
+}

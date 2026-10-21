@@ -1,0 +1,350 @@
+erDiagram
+    %% ==========================================================
+    %% Solicitacao OS -- DER revisado (revisao 4.4, migrations ate 000013)
+    %% Fonte: /src/tipos, /src/servicos e as regras ja implementadas nas telas.
+    %% ---
+    %% Depois da revisao 4 (detalhe em modelagem-banco-dados.md):
+    %%   000003 anexo guarda chave do R2, nao URL (foto_chave, chave)
+    %%   000004/000007 criticidade e urgencia viram ENUM (as tabelas sairam)
+    %%   000008 (4.2) preventiva.tecnico_id; aberta_por_id nullable
+    %%   000009 os_custo.custo_revisado_em; 000011 os_custo.tem_nota_fiscal
+    %%   000012 (4.3) os_custo_item (tarefas) e os_nota_fiscal (N notas)
+    %%   000013 (4.4) token de recuperacao de senha em usuario
+    %% ---
+    %% Revisao 4: terceirizar deixou de ser um tipo de pedido e virou um
+    %% desfecho da OS, decidido pelo Tecnico no meio da execucao. Efeitos:
+    %%   1. solicitacao_os.tipo passa a usar o ENUM tipo_solicitacao (2 valores);
+    %%      tipo_os (3 valores) fica so na OS e nas filhas dela.
+    %%   2. ordem_servico.tipo deixa de ser imutavel: acionar-terceiro promove
+    %%      maquinario/reparo -> terceiros. A FK composta (solicitacao_id, tipo)
+    %%      cai (secao 5.2 de modelagem-banco-dados.md).
+    %%   3. Toda OS tem tecnico e urgencia, inclusive a terceirizada, e toda OS
+    %%      passa por os_encerramento -- quem encerra continua sendo o Tecnico.
+    %%   4. tipo_defeito virou "Tipo de OS" (Predial | Corretiva), saiu da
+    %%      solicitacao e passou a ser gravado no encerramento, por quem executou.
+    %%   5. ordem_servico.afeta_producao governa o relogio de maquina parada.
+    %%   6. A rejeicao do Gestor ganhou motivo, autor e instante.
+    %% Revisao 3: PKs/FKs de entidade de negocio trocaram de uuid para bigint
+    %% (identity/serial), para bater com os tipos reais do front (id: number
+    %% em todo /src/tipos -- nenhuma tela trata id como string). O ganho de
+    %% uuid (nao enumeravel numa API publica) foi julgado nao decisivo aqui:
+    %% o tenant_id ja isola os dados entre clientes, e o front inteiro foi
+    %% escrito assumindo id numerico (valueAsNumber nos formularios, Number()
+    %% nos filtros de query). Ver secao 3.12 de modelagem-banco-dados.md.
+    %% ---
+    %% Tipos ENUM nativos usados abaixo (listas que so mudam com deploy):
+    %%   perfil_usuario     solicitante | tecnico | gestor | administrador
+    %%   tipo_solicitacao   maquinario | reparo
+    %%   tipo_os            maquinario | terceiros | reparo
+    %%   tipo_defeito       Predial | Corretiva
+    %%   origem_solicitacao solicitante | preventiva
+    %%   status_solicitacao Pendente | Convertida | Rejeitada
+    %%   status_os          Aberta | Em Andamento | Pausada | Concluida
+    %%   marcador_impacto   Afeta Producao
+    %%   tipo_anexo         foto | video
+    %%   nivel_criticidade  Baixa | Media | Alta   (000004)
+    %%   nivel_urgencia     Baixa | Media | Alta   (000007)
+    %% ---
+    %% Continua como tabela de dominio (vocabulario do cliente, cadastravel):
+    %%   area_tecnico (semeada por trigger em todo tenant novo, 000006)
+    %% ==========================================================
+
+    %% ==========================================================
+    %% Raiz multi-tenant
+    %% empresa E o tenant: 1 cliente SaaS = 1 empresa = 1 subdominio.
+    %% As demais tabelas referenciam empresa.id pela coluna tenant_id.
+    %% ==========================================================
+    empresa ||--o{ loja : "possui"
+    empresa ||--o{ usuario : "possui"
+    empresa ||--o{ empresa_terceirizada : "contrata"
+    loja ||--o{ setor : "possui"
+
+    empresa {
+        bigint id PK
+        text subdominio UK "extraido de window.location.hostname"
+        text nome
+        boolean ativa
+        timestamptz criado_em
+    }
+
+    loja {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        text nome "unico por tenant"
+        boolean ativa
+        timestamptz criado_em
+    }
+
+    setor {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint loja_id FK
+        text nome "unico por loja"
+        boolean ativo
+        timestamptz criado_em
+    }
+
+    %% Cadastro do Administrador, sem vinculo de loja: o mesmo fornecedor
+    %% atende quantas lojas do tenant forem necessarias.
+    empresa_terceirizada {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        text nome "unico por tenant"
+        text especialidade
+        text telefone
+        boolean ativa
+        timestamptz criado_em
+    }
+
+    %% ==========================================================
+    %% Usuarios e escopo de acesso
+    %% Um unico modelo de escopo serve aos quatro perfis:
+    %%   solicitante  -> 1 escopo, 1 setor
+    %%   tecnico      -> N escopos (lojas), sem setor
+    %%   gestor       -> N escopos, cada um com setores ou acesso total
+    %%   administrador-> NENHUM escopo (a ausencia significa o tenant inteiro)
+    %% ==========================================================
+    area_tecnico ||--o{ usuario : "atua em"
+    usuario ||--o{ usuario_escopo : "tem"
+    loja ||--o{ usuario_escopo : "delimita"
+    usuario_escopo ||--o{ usuario_escopo_setor : "detalha"
+    setor ||--o{ usuario_escopo_setor : "restringe"
+
+    area_tecnico {
+        smallint id PK
+        bigint tenant_id FK "empresa.id"
+        text nome "Refrigeracao Eletrica Mecanica Hidraulica"
+    }
+
+    usuario {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        perfil_usuario perfil "ENUM 4 perfis"
+        smallint area_tecnico_id FK "NULL exceto tecnico"
+        text nome
+        citext email "unico por tenant"
+        text senha_hash "argon2id, nunca texto puro"
+        text telefone
+        boolean ativo
+        timestamptz ultimo_acesso
+        text token_recuperacao_hash "SHA-256 do link, nunca o token"
+        timestamptz token_recuperacao_expira_em "nasce e morre junto com o hash"
+        timestamptz criado_em
+    }
+
+    usuario_escopo {
+        bigint id PK
+        bigint usuario_id FK
+        bigint loja_id FK
+        boolean acesso_total_setores "equivale a setores todos"
+        timestamptz criado_em
+    }
+
+    usuario_escopo_setor {
+        bigint escopo_id PK "FK usuario_escopo"
+        bigint setor_id PK "FK setor"
+    }
+
+    %% ==========================================================
+    %% Maquinas e manutencao preventiva
+    %% A maquina referencia apenas setor_id: a loja vem por join,
+    %% evitando um par (loja, setor) que possa se contradizer.
+    %% ==========================================================
+    setor ||--o{ maquina : "abriga"
+    maquina ||--o{ preventiva : "possui"
+    usuario ||--o{ preventiva : "tecnico designado"
+
+    maquina {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint setor_id FK "loja derivada via setor"
+        nivel_criticidade criticidade "ENUM Baixa Media Alta"
+        text numero_patrimonio "unico por tenant"
+        text numero_serie "unico por tenant quando informado"
+        text nome
+        text descricao
+        text marca
+        text modelo
+        text foto_chave "chave no R2, URL assinada na leitura"
+        boolean ativa
+        timestamptz criado_em
+    }
+
+    preventiva {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint maquina_id FK
+        bigint tecnico_id FK "quem recebe a OS quando vence"
+        text descricao
+        integer intervalo_dias "CHECK maior que zero"
+        date proxima_data
+        boolean ativa
+        timestamptz criado_em
+    }
+
+    %% ==========================================================
+    %% Solicitacao de OS -- so os dois tipos que o Solicitante abre
+    %% maquinario: exige maquina_id
+    %% reparo:     exige item_descricao (texto livre), sem maquina
+    %% ---
+    %% Nao existe solicitacao "de terceiros": terceirizar e decisao do Tecnico
+    %% depois da OS aberta (ver ordem_servico.empresa_terceirizada_id).
+    %% A classificacao Predial/Corretiva tambem nao esta aqui -- quem relata o
+    %% problema nao classifica o servico (ver os_encerramento.tipo_defeito).
+    %% ==========================================================
+    maquina ||--o{ solicitacao_os : "origina"
+    setor ||--o{ solicitacao_os : "localiza"
+    usuario ||--o{ solicitacao_os : "solicita"
+    usuario ||--o{ solicitacao_os : "rejeita"
+    preventiva ||--o{ solicitacao_os : "dispara"
+    solicitacao_os ||--o{ solicitacao_impacto : "informa"
+    solicitacao_os ||--o{ solicitacao_anexo : "evidencia"
+
+    solicitacao_os {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        tipo_solicitacao tipo "ENUM maquinario reparo"
+        bigint maquina_id FK "NULL somente se tipo reparo"
+        text item_descricao "obrigatorio somente se tipo reparo"
+        bigint setor_id FK "onde o problema esta, o reparo nao tem maquina"
+        bigint solicitante_id FK "NULL se origem preventiva"
+        bigint preventiva_id FK "NULL se origem solicitante"
+        status_solicitacao status "ENUM Pendente Convertida Rejeitada"
+        origem_solicitacao origem "ENUM solicitante preventiva"
+        text descricao
+        text motivo_rejeicao "obrigatorio se status Rejeitada"
+        bigint rejeitado_por_id FK "usuario perfil gestor"
+        timestamptz rejeitada_em
+        timestamptz criado_em "inicio do relogio de horas parada, a maquina parou aqui"
+    }
+
+    %% Marcador unico hoje (Afeta Producao), mas associativa e nao boolean: o
+    %% contrato ja troca uma lista (impactos) e um marcador novo nao mexe na tabela.
+    solicitacao_impacto {
+        bigint solicitacao_id PK "FK solicitacao_os"
+        marcador_impacto marcador PK "ENUM Afeta Producao"
+    }
+
+    %% Foto do defeito obrigatoria e video opcional. Tabela em vez de duas
+    %% colunas: aguenta N arquivos e ja tem onde guardar o que o storage exige.
+    solicitacao_anexo {
+        bigint id PK
+        bigint solicitacao_id FK
+        tipo_anexo tipo "ENUM foto video"
+        text chave "chave no R2, nao link assinado"
+        text mime_type
+        bigint tamanho_bytes
+        timestamptz criado_em
+    }
+
+    %% ==========================================================
+    %% Ordem de Servico e seu ciclo de vida
+    %% Toda OS tem tecnico responsavel e urgencia, e toda OS passa pelo mesmo
+    %% ciclo (iniciar / pausar / retomar / encerrar). O tipo comeca igual ao da
+    %% solicitacao e vira 'terceiros' quando o Tecnico aciona uma empresa
+    %% externa -- acionar nao encerra nada e nao tira a OS dele.
+    %% ---
+    %% O par (id, tipo) e propagado por FK composta da OS para as filhas,
+    %% para que cada CHECK local enxergue o tipo sem consultar a tabela pai.
+    %% Da solicitacao para a OS a propagacao caiu na revisao 4: os dominios
+    %% passaram a ser diferentes (tipo_solicitacao x tipo_os) e o valor da OS
+    %% deixou de ser imutavel.
+    %% ==========================================================
+    solicitacao_os ||--o| ordem_servico : "convertida em"
+    usuario ||--o{ ordem_servico : "tecnico responsavel"
+    usuario ||--o{ ordem_servico : "aberta pelo gestor"
+    empresa_terceirizada ||--o{ ordem_servico : "atende"
+    ordem_servico ||--o{ os_pausa : "historico de pausas"
+    ordem_servico ||--o| os_encerramento : "encerrada por"
+    ordem_servico ||--o| os_custo : "custo lancado em"
+    ordem_servico ||--o{ os_custo_item : "tarefas executadas"
+    ordem_servico ||--o{ os_nota_fiscal : "notas conferidas"
+    usuario ||--o{ os_encerramento : "registrado por"
+    usuario ||--o{ os_custo : "lancado por"
+
+    ordem_servico {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint solicitacao_id FK "UNIQUE um para um"
+        tipo_os tipo "nasce igual ao da solicitacao, vira terceiros ao acionar"
+        bigint tecnico_id FK "sempre preenchido, toda OS passa pelo Tecnico"
+        nivel_urgencia urgencia "ENUM, Baixa na OS de preventiva"
+        bigint empresa_terceirizada_id FK "NOT NULL se e so se tipo terceiros"
+        timestamptz terceiro_acionado_em "quando o Tecnico encaminhou"
+        bigint aberta_por_id FK "gestor; NULL na OS de preventiva"
+        boolean afeta_producao "copiado do marcador da solicitacao"
+        status_os status "ENUM Aberta EmAndamento Pausada Concluida"
+        timestamptz aberta_em "quando o Gestor abriu, NAO e o inicio de horas parada"
+        timestamptz iniciada_em "NULL ate iniciar atendimento, inicio de horas trabalhadas"
+        timestamptz criado_em
+    }
+
+    %% Historico, nao campo sobrescrito: tres pausas seguidas precisam das tres
+    %% linhas. E dele que sai o calculo de horas trabalhadas.
+    os_pausa {
+        bigint id PK
+        bigint ordem_servico_id FK
+        status_os status_anterior "para onde retomar"
+        text motivo
+        timestamptz pausada_em
+        timestamptz retomada_em "NULL enquanto pausada"
+    }
+
+    %% Registro de execucao do Tecnico. Existe para os tres tipos: mesmo a OS
+    %% terceirizada e encerrada por ele, que recebe o servico da empresa.
+    %% E aqui que a OS e classificada como Predial ou Corretiva.
+    os_encerramento {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint ordem_servico_id FK "UNIQUE um para um"
+        tipo_os tipo FK "par com ordem_servico"
+        tipo_defeito tipo_defeito "ENUM Predial Corretiva, exibido como Tipo de OS"
+        bigint encerrado_por_id FK "usuario perfil tecnico"
+        timestamptz data_fim
+        text defeito_constatado
+        text causa_raiz
+        text solucao
+        timestamptz criado_em
+    }
+
+    %% Lancamento financeiro, separado da execucao: a linha nasce no encerramento
+    %% (o Tecnico informa as tarefas) e o Administrador corrige depois em Custos
+    %% Pendentes. Sua existencia e o que torna a OS "finalizada".
+    %% Os dois valores sao a SOMA de os_custo_item, escrita pelo servidor.
+    os_custo {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint ordem_servico_id FK "UNIQUE um para um"
+        tipo_os tipo FK "par com ordem_servico"
+        numeric custo_hora_tecnico "soma dos itens, so no tipo maquinario"
+        numeric custo_manutencao "soma dos itens"
+        text descricao_servico_terceiro "so no tipo terceiros"
+        boolean tem_nota_fiscal "declarado pelo Tecnico no encerramento"
+        bigint lancado_por_id FK
+        timestamptz lancado_em
+        timestamptz custo_revisado_em "NULL ate o Administrador conferir"
+    }
+
+    %% Uma linha por TAREFA, com os dois valores dela. Reescrita inteira a cada
+    %% edicao (DELETE + INSERT), por isso apaga de verdade, sem soft delete.
+    os_custo_item {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint ordem_servico_id FK
+        tipo_os tipo FK "par com ordem_servico"
+        text descricao "a tarefa"
+        numeric custo_manutencao "CHECK nao negativo, zero vale"
+        numeric custo_hora_tecnico "so no tipo maquinario"
+        timestamptz criado_em
+    }
+
+    %% N notas por OS, sem vinculo com os itens: uma nota pode cobrir duas
+    %% pecas e uma peca pode nao ter nota. So entra com tem_nota_fiscal.
+    os_nota_fiscal {
+        bigint id PK
+        bigint tenant_id FK "empresa.id"
+        bigint ordem_servico_id FK
+        text numero "UNIQUE com serie por OS, NULLS NOT DISTINCT"
+        text serie "opcional"
+        timestamptz criado_em
+    }

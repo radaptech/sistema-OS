@@ -1,0 +1,1056 @@
+-- ==========================================================================
+-- Ordem de serviço -- leitura e ciclo de vida.
+--
+-- A criação mora em solicitacao_os.sql (CriarOrdemServicoDeSolicitacao, o
+-- POST /solicitacoes/:id/abrir-os): a OS nasce da aprovação do Gestor, não
+-- de um POST /ordens-servico. Este arquivo é a listagem que os três painéis
+-- consomem, ObterOrdemServicoPorID (a leitura crua que toda transição usa
+-- pra checar dono e status atual antes de escrever) e, a partir daqui, as
+-- próprias transições do ciclo de vida
+-- (iniciar/pausar/retomar/acionar-terceiro/encerrar/custo, fase 2).
+-- ==========================================================================
+
+-- name: ObterOrdemServicoPorID :one
+-- Leitura crua (`os.*`, sem os JOINs denormalizados de ListarOrdensServico):
+-- todo método de transição (Iniciar/Pausar/Retomar/AcionarTerceiro/Encerrar)
+-- chama esta query dentro da própria transação, antes de escrever, pra
+-- checar duas coisas que o WHERE de cada UPDATE não checa sozinho -- ele só
+-- devolve 0 linhas, sem dizer POR QUÊ: (1) TecnicoID bate com o ator do
+-- token (dono da OS -- senão ErrNaoEncontrado, 404, nunca 403: mesmo
+-- critério de "existe mas você não pode ver" de Indicadores/escopo, 403 é
+-- só perfil errado, e o perfil aqui está certo) e (2) Status está no
+-- estado que a transição espera (senão ErrConflitoIntegridade, 409 --
+-- nunca 500).
+--
+-- Sem escopo de loja/setor no WHERE: quem chama já é o técnico dono
+-- (checagem 1 acima) ou o administrador (sem escopo, mesmo critério do
+-- resto do sistema) -- a rota nunca é aberta a gestor/solicitante.
+SELECT * FROM ordem_servico
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id);
+
+-- name: IniciarOrdemServico :one
+-- POST /ordens-servico/:id/iniciar -- Aberta -> Em Andamento, grava
+-- iniciada_em. O `status = 'Aberta'` no WHERE é a rede contra corrida: o
+-- service já leu o estado via ObterOrdemServicoPorID e decidiu que a
+-- transição vale, mas entre a leitura e este UPDATE outra request pode ter
+-- mudado a linha (duas abas do mesmo Técnico). RETURNING * devolve
+-- pgx.ErrNoRows quando a corrida perde, e o service traduz isso pra
+-- ErrConflitoIntegridade -- nunca 500.
+UPDATE ordem_servico
+SET status = 'Em Andamento', iniciada_em = now()
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id) AND status = 'Aberta'
+RETURNING *;
+
+-- name: PausarOrdemServico :one
+-- POST /ordens-servico/:id/pausar -- (Aberta ou Em Andamento) -> Pausada.
+-- Aceita as duas de origem porque o Técnico pode pausar antes mesmo de
+-- iniciar (ex.: falta peça, ainda nem começou) -- ck_pausa_status_anterior
+-- em os_pausa é quem define o universo válido, aqui só espelha. RETURNING *
+-- não devolve o status ANTERIOR (a coluna já vem 'Pausada'); é o service
+-- que lê o estado antes de chamar esta query (ObterOrdemServicoPorID) e
+-- repassa esse valor pra CriarPausa.status_anterior logo abaixo.
+UPDATE ordem_servico
+SET status = 'Pausada'
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id)
+  AND status IN ('Aberta', 'Em Andamento')
+RETURNING *;
+
+-- name: CriarPausa :one
+-- Registra o intervalo parado (docs/modelagem, "pausa é histórico, não
+-- campo sobrescrito"): pausada_em sai do DEFAULT now(), retomada_em fica
+-- NULL até FecharPausaAberta (retomar). uq_pausa_aberta (índice único
+-- parcial em ordem_servico_id WHERE retomada_em IS NULL) garante no máximo
+-- uma pausa aberta por OS -- se PausarOrdemServico acima já travou o status
+-- em 'Pausada', não deveria haver corrida até aqui, mas a violação, se
+-- acontecer, vira ErrDadoDuplicado via TraduzErroPostgres, nunca 500.
+INSERT INTO os_pausa (ordem_servico_id, status_anterior, motivo)
+VALUES (sqlc.arg(ordem_servico_id), sqlc.arg(status_anterior), sqlc.arg(motivo))
+RETURNING *;
+
+-- name: ObterPausaAbertaDaOrdemServico :one
+-- POST /ordens-servico/:id/retomar chama esta query pra saber pra ONDE
+-- voltar: status_anterior aqui é 'Aberta' ou 'Em Andamento' (quem pausou
+-- estava num desses dois -- ver PausarOrdemServico), nunca fixo. uq_pausa_aberta
+-- garante no máximo uma linha com retomada_em NULL por OS.
+--
+-- Sem tenant_id/WHERE de escopo: os_pausa não tem tenant_id (não precisa --
+-- pende de ordem_servico, que tem), e quem chama já validou a OS (dono +
+-- tenant) via ObterOrdemServicoPorID antes. Nunca chame com um
+-- ordem_servico_id que não veio de uma leitura já filtrada, mesmo aviso de
+-- ObterPausasDasOrdensServico acima.
+SELECT * FROM os_pausa
+WHERE ordem_servico_id = sqlc.arg(ordem_servico_id) AND retomada_em IS NULL;
+
+-- name: FecharPausaAberta :one
+-- Fecha a pausa que ObterPausaAbertaDaOrdemServico acabou de achar.
+-- `retomada_em IS NULL` no WHERE (e não só `id`) é a mesma rede de corrida
+-- das outras transições: se a linha já foi fechada entre a leitura e aqui,
+-- RETURNING devolve pgx.ErrNoRows em vez de fechar de novo calado.
+UPDATE os_pausa
+SET retomada_em = now()
+WHERE id = sqlc.arg(id) AND retomada_em IS NULL
+RETURNING *;
+
+-- name: RetomarOrdemServico :one
+-- POST /ordens-servico/:id/retomar -- Pausada -> status_anterior da pausa
+-- que acabou de fechar ('Aberta' ou 'Em Andamento', nunca um valor fixo
+-- como em IniciarOrdemServico/PausarOrdemServico -- por isso `status` entra
+-- como parâmetro, não como literal). O cast `::status_os` é explícito de
+-- propósito: fora de um INSERT ... VALUES, que sqlc já resolve pelo tipo da
+-- coluna (ver CriarPausa acima), um SET com sqlc.arg cru fica ambíguo pro
+-- sqlc -- mesma cautela de sqlc.narg(tipo)::tipo_os em ListarOrdensServico.
+UPDATE ordem_servico
+SET status = sqlc.arg(status)::status_os
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id) AND status = 'Pausada'
+RETURNING *;
+
+-- name: AcionarTerceiro :one
+-- POST /ordens-servico/:id/acionar-terceiro -- promove tipo pra 'terceiros'
+-- e grava a empresa + o instante do encaminhamento. Não mexe em `status`
+-- de propósito (docs/modelagem, 1.4.2): acionar não é uma transição de
+-- execução, a OS continua no ciclo iniciar/pausar/retomar/encerrar por
+-- cima -- se o atendimento vai demorar, quem sinaliza isso é `pausar`.
+--
+-- `tipo <> 'terceiros'` no WHERE trava dois casos: (1) idempotência -- não
+-- deixa acionar duas vezes a mesma OS, o que pisaria em
+-- terceiro_acionado_em sem avisar; (2) trg_os_tipo_promocao só barra
+-- DEMOTE (tipo <> 'terceiros' tentando virar outra coisa), uma promoção
+-- repetida passaria batida pra ele, então a trava tem que estar aqui.
+-- `status <> 'Concluída'` porque não faz sentido terceirizar uma OS que já
+-- encerrou.
+--
+-- empresa_terceirizada_id não é checado aqui: a FK composta
+-- (tenant_id, empresa_terceirizada_id) -> empresa_terceirizada garante
+-- tenant certo e existência ao mesmo tempo -- violação vira
+-- ErrConflitoIntegridade via TraduzErroPostgres, mesmo caminho de
+-- CriarOrdemServicoDeSolicitacao com tecnico_id inexistente.
+UPDATE ordem_servico
+SET tipo = 'terceiros',
+    empresa_terceirizada_id = sqlc.arg(empresa_terceirizada_id),
+    terceiro_acionado_em = now()
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id)
+  AND tipo <> 'terceiros' AND status <> 'Concluída'
+RETURNING *;
+
+-- name: EncerrarOrdemServico :one
+-- POST /ordens-servico/:id/encerrar -- Em Andamento -> Concluída. Só esse
+-- estado de origem: front-end/PainelTecnico só oferece "Finalizar" quando
+-- statusExecucao === 'Em Andamento' (uma OS Pausada tem que ser retomada
+-- primeiro, uma Aberta nem começou). RETURNING * devolve o `tipo` atual da
+-- OS (não muda aqui) -- é esse valor que o service repassa pra
+-- CriarEncerramento e CriarCusto abaixo, sem reler a linha: tipo pode já
+-- estar 'terceiros' se AcionarTerceiro rodou antes, e as duas FKs
+-- compostas (fk_encerramento_os_tipo, fk_custo_os_tipo) exigem o par
+-- (ordem_servico_id, tipo) bater exatamente com o da OS.
+UPDATE ordem_servico
+SET status = 'Concluída'
+WHERE id = sqlc.arg(id) AND tenant_id = sqlc.arg(tenant_id) AND status = 'Em Andamento'
+RETURNING *;
+
+-- name: CriarEncerramento :one
+-- Grava o que o Técnico apurou (docs/modelagem, 1.4.3 -- universal pros
+-- três tipos, inclusive terceiros: quem recebe o serviço da empresa
+-- externa continua sendo ele). `tipo` vem do RETURNING de
+-- EncerrarOrdemServico acima, nunca escolhido aqui de novo. data_fim sai
+-- do DEFAULT now() -- é o instante que ListarOrdensServico projeta como
+-- `dataFim` e vw_os_horas usa pra fechar o relógio de horas trabalhadas.
+INSERT INTO os_encerramento (
+    tenant_id, ordem_servico_id, tipo, tipo_defeito,
+    encerrado_por_id, defeito_constatado, causa_raiz, solucao
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(ordem_servico_id), sqlc.arg(tipo), sqlc.arg(tipo_defeito),
+    sqlc.arg(encerrado_por_id), sqlc.arg(defeito_constatado), sqlc.arg(causa_raiz), sqlc.arg(solucao)
+)
+RETURNING *;
+
+-- name: CriarCusto :one
+-- Nasce na mesma transação do encerramento (docs/modelagem, 2.3 revisão 4:
+-- "os dois momentos deixaram de ser sequenciais"), lancado_por_id = o
+-- próprio Técnico -- o Administrador só CORRIGE depois, em
+-- POST /ordens-servico/:id/custo (fora daqui), inclusive o NÚMERO e a SÉRIE
+-- da nota, que por isso não entram neste INSERT e ficam NULL.
+--
+-- tem_nota_fiscal, esse sim, entra: é declaração do TÉCNICO, não do
+-- Administrador. Só quem executou sabe se houve compra (peça, material,
+-- fatura da empresa) ou se foi só mão de obra -- e é essa resposta que
+-- decide se os campos de NF aparecem na tela do Administrador depois. Com
+-- `false` aqui, ck_custo_nota_fiscal exige os dois campos NULL, que é
+-- exatamente o que este INSERT deixa.
+--
+-- custo_hora_tecnico é a mão de obra somada das tarefas, gravada
+-- em todo tipo de OS desde a 000017 (antes, reparo e terceiros
+-- ficavam NULL por ck_custo_por_tipo). Os dois
+-- (e custo_manutencao, sempre obrigatório) já saem tipados
+-- `pgtype.Float8` pelos overrides de coluna em sqlc.yaml -- não
+-- `shopspring/decimal`, que sairia como string no JSON contra um front
+-- que tipa `number` (ver a nota longa no override de `numeric` no
+-- sqlc.yaml, que por isso continua morto de propósito).
+INSERT INTO os_custo (
+    tenant_id, ordem_servico_id, tipo,
+    custo_hora_tecnico, custo_manutencao, lancado_por_id, tem_nota_fiscal
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(ordem_servico_id), sqlc.arg(tipo),
+    sqlc.arg(custo_hora_tecnico), sqlc.arg(custo_manutencao), sqlc.arg(lancado_por_id),
+    sqlc.arg(tem_nota_fiscal)
+)
+RETURNING *;
+
+-- name: AtualizarCusto :one
+-- POST /ordens-servico/:id/custo -- a correção prometida no comentário de
+-- CriarCusto acima. lancado_por_id passa a ser o Administrador que corrige,
+-- não mais o Técnico do encerramento; lancado_em anda junto (é "a última vez
+-- que este custo foi mexido", não "quando nasceu").
+--
+-- SET direto, sem COALESCE (diferente de AtualizarMaquina/foto_chave): o
+-- modal do Administrador chega pré-preenchido com o valor atual (é edição,
+-- não patch parcial), então campo omitido é o Administrador apagando de
+-- propósito -- ex: nota fiscal que ele decidiu não registrar. sqlc.narg vira
+-- NULL nesse caso, que é exatamente o que ck_custo_por_tipo exige fora de
+-- 'maquinario'/'terceiros'. O service confere o tipo ANTES de chamar esta
+-- query (mesma checagem de Encerrar), pra um erro de tipo virar mensagem
+-- clara em vez de estourar a constraint aqui.
+--
+-- Sem WHERE por tipo: os_custo.tipo é fixo desde o INSERT (CriarCusto) e não
+-- muda depois de Concluída, então não há o que recomparar contra a OS.
+--
+-- tem_nota_fiscal é sobrescrito aqui de propósito, apesar de nascer como
+-- declaração do Técnico: se ele esquecer de marcar, o Administrador ficaria
+-- sem onde lançar a nota que tem na mão -- e a tela dele traz o mesmo
+-- controle. Desmarcar limpa número e série no mesmo UPDATE (o service manda
+-- nil nos dois), senão ck_custo_nota_fiscal barra a escrita.
+--
+-- custo_revisado_em = now() na mesma tacada: toda passagem do Administrador
+-- por esta query É a conferência contra a nota, então é aqui que a marca
+-- nasce. É o que move a OS de "Pendentes" para "Revisadas" em Custos
+-- Pendentes -- agora para todos os Administradores, não só no navegador de
+-- quem salvou (era localStorage). Re-salvar só reafirma a data, não desfaz.
+UPDATE os_custo
+SET custo_hora_tecnico = sqlc.narg(custo_hora_tecnico),
+    custo_manutencao = sqlc.arg(custo_manutencao),
+    descricao_servico_terceiro = sqlc.narg(descricao_servico_terceiro),
+    tem_nota_fiscal = sqlc.arg(tem_nota_fiscal),
+    lancado_por_id = sqlc.arg(lancado_por_id),
+    lancado_em = now(),
+    custo_revisado_em = now()
+WHERE tenant_id = sqlc.arg(tenant_id) AND ordem_servico_id = sqlc.arg(ordem_servico_id)
+RETURNING *;
+
+-- name: ListarOrdensServico :many
+-- GET /ordens-servico -- um endpoint para os três painéis, o que muda é o
+-- filtro (front-end/src/servicos/servicoOrdensServico.ts):
+--   Gestor  (PainelGestor)                 -> sem filtro, recorta pelo escopo
+--   Técnico (PainelTecnico)                -> ?tecnicoId=
+--   Admin   (CustosPendentes/OSFinalizadas)-> ?status=Concluída / ?finalizada=true
+-- Por cima disso as três telas estreitam com ?busca=, ?tipo=, ?lojaId= e
+-- ?setorId= -- filtros do cliente, sempre opcionais e sempre cumulativos.
+-- Array simples, sem paginação: o front tipa `OrdemServico[]` e pagina no
+-- cliente, mesmo padrão de ListarSolicitacoes/ListarMaquinas. `pagina` existe
+-- em ParametrosListagemOrdensServico mas nunca chega a uma query -- ignorar é
+-- o comportamento certo, não um esquecimento.
+--
+-- os_pausa fica de fora: é 1:N e sairia duplicando a OS por pausa. Vem de
+-- ObterPausasDasOrdensServico (abaixo), em lote, mesmo padrão de
+-- ObterAnexosDasSolicitacoes.
+--
+-- JOINs INNER onde a FK é NOT NULL (solicitação, setor, loja, técnico) e LEFT
+-- onde a coluna é nullable (máquina e solicitante -- reparo não tem máquina,
+-- preventiva não tem pessoa; empresa terceirizada -- só existe se o Técnico
+-- acionou uma) ou onde a linha inteira pode não existir ainda
+-- (os_encerramento até o Técnico encerrar, os_custo até o custo ser lançado,
+-- vw_os_horas que é INNER em os_encerramento por dentro).
+--
+-- ⚠️ horas_* e custo_* são projetadas CRUAS, sem `::float8`, e isso não é
+-- descuido: o override que as transforma em pgtype.Float8 mora no sqlc.yaml e
+-- casa por NOME DE COLUNA. Com o cast o sqlc perde o vínculo com a coluna, o
+-- override não casa mais E a expressão passa a ser tipada como NOT NULL --
+-- sai `float64` e o Scan quebra no primeiro NULL (que é o caso comum: OS
+-- aberta não tem horas nem custo). Ver a nota longa no sqlc.yaml.
+--
+-- `finalizada` é derivado, não coluna (docs/modelagem, seção 3.4): a OS está
+-- finalizada quando o Técnico encerrou E o custo foi lançado. Mesma regra de
+-- vw_os_finalizada, que não serve aqui porque ela é `JOIN os_custo` e só
+-- devolve as finalizadas -- a listagem precisa de todas.
+-- ⚠️ A expressão aparece DUAS vezes (projeção e filtro) porque o Postgres não
+-- deixa referenciar alias do SELECT no WHERE -- mesmo motivo de
+-- ListarUsuarios/ContarUsuarios repetirem o WHERE delas. Divergir as duas dá
+-- uma listagem que se contradiz.
+-- ⚠️ O `::boolean` no fim não é enfeite: expressão booleana composta sem cast
+-- vira `*bool` no sqlc, mesma armadilha do `vencida` em preventiva.sql.
+--
+-- custoTotal NÃO é calculado aqui, de propósito: é a soma dos dois valores
+-- que já viajam na linha, e uma expressão a mais no SELECT seria mais uma
+-- chance de cair na armadilha do numeric/COALESCE. O model soma.
+--
+-- ⚠️ area_tecnico é LEFT, diferente de ListarTecnicos, que a junta INNER. Lá
+-- o WHERE já garante perfil = 'tecnico', e ck_usuario_area_tecnico exige a
+-- coluna NOT NULL exatamente nesse perfil. Aqui não: fk_os_tecnico aponta pra
+-- `usuario`, sem checar o perfil, e AtualizarUsuario zera area_tecnico_id ao
+-- tirar alguém do perfil técnico. Com INNER, promover a gestor um técnico que
+-- já tem OS aberta apagaria essas OS da listagem inteira, calado. O front
+-- tipa tecnicoArea como opcional -- NULL cabe, sumir não.
+--
+-- ⚠️ `status` entra como text[] e só vira status_os dentro do ANY. Como
+-- status_os[] direto, o pgx não acha plano de encode ("unknown type (OID
+-- ...): cannot find encode plan") -- ele conhece os tipos built-in, não um
+-- ARRAY de ENUM nosso, e registrar o tipo no pool custaria um AfterConnect
+-- em config/conn.go por enum. O cast volta para status_os antes da
+-- comparação de propósito: com `os.status::text = ANY(...)` o índice
+-- idx_os_tecnico_status pararia de valer para esta coluna.
+--
+-- Escopo no WHERE via EXISTS, mesmo bloco de ListarSolicitacoes: NULL é o
+-- administrador (não filtra), os demais perfis só enxergam OS cujo setor eles
+-- alcançam. O setor é o da solicitação de origem -- ordem_servico não tem
+-- setor_id próprio, e nem deveria: a OS é da solicitação, não de um lugar.
+SELECT
+    os.*,
+    s.descricao,
+    s.criado_em AS data_solicitacao,
+    s.maquina_id,
+    s.item_descricao,
+    s.setor_id,
+    -- De onde veio a OS (solicitante, direta, preventiva): a tela marca a de
+    -- preventiva em âmbar. Antes só dava para deduzir pela ausência de solicitante.
+    s.origem,
+    m.nome AS maquina_nome,
+    m.numero_patrimonio AS maquina_codigo,
+    sc.nome AS setor_nome,
+    sc.loja_id,
+    l.nome AS loja_nome,
+    sol.nome AS solicitante_nome,
+    tec.nome AS tecnico_nome,
+    a.nome AS tecnico_area,
+    et.nome AS empresa_terceirizada_nome,
+    -- KEY no R2 da foto da terceirizada; o controller assina antes de responder.
+    et.foto_chave AS empresa_terceirizada_foto_chave,
+    (os.status = 'Concluída' AND c.id IS NOT NULL)::boolean AS finalizada,
+    e.tipo_defeito,
+    e.data_fim,
+    e.defeito_constatado,
+    e.causa_raiz,
+    e.solucao,
+    enc.nome AS encerrado_por_nome,
+    h.horas_trabalhadas,
+    h.horas_parada,
+    c.custo_hora_tecnico,
+    c.custo_manutencao,
+    c.descricao_servico_terceiro,
+    c.tem_nota_fiscal,
+    c.lancado_em,
+    c.custo_revisado_em,
+    lanc.nome AS lancado_por_nome
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+JOIN loja l            ON l.tenant_id = sc.tenant_id AND l.id = sc.loja_id
+JOIN usuario tec       ON tec.tenant_id = os.tenant_id AND tec.id = os.tecnico_id
+LEFT JOIN area_tecnico a           ON a.tenant_id = tec.tenant_id AND a.id = tec.area_tecnico_id
+LEFT JOIN maquina m                ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN usuario sol              ON sol.tenant_id = s.tenant_id AND sol.id = s.solicitante_id
+LEFT JOIN empresa_terceirizada et  ON et.tenant_id = os.tenant_id AND et.id = os.empresa_terceirizada_id
+LEFT JOIN os_encerramento e        ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+LEFT JOIN usuario enc              ON enc.tenant_id = e.tenant_id AND enc.id = e.encerrado_por_id
+LEFT JOIN os_custo c               ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+LEFT JOIN usuario lanc             ON lanc.tenant_id = c.tenant_id AND lanc.id = c.lancado_por_id
+LEFT JOIN vw_os_horas h            ON h.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  -- `id` não é filtro de GET /ordens-servico (não existe em
+  -- ParametrosListagemOrdensServico, front-end/servicoOrdensServico.ts) --
+  -- é OrdemServicoService.Iniciar/Pausar/Retomar/AcionarTerceiro/Encerrar
+  -- que chama esta query direto (fora do método ListarOrdensServico, sem
+  -- passar por FiltrosOrdemServico) pra remontar a OrdemServico completa e
+  -- denormalizada depois de escrever, dentro da mesma transação -- reaproveita
+  -- o SELECT com todos os JOINs em vez de duplicá-lo numa query só pra isso.
+  AND (sqlc.narg(id)::bigint IS NULL OR os.id = sqlc.narg(id))
+  AND (
+    sqlc.narg(finalizada)::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = sqlc.narg(finalizada)
+  )
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao `custo?.revisadoEm == null` do front.
+  AND (
+    sqlc.narg(revisado)::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = sqlc.narg(revisado)
+  )
+  AND (sqlc.narg(status)::text[] IS NULL OR os.status = ANY(sqlc.narg(status)::text[]::status_os[]))
+  AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
+  AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
+  -- setor_id sai da SOLICITAÇÃO (s.setor_id), não de ordem_servico -- a OS não
+  -- tem setor próprio, e nem deveria (ver a nota do escopo lá embaixo). Mesma
+  -- coluna que o EXISTS de escopo compara, então filtro e escopo falam da
+  -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
+  -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
+  AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
+  AND (
+    sqlc.narg(busca)::text IS NULL
+    OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.nome ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(busca) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(busca) || '%'
+  )
+  -- Filtros avançados do Painel do Gestor (ModalFiltrosOS), que antes eram
+  -- aplicados no navegador sobre a lista inteira. `maquina` é o espelho de
+  -- combinaBuscaAlvo: nome OU patrimônio (ou o item digitado, no reparo) --
+  -- mais estreito que `busca`, que também olha a descrição.
+  AND (
+    sqlc.narg(maquina)::text IS NULL
+    OR m.nome ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(maquina) || '%'
+  )
+  -- Período pela data de ABERTURA da OS, no dia de São Paulo (mesmo fuso do mês
+  -- dos indicadores): a OS aberta às 22h de 31/08 é de agosto para o Gestor.
+  AND (sqlc.narg(data_inicio)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= sqlc.narg(data_inicio))
+  AND (sqlc.narg(data_fim)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= sqlc.narg(data_fim))
+  -- Custo TOTAL já lançado (hora técnica + manutenção). OS sem custo lançado não
+  -- combina com filtro de valor, igual ao que a tela fazia.
+  AND (
+    sqlc.narg(valor_minimo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= sqlc.narg(valor_minimo))
+  )
+  AND (
+    sqlc.narg(valor_maximo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= sqlc.narg(valor_maximo))
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+-- os.id desempata: com LIMIT/OFFSET, duas OS abertas no mesmo instante
+-- poderiam trocar de página entre uma requisição e outra.
+--
+-- Paginação opcional (?pagina=): limite NULL é LIMIT ALL no Postgres e
+-- deslocamento NULL é OFFSET 0, então sem página a query devolve tudo, como
+-- antes -- os painéis do Gestor e do Técnico ainda montam a navegação
+-- Loja -> Setor a partir da lista inteira.
+ORDER BY os.aberta_em DESC, os.id DESC
+LIMIT sqlc.narg(limite) OFFSET sqlc.narg(deslocamento);
+
+-- name: ObterPausasDasOrdensServico :many
+-- Pausas de uma página inteira de OS numa ida só, mesmo padrão de
+-- ObterAnexosDasSolicitacoes: 1:N não cabe na listagem sem duplicar a OS por
+-- pausa, e uma query por OS seria N+1.
+--
+-- os_pausa não tem tenant_id (nem precisa: ela pende de ordem_servico, que
+-- tem) -- o recorte de tenant e de escopo já aconteceu em
+-- ListarOrdensServico, e é de lá que saem os ids. Nunca chame esta query com
+-- ids que não vieram de uma listagem já filtrada.
+--
+-- ORDER BY pausada_em: o front lê `pausas` como histórico em ordem e tira
+-- `pausaAtual` da que tem retomada_em nulo (uq_pausa_aberta garante no máximo
+-- uma por OS).
+SELECT id, ordem_servico_id, status_anterior, motivo, pausada_em, retomada_em
+FROM os_pausa
+WHERE ordem_servico_id = ANY(sqlc.arg(ordens_servico_ids)::bigint[])
+ORDER BY ordem_servico_id, pausada_em;
+
+-- name: ListarHistoricoOsDaMaquina :many
+-- GET /indicadores/maquinas/:id -- a matéria-prima do Painel de Indicadores do
+-- Gestor (front DashboardGestor). Uma linha por OS encerrada da máquina; as
+-- seis grandezas do painel (Horas Parada, MTTR, MTBF, Custo Total, rosca por
+-- tipo de defeito e barras de custo mensal) são somadas em
+-- MontarIndicadoresMaquina, não aqui.
+--
+-- Agregar no SELECT custaria seis expressões e três GROUP BY diferentes numa
+-- query só, e MTBF (média do intervalo entre aberturas) ainda pediria LAG --
+-- em Go são três laços sobre uma lista que já cabe na memória, testáveis sem
+-- Postgres. Mesmo espírito do custoTotal de ListarOrdensServico, que também é
+-- somado no model.
+--
+-- O JOIN com os_encerramento É o filtro de "concluída": a linha só existe
+-- quando o Técnico encerrou (uq_encerramento_os, data_fim NOT NULL) e não há
+-- reabertura no modelo. `os.status = 'Concluída'` seria o espelho
+-- denormalizado da mesma coisa -- e, se um dia divergirem, é a linha de
+-- encerramento que manda.
+--
+-- Sem escopo no WHERE aqui, e não é esquecimento: quem valida o acesso é o
+-- ObterMaquinaPorID que o service chama ANTES, com escopo_usuario_id. Máquina
+-- fora do escopo nem chega nesta query -- vira 404 lá em cima.
+--
+-- ⚠️ horas_* e custo_* CRUAS, sem ::float8 -- ver a nota longa em
+-- ListarOrdensServico e no sqlc.yaml: o cast quebra o override que as
+-- transforma em pgtype.Float8, e o Scan estoura no primeiro NULL (custo ainda
+-- não lançado, ou máquina que não parou).
+--
+-- O mês sai pronto do banco, em America/Sao_Paulo, mesmo tratamento de
+-- `vencida` em preventiva.sql: uma OS encerrada às 22h de 31/08 é agosto pro
+-- Gestor e setembro pro UTC. Formato YYYY-MM porque ordena como texto -- o
+-- 'MM/YYYY' do contrato é montado na hora de responder.
+-- origem: MTBF e MTTR medem FALHA e conserto, e a OS de preventiva é revisão
+-- programada -- nem quebra nem reparo. Entrando, o MTBF encolhe a cada revisão
+-- (a máquina "falha" mais) e o MTTR é puxado pelo tempo de uma revisão curta:
+-- o indicador puniria quem faz a manutenção em dia. Ver `preventiva` em
+-- resumir/mtbf (model/indicadorMaquina.go). Custo e quantidade da preventiva saem
+-- à parte do maquinário (quantidadePreventivas/custoPreventivas), como os reparos.
+SELECT
+    os.aberta_em,
+    s.origem,
+    e.tipo_defeito,
+    to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
+    h.horas_parada,
+    h.horas_trabalhadas,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND s.maquina_id = sqlc.arg(maquina_id)::bigint
+-- Ascendente porque MTBF é a média do intervalo entre aberturas consecutivas:
+-- ordenado aqui, o Go só percorre. Trocar para DESC quebra o indicador calado.
+ORDER BY os.aberta_em;
+
+-- name: ListarHistoricoOsDaLoja :many
+-- GET /indicadores/lojas/:id -- a mesma matéria-prima de
+-- ListarHistoricoOsDaMaquina, só que de todas as máquinas da loja que quem
+-- chama alcança. O Painel de Indicadores abre a loja com o total dela, um card
+-- por setor e um por máquina; MontarIndicadoresLoja faz os três recortes sobre
+-- esta lista, em Go, pelo mesmo motivo da query por máquina.
+--
+-- maquina_id e setor_id vêm na linha porque são as chaves do recorte -- e o
+-- MTBF de um grupo precisa separar as OS por máquina (ver mtbf no model).
+--
+-- setor_id é o ATUAL da máquina, não o da solicitação: o painel mostra a
+-- máquina onde ela está hoje, e uma máquina transferida de setor leva o
+-- histórico junto.
+--
+-- Escopo no WHERE, mesmo EXISTS de ListarMaquinas: o Gestor com só alguns
+-- setores da loja vê o agregado desses setores, não da loja inteira. Só
+-- máquina ativa, de novo como ListarMaquinas -- o total da loja tem que bater
+-- com a soma dos cards que a tela desenha.
+--
+-- ⚠️ horas_* e custo_* CRUAS, mesma nota de ListarHistoricoOsDaMaquina.
+SELECT
+    m.id AS maquina_id,
+    m.setor_id,
+    os.aberta_em,
+    s.origem,
+    e.tipo_defeito,
+    to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
+    h.horas_parada,
+    h.horas_trabalhadas,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN maquina m          ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+JOIN setor st           ON st.tenant_id = m.tenant_id AND st.id = m.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND m.ativa
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+-- Ascendente pelo mesmo motivo da query por máquina: o MTBF percorre em ordem.
+ORDER BY os.aberta_em;
+
+-- name: CriarItemDeCusto :exec
+-- Uma TAREFA da OS, com o custo de material e o de mão de obra dela (migration
+-- 000012). Chamada em laço por gravarItensDeCusto, sempre depois de
+-- DeletarItensDeCustoDaOrdemServico na mesma transação -- substitui o conjunto
+-- inteiro, não faz merge incremental, mesmo padrão de gravarPreventivas e
+-- gravarEscopo.
+--
+-- Uma linha por chamada, e não um INSERT em lote com unnest, por dois motivos.
+-- O que decide: o sqlc não resolve `unnest(a, b, c)` de múltiplos argumentos e
+-- para com "function unnest(unknown, unknown, unknown) does not exist", mesmo
+-- com os casts explícitos nos parâmetros. O que confirma: gravarPreventivas já
+-- grava em laço dentro da transação, e a lista aqui tem o tamanho de um
+-- formulário, não de uma importação.
+--
+-- custo_hora_tecnico é `narg` porque é nulo em duas situações diferentes e as
+-- duas são legítimas: fora de 'maquinario' a coluna é PROIBIDA
+-- (ck_custo_item_hora_tecnico), e dentro dele a tarefa pode simplesmente não
+-- ter cobrado mão de obra. Quem distingue é o service.
+--
+-- btrim na descrição espelha ck_custo_item_descricao. O service já recusa o
+-- vazio antes, com mensagem própria; aqui é só para não gravar a margem que o
+-- usuário digitou sem querer.
+INSERT INTO os_custo_item (
+    tenant_id, ordem_servico_id, tipo, descricao, custo_manutencao, custo_hora_tecnico
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(ordem_servico_id), sqlc.arg(tipo),
+    btrim(sqlc.arg(descricao)), sqlc.arg(custo_manutencao), sqlc.narg(custo_hora_tecnico)
+);
+
+-- name: DeletarItensDeCustoDaOrdemServico :exec
+-- DELETE de verdade, não soft delete, e é a única exceção do projeto junto com
+-- a irmã de nota fiscal. A regra "exclusão é sempre soft delete" existe para
+-- não perder histórico de entidade que alguém consultou; item de custo não é
+-- entidade, é uma linha de composição de um valor que está sendo reescrito
+-- inteiro na mesma transação. Um `ativo` aqui obrigaria toda soma a filtrar
+-- por ele e deixaria a listagem mostrando peça que o Administrador tirou.
+DELETE FROM os_custo_item
+WHERE tenant_id = sqlc.arg(tenant_id) AND ordem_servico_id = sqlc.arg(ordem_servico_id);
+
+-- name: ObterItensDeCustoDasOrdensServico :many
+-- Itens de uma página inteira de OS numa ida só, mesmo desenho de
+-- ObterPausasDasOrdensServico: 1:N no JOIN duplicaria a OS por item, e uma
+-- query por OS seria N+1.
+--
+-- Sem tenant_id no WHERE pelo mesmo motivo da query de pausas, apesar de a
+-- coluna existir aqui: os ids sempre vêm de ListarOrdensServico, que já
+-- recortou por tenant E por escopo. Nunca chame com ids de outra origem.
+--
+-- ORDER BY id: é a ordem em que o Técnico digitou, e é ela que a tela repete.
+-- Ordenar por valor embaralharia a lista a cada leitura.
+--
+-- ⚠️ As duas colunas de dinheiro saem CRUAS, sem `::float8`: o override do
+-- sqlc.yaml casa por NOME DE COLUNA, e o cast quebraria o vínculo -- mesma
+-- armadilha documentada em ListarOrdensServico.
+SELECT id, ordem_servico_id, descricao, custo_manutencao, custo_hora_tecnico
+FROM os_custo_item
+WHERE ordem_servico_id = ANY(sqlc.arg(ordens_servico_ids)::bigint[])
+ORDER BY ordem_servico_id, id;
+
+-- name: CriarNotaFiscal :exec
+-- Espelho de CriarItemDeCusto para os documentos que o Administrador registra
+-- na conferência (migration 000012). Mesma substituição de conjunto, sempre
+-- depois de DeletarNotasFiscaisDaOrdemServico, e em laço pelo mesmo motivo.
+--
+-- ⚠️ NULLIF na série porque ela é opcional e o React Hook Form manda string
+-- vazia no campo que ninguém preencheu -- mesmo papel do textoOuNil do
+-- service. Sem ele o banco guardaria '' numa coluna nullable, e aí
+-- uq_nota_fiscal_os passaria a tratar "sem série" e "série vazia" como dois
+-- documentos diferentes, deixando a duplicata entrar.
+--
+-- O trigger trg_nota_fiscal_declarada barra a escrita se a OS não estiver com
+-- tem_nota_fiscal. O service confere antes para a mensagem sair nomeando o
+-- campo, mesmo padrão dos CHECKs espelhados em Go.
+INSERT INTO os_nota_fiscal (tenant_id, ordem_servico_id, numero, serie)
+VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(ordem_servico_id),
+    btrim(sqlc.arg(numero)), NULLIF(btrim(sqlc.arg(serie)), '')
+);
+
+-- name: DeletarNotasFiscaisDaOrdemServico :exec
+-- Mesmo raciocínio do DELETE de itens acima. Serve dois casos: a substituição
+-- do conjunto em CorrigirCusto e o Administrador DESMARCANDO tem_nota_fiscal,
+-- que tem que apagar as notas na mesma escrita -- é a direção que o trigger
+-- não cobre de propósito (ver a nota na migration 000012).
+DELETE FROM os_nota_fiscal
+WHERE tenant_id = sqlc.arg(tenant_id) AND ordem_servico_id = sqlc.arg(ordem_servico_id);
+
+-- name: ObterNotasFiscaisDasOrdensServico :many
+-- Espelho de ObterItensDeCustoDasOrdensServico; ver as notas de lá sobre a
+-- ausência de tenant_id e sobre a ordenação.
+SELECT id, ordem_servico_id, numero, serie
+FROM os_nota_fiscal
+WHERE ordem_servico_id = ANY(sqlc.arg(ordens_servico_ids)::bigint[])
+ORDER BY ordem_servico_id, id;
+
+-- name: ContarOrdensServico :one
+-- O total da listagem paginada (?pagina= em GET /ordens-servico). ⚠️ O WHERE
+-- tem que ser o MESMO de ListarOrdensServico -- filtro mudado lá e esquecido
+-- aqui faz o "1 de N" mentir. Só os JOINs que o WHERE usa: loja/setor/
+-- solicitação (escopo e filtros), máquina (busca) e custo (finalizada/revisado).
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+LEFT JOIN maquina m    ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN os_custo c   ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.narg(finalizada)::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = sqlc.narg(finalizada)
+  )
+  -- Abas "Pendentes"/"Revisadas" de Custos Pendentes: o Administrador já conferiu
+  -- o custo (custo_revisado_em gravado no POST /custo) ou não. OS sem linha de
+  -- custo conta como não revisada, igual ao `custo?.revisadoEm == null` do front.
+  AND (
+    sqlc.narg(revisado)::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = sqlc.narg(revisado)
+  )
+  AND (sqlc.narg(status)::text[] IS NULL OR os.status = ANY(sqlc.narg(status)::text[]::status_os[]))
+  AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
+  AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
+  -- setor_id sai da SOLICITAÇÃO (s.setor_id), não de ordem_servico -- a OS não
+  -- tem setor próprio, e nem deveria (ver a nota do escopo lá embaixo). Mesma
+  -- coluna que o EXISTS de escopo compara, então filtro e escopo falam da
+  -- mesma coisa: o cliente estreita dentro do que o escopo já permitiu, nunca
+  -- amplia -- mandar o setor de outra loja devolve vazio, não a lista dela.
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
+  AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
+  AND (
+    sqlc.narg(busca)::text IS NULL
+    OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.nome ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(busca) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(busca) || '%'
+  )
+  -- Filtros avançados do Painel do Gestor (ModalFiltrosOS), que antes eram
+  -- aplicados no navegador sobre a lista inteira. `maquina` é o espelho de
+  -- combinaBuscaAlvo: nome OU patrimônio (ou o item digitado, no reparo) --
+  -- mais estreito que `busca`, que também olha a descrição.
+  AND (
+    sqlc.narg(maquina)::text IS NULL
+    OR m.nome ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(maquina) || '%'
+  )
+  -- Período pela data de ABERTURA da OS, no dia de São Paulo (mesmo fuso do mês
+  -- dos indicadores): a OS aberta às 22h de 31/08 é de agosto para o Gestor.
+  AND (sqlc.narg(data_inicio)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= sqlc.narg(data_inicio))
+  AND (sqlc.narg(data_fim)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= sqlc.narg(data_fim))
+  -- Custo TOTAL já lançado (hora técnica + manutenção). OS sem custo lançado não
+  -- combina com filtro de valor, igual ao que a tela fazia.
+  AND (
+    sqlc.narg(valor_minimo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= sqlc.narg(valor_minimo))
+  )
+  AND (
+    sqlc.narg(valor_maximo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= sqlc.narg(valor_maximo))
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  );
+
+-- name: ResumoOrdensServicoPorSetor :many
+-- Quantas OS há em cada loja/setor para os MESMOS filtros da listagem -- os
+-- cards de loja e setor da navegação do Painel do Gestor. Existe porque a
+-- lista de OS Finalizadas é paginada no servidor: a tela deixou de ter a lista
+-- inteira para contar.
+--
+-- ⚠️ O WHERE tem que ser o MESMO de ListarOrdensServico/ContarOrdensServico --
+-- filtro mudado lá e esquecido aqui faz o card dizer 40 e a lista mostrar 12.
+-- Só os JOINs que o WHERE usa mais os nomes de loja e setor.
+--
+-- `afeta_producao` conta as que pararam a máquina (selo vermelho do card);
+-- finalizadas não usam, mas a query serve às abas em andamento no dia em que
+-- elas também paginarem.
+--
+-- Uma linha por MÁQUINA dentro do setor (o front soma por setor e por loja):
+-- é o que monta o terceiro nível da navegação. Os pequenos reparos do setor
+-- (s.maquina_id NULL) caem juntos numa linha só, com maquina_* nulos.
+SELECT
+    sc.loja_id,
+    l.nome AS loja_nome,
+    s.setor_id,
+    sc.nome AS setor_nome,
+    s.maquina_id,
+    m.nome AS maquina_nome,
+    m.numero_patrimonio AS maquina_codigo,
+    count(*)::bigint AS quantidade,
+    (count(*) FILTER (WHERE os.afeta_producao))::bigint AS afetam_producao
+FROM ordem_servico os
+JOIN solicitacao_os s  ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor sc          ON sc.tenant_id = s.tenant_id AND sc.id = s.setor_id
+JOIN loja l            ON l.tenant_id = sc.tenant_id AND l.id = sc.loja_id
+LEFT JOIN maquina m    ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+LEFT JOIN os_custo c   ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.narg(finalizada)::boolean IS NULL
+    OR (os.status = 'Concluída' AND c.id IS NOT NULL) = sqlc.narg(finalizada)
+  )
+  AND (
+    sqlc.narg(revisado)::boolean IS NULL
+    OR (c.custo_revisado_em IS NOT NULL) = sqlc.narg(revisado)
+  )
+  AND (sqlc.narg(status)::text[] IS NULL OR os.status = ANY(sqlc.narg(status)::text[]::status_os[]))
+  AND (sqlc.narg(tipo)::tipo_os IS NULL OR os.tipo = sqlc.narg(tipo))
+  AND (sqlc.narg(loja_id)::bigint IS NULL OR sc.loja_id = sqlc.narg(loja_id))
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Nível de máquina da navegação (Loja -> Setor -> Máquina) das OS Finalizadas
+  -- do Gestor. A máquina também é a da SOLICITAÇÃO. `reparo` separa o card de
+  -- pequenos reparos (maquina_id NULL, o item foi digitado) do maquinário --
+  -- mesma identificação de ListarHistoricoReparosDaLoja, que não olha os.tipo.
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR s.maquina_id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(reparo)::boolean IS NULL OR (s.maquina_id IS NULL) = sqlc.narg(reparo))
+  AND (sqlc.narg(tecnico_id)::bigint IS NULL OR os.tecnico_id = sqlc.narg(tecnico_id))
+  AND (
+    sqlc.narg(busca)::text IS NULL
+    OR s.descricao ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.nome ILIKE '%' || sqlc.narg(busca) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(busca) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(busca) || '%'
+  )
+  AND (
+    sqlc.narg(maquina)::text IS NULL
+    OR m.nome ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR m.numero_patrimonio ILIKE '%' || sqlc.narg(maquina) || '%'
+    OR s.item_descricao ILIKE '%' || sqlc.narg(maquina) || '%'
+  )
+  AND (sqlc.narg(data_inicio)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date >= sqlc.narg(data_inicio))
+  AND (sqlc.narg(data_fim)::date IS NULL OR (os.aberta_em AT TIME ZONE 'America/Sao_Paulo')::date <= sqlc.narg(data_fim))
+  AND (
+    sqlc.narg(valor_minimo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) >= sqlc.narg(valor_minimo))
+  )
+  AND (
+    sqlc.narg(valor_maximo)::float8 IS NULL
+    OR (c.id IS NOT NULL AND COALESCE(c.custo_hora_tecnico, 0) + COALESCE(c.custo_manutencao, 0) <= sqlc.narg(valor_maximo))
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = sc.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+GROUP BY sc.loja_id, l.nome, s.setor_id, sc.nome, s.maquina_id, m.nome, m.numero_patrimonio
+ORDER BY l.nome, sc.nome, m.nome, m.numero_patrimonio;
+
+-- name: ListarHistoricoReparosDaLoja :many
+-- Os PEQUENOS REPAROS encerrados da loja, para o custo separado do Painel de
+-- Indicadores (GET /indicadores/lojas/:id). Reparo não tem máquina
+-- (solicitacao_os.maquina_id é NULL: o Solicitante digita o item), então nunca
+-- entra em ListarHistoricoOsDaLoja nem nos indicadores por máquina -- e, de
+-- propósito, também não nos de falha (MTBF/MTTR) nem nas horas: só no custo e
+-- na contagem, em campos próprios, para o Gestor ver o custo do maquinário e o
+-- dos reparos SEPARADOS e nunca somados num número só.
+--
+-- O reparo é identificado pela SOLICITAÇÃO (maquina_id IS NULL), não por
+-- ordem_servico.tipo: o Técnico pode promover a OS a 'terceiros' no meio, e um
+-- reparo terceirizado continua sendo reparo.
+--
+-- O setor é o da SOLICITAÇÃO (s.setor_id, NOT NULL): é a única âncora que o
+-- reparo tem. Escopo no WHERE, mesmo EXISTS das outras queries de histórico.
+-- ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+SELECT
+    s.setor_id,
+    st.nome AS setor_nome,
+    os.aberta_em,
+    to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS mes_encerramento,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND s.maquina_id IS NULL
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+ORDER BY os.aberta_em;
+
+-- name: ListarReparosEncerradosDaLoja :many
+-- A LISTA por trás do card "Pequenos Reparos" do Painel de Indicadores: cada reparo
+-- encerrado que compõe quantidadeReparos/custoReparos. ⚠️ O WHERE tem que ser o MESMO de
+-- ListarHistoricoReparosDaLoja (e de ContarReparosEncerradosDaLoja logo abaixo) -- a soma
+-- dos itens é o número do card, e divergir faz a lista mentir. Mesma definição de
+-- reparo: solicitação sem máquina (um reparo terceirizado pelo Técnico continua reparo),
+-- setor da solicitação, escopo no WHERE. Filtros opcionais: o setor e o mês que a tela
+-- está mostrando. Mais novo primeiro, paginada.
+-- ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+SELECT
+    os.id,
+    s.item_descricao,
+    s.origem,
+    s.descricao,
+    s.setor_id,
+    st.nome AS setor_nome,
+    tec.nome AS tecnico_nome,
+    e.data_fim,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN usuario tec        ON tec.tenant_id = os.tenant_id AND tec.id = os.tecnico_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND s.maquina_id IS NULL
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Mês de ENCERRAMENTO em São Paulo (YYYY-MM): o mesmo que o gráfico do painel usa
+  -- (mes_encerramento de ListarHistoricoReparosDaLoja), não a abertura da OS --
+  -- senão a lista e a barra do mês discordariam.
+  AND (
+    sqlc.narg(mes)::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  )
+ORDER BY e.data_fim DESC, os.id DESC
+LIMIT sqlc.arg(limite) OFFSET sqlc.arg(deslocamento);
+
+-- name: ContarReparosEncerradosDaLoja :one
+-- O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN setor st           ON st.tenant_id = s.tenant_id AND st.id = s.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND s.maquina_id IS NULL
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR s.setor_id = sqlc.narg(setor_id))
+  -- Mês de ENCERRAMENTO em São Paulo (YYYY-MM): o mesmo que o gráfico do painel usa
+  -- (mes_encerramento de ListarHistoricoReparosDaLoja), não a abertura da OS --
+  -- senão a lista e a barra do mês discordariam.
+  AND (
+    sqlc.narg(mes)::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = s.setor_id)
+    )
+  );
+
+-- name: ListarOrdensMaquinarioEncerradasDaLoja :many
+-- A LISTA por trás do card "Custo Maquinário" do Painel de Indicadores (e do card da
+-- máquina): cada OS de máquina encerrada que compõe quantidadeOs/custoTotal. Irmã de
+-- ListarReparosEncerradosDaLoja, que cobre os reparos. Serve também à faixa de
+-- manutenções preventivas: `preventiva` separa os dois grupos pela origem da solicitação,
+-- o mesmo critério de `preventiva` em resumir (model/indicadorMaquina.go) -- false é o
+-- card do maquinário, true é a faixa das preventivas.
+--
+-- ⚠️ O WHERE (e os JOINs que filtram: máquina, setor, encerramento, vw_os_horas) tem que ser o
+-- MESMO de ListarHistoricoOsDaLoja -- é dela que sai o número do card, e a soma dos itens
+-- desta lista é esse número. Mesma regra: só máquina ativa, setor ATUAL da máquina (uma máquina
+-- transferida leva o histórico), escopo no WHERE. Entram as terceirizadas também -- o custo delas
+-- está no card, e a lista explica.
+-- Filtros opcionais: o setor, a máquina e o mês de ENCERRAMENTO que a tela está mostrando.
+-- Mais novo primeiro, paginada.
+-- ⚠️ custo_* CRUAS, sem ::float8 -- mesma nota de ListarHistoricoOsDaMaquina.
+SELECT
+    os.id,
+    m.id AS maquina_id,
+    m.nome AS maquina_nome,
+    m.numero_patrimonio AS maquina_codigo,
+    s.origem,
+    s.descricao,
+    m.setor_id,
+    st.nome AS setor_nome,
+    tec.nome AS tecnico_nome,
+    e.data_fim,
+    c.custo_hora_tecnico,
+    c.custo_manutencao
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN maquina m          ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+JOIN setor st           ON st.tenant_id = m.tenant_id AND st.id = m.setor_id
+JOIN usuario tec        ON tec.tenant_id = os.tenant_id AND tec.id = os.tecnico_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+LEFT JOIN os_custo c    ON c.tenant_id = os.tenant_id AND c.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND m.ativa
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR m.setor_id = sqlc.narg(setor_id))
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR m.id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(preventiva)::boolean IS NULL OR (s.origem = 'preventiva') = sqlc.narg(preventiva))
+  AND (
+    sqlc.narg(mes)::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  )
+ORDER BY e.data_fim DESC, os.id DESC
+LIMIT sqlc.arg(limite) OFFSET sqlc.arg(deslocamento);
+
+-- name: ContarOrdensMaquinarioEncerradasDaLoja :one
+-- O total da lista acima ("1 de N"). Mesmo WHERE, só os JOINs que ele usa.
+SELECT count(*)
+FROM ordem_servico os
+JOIN solicitacao_os s   ON s.tenant_id = os.tenant_id AND s.id = os.solicitacao_id
+JOIN maquina m          ON m.tenant_id = s.tenant_id AND m.id = s.maquina_id
+JOIN setor st           ON st.tenant_id = m.tenant_id AND st.id = m.setor_id
+JOIN os_encerramento e  ON e.tenant_id = os.tenant_id AND e.ordem_servico_id = os.id
+JOIN vw_os_horas h      ON h.ordem_servico_id = os.id
+WHERE os.tenant_id = sqlc.arg(tenant_id)
+  AND st.loja_id = sqlc.arg(loja_id)::bigint
+  AND m.ativa
+  AND (sqlc.narg(setor_id)::bigint IS NULL OR m.setor_id = sqlc.narg(setor_id))
+  AND (sqlc.narg(maquina_id)::bigint IS NULL OR m.id = sqlc.narg(maquina_id))
+  AND (sqlc.narg(preventiva)::boolean IS NULL OR (s.origem = 'preventiva') = sqlc.narg(preventiva))
+  AND (
+    sqlc.narg(mes)::text IS NULL
+    OR to_char(e.data_fim AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = sqlc.narg(mes)
+  )
+  AND (
+    sqlc.narg(escopo_usuario_id)::bigint IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM usuario_escopo ue
+      LEFT JOIN usuario_escopo_setor ues ON ues.escopo_id = ue.id
+      WHERE ue.usuario_id = sqlc.narg(escopo_usuario_id)
+        AND ue.loja_id = st.loja_id
+        AND (ue.acesso_total_setores OR ues.setor_id = m.setor_id)
+    )
+  );

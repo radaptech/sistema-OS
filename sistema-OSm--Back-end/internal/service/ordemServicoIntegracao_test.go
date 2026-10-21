@@ -1,0 +1,2188 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/radaptech/sistema-OSm--Back-end/config"
+	"github.com/radaptech/sistema-OSm--Back-end/database/repository"
+	"github.com/radaptech/sistema-OSm--Back-end/internal/helper"
+	"github.com/radaptech/sistema-OSm--Back-end/internal/model"
+)
+
+// itensMaquinario e itensSemHoraTecnica montam a lista de TAREFAS da migration
+// 000012 sem repetir a struct em cada subteste: com e sem mão de obra. Desde a
+// 000017 todo tipo de OS aceita os dois (em 'terceiros', mão de obra da
+// empresa, 000016).
+//
+// A descrição é obrigatória (ck_custo_item_descricao) e nunca é o assunto dos
+// testes que usam estes helpers -- quem testa a descrição em si passa a lista
+// na mão.
+func itensMaquinario(horaTecnico, manutencao float64) []model.ItemCustoPayload {
+	return []model.ItemCustoPayload{
+		{Descricao: "Troca da peça", CustoManutencao: manutencao, CustoHoraTecnico: &horaTecnico},
+	}
+}
+
+func itensSemHoraTecnica(manutencao float64) []model.ItemCustoPayload {
+	return []model.ItemCustoPayload{
+		{Descricao: "Material", CustoManutencao: manutencao},
+	}
+}
+
+// ptrFloat existe porque ItemCustoPayload.CustoHoraTecnico é *float64 (nulo
+// distingue "não cobrou hora" de "cobrou zero") e Go não deixa tomar endereço
+// de literal.
+func ptrFloat(v float64) *float64 { return &v }
+
+// TestListarOrdensServico cobre a query de GET /ordens-servico antes de
+// existir service em cima dela: o recorte por escopo (que é o WHERE, não o
+// RBAC -- a rota é aberta a gestor/técnico/administrador) e os filtros que os
+// três painéis mandam.
+//
+// Falha de escopo aqui é silenciosa em produção -- a listagem responde 200
+// com OS de setor alheio e nenhuma tela reclama. Mesmo motivo de
+// TestEscopoDasListagens existir para máquina/preventiva.
+func TestListarOrdensServico(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	repo := repository.New(pool)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svc := NewRepoSolicitacao(pool)
+
+	// Duas lojas e três setores: é o setor da outra loja que separa "gestor
+	// com acesso total à Loja A" de "enxerga o tenant".
+	var tenantID, lojaA, lojaB, setorA, setorB, setorC int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os', 'Empresa OS') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	for _, l := range []struct {
+		nome string
+		dest *int64
+	}{{"Loja A", &lojaA}, {"Loja B", &lojaB}} {
+		if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, $2) RETURNING id`, tenantID, l.nome).Scan(l.dest); err != nil {
+			t.Fatalf("erro ao criar loja: %v", err)
+		}
+	}
+	for _, s := range []struct {
+		nome string
+		loja int64
+		dest *int64
+	}{{"Padaria", lojaA, &setorA}, {"Açougue", lojaA, &setorB}, {"Hortifruti", lojaB, &setorC}} {
+		if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, $3) RETURNING id`, tenantID, s.loja, s.nome).Scan(s.dest); err != nil {
+			t.Fatalf("erro ao criar setor: %v", err)
+		}
+	}
+
+	maquina := func(nome string, setor int64) model.Maquinario {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setor, Criticidade: "Alta", NumeroPatrimonio: "PAT-" + nome, Nome: nome,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina %s: %v", nome, err)
+		}
+		return m
+	}
+	forno := maquina("Forno", setorA)
+	serra := maquina("Serra", setorB)
+	balanca := maquina("Balanca", setorC)
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+
+	admin := cadastrar("Ana", "ana@os.com", "administrador", model.NovoUsuarioPayload{})
+	gestorParcial := cadastrar("Carla", "carla@os.com", "gestor", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, SetoresIds: []int64{setorB},
+	})
+	gestorTotal := cadastrar("Dora", "dora@os.com", "gestor", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, AcessoTotalSetores: true,
+	})
+	tecnicoA := cadastrar("Eder", "eder@os.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA, lojaB}, Area: &area,
+	})
+	tecnicoB := cadastrar("Ivo", "ivo@os.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaB}, Area: &area,
+	})
+	solA := cadastrar("Bruno", "bruno@os.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, SetoresIds: []int64{setorA},
+	})
+	solB := cadastrar("Bia", "bia@os.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaA}, SetoresIds: []int64{setorB},
+	})
+	solC := cadastrar("Caio", "caio@os.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaB}, SetoresIds: []int64{setorC},
+	})
+
+	// Uma OS por setor. Vão todas pelo caminho de verdade (solicitação humana
+	// -> AbrirOS) porque não existe outro: ordem_servico só nasce da aprovação
+	// do Gestor, e um INSERT na mão aqui testaria uma linha que a API nunca
+	// produz.
+	abrirMaquinario := func(solicitante model.Usuario, maquinaID int64, descricao string, tecnico model.Usuario) model.OrdemServico {
+		t.Helper()
+		sol, err := svc.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: maquinaID, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação de %s: %v", descricao, err)
+		}
+		os, err := svc.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnico.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS de %s: %v", descricao, err)
+		}
+		return os
+	}
+
+	osForno := abrirMaquinario(solA, forno.Id, "Forno não aquece", tecnicoA)
+	osSerra := abrirMaquinario(solB, serra.Id, "Serra travando", tecnicoA)
+	osBalanca := abrirMaquinario(solC, balanca.Id, "Balança descalibrada", tecnicoB)
+
+	// Um reparo: prova que a listagem aguenta OS sem máquina (LEFT JOIN
+	// maquina) e serve ao filtro por tipo.
+	solReparo, err := svc.CadastrarSolicitacaoReparo(ctx, tenantID, solA.Id, model.NovaSolicitacaoReparoPayload{
+		Item: "Lâmpada queimada", Descricao: "Corredor principal",
+		FotoChave: "tenant/1/reparo.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+	})
+	if err != nil {
+		t.Fatalf("erro ao criar reparo: %v", err)
+	}
+	osReparo, err := svc.AbrirOS(ctx, tenantID, admin.Id, "administrador", solReparo.Id, model.AberturaOrdemServicoPayload{
+		Urgencia: "Baixa", TecnicoId: tecnicoA.Id,
+	})
+	if err != nil {
+		t.Fatalf("erro ao abrir OS do reparo: %v", err)
+	}
+
+	listar := func(t *testing.T, p repository.ListarOrdensServicoParams) []repository.ListarOrdensServicoRow {
+		t.Helper()
+		p.TenantID = tenantID
+		linhas, err := repo.ListarOrdensServico(ctx, p)
+		if err != nil {
+			t.Fatalf("erro ao listar: %v", err)
+		}
+		return linhas
+	}
+	ids := func(linhas []repository.ListarOrdensServicoRow) []int64 {
+		out := make([]int64, 0, len(linhas))
+		for _, l := range linhas {
+			out = append(out, l.ID)
+		}
+		slices.Sort(out)
+		return out
+	}
+	ordenados := func(v ...int64) []int64 {
+		slices.Sort(v)
+		return v
+	}
+
+	t.Run("escopo recorta por loja E setor", func(t *testing.T) {
+		casos := []struct {
+			nome     string
+			escopo   *int64
+			esperado []int64
+		}{
+			// Administrador não tem linha em usuario_escopo
+			// (trg_usuario_escopo_nao_admin recusa): filtrar por escopo
+			// devolveria zero justamente para quem enxerga tudo.
+			{"administrador vê o tenant inteiro", nil, ordenados(osForno.Id, osSerra.Id, osBalanca.Id, osReparo.Id)},
+			// Açougue da Loja A: a Padaria (Forno + o reparo, que herda o
+			// setor do solicitante) e a Loja B ficam de fora.
+			{"gestor parcial vê só o setor dele", &gestorParcial.Id, ordenados(osSerra.Id)},
+			// Loja A inteira, sem a Loja B.
+			{"gestor total vê a loja inteira", &gestorTotal.Id, ordenados(osForno.Id, osSerra.Id, osReparo.Id)},
+			// Escopo do técnico é acesso_total_setores nas lojas dele.
+			{"técnico das duas lojas vê tudo", &tecnicoA.Id, ordenados(osForno.Id, osSerra.Id, osBalanca.Id, osReparo.Id)},
+			{"técnico de uma loja só vê a dele", &tecnicoB.Id, ordenados(osBalanca.Id)},
+			// Escopo não é "as minhas OS": o solicitante da Padaria enxerga
+			// as OS do setor dele, inclusive a que ele não abriu.
+			{"solicitante vê o próprio setor", &solA.Id, ordenados(osForno.Id, osReparo.Id)},
+			{"solicitante de outro setor", &solC.Id, ordenados(osBalanca.Id)},
+		}
+		for _, caso := range casos {
+			t.Run(caso.nome, func(t *testing.T) {
+				got := ids(listar(t, repository.ListarOrdensServicoParams{EscopoUsuarioID: caso.escopo}))
+				if !slices.Equal(got, caso.esperado) {
+					t.Errorf("ids = %v, esperado %v", got, caso.esperado)
+				}
+			})
+		}
+	})
+
+	t.Run("filtro do cliente estreita, nunca amplia", func(t *testing.T) {
+		// ?lojaId= de uma loja fora do escopo devolve vazio, não a loja.
+		// Mesma trava de TestEscopoDasListagens.
+		got := listar(t, repository.ListarOrdensServicoParams{EscopoUsuarioID: &gestorTotal.Id, LojaID: &lojaB})
+		if len(got) != 0 {
+			t.Errorf("gestor da Loja A pedindo ?lojaId=B recebeu %d OS, esperado 0", len(got))
+		}
+		// E dentro do escopo ele estreita de verdade.
+		got = listar(t, repository.ListarOrdensServicoParams{EscopoUsuarioID: nil, LojaID: &lojaB})
+		if !slices.Equal(ids(got), ordenados(osBalanca.Id)) {
+			t.Errorf("?lojaId=B para o admin = %v, esperado só a Balança", ids(got))
+		}
+	})
+
+	t.Run("filtros combináveis", func(t *testing.T) {
+		// Status entra como text[] e o SQL casta para status_os -- ver a nota
+		// na query. Os rótulos são os mesmos que o front manda em ?status=.
+		aberta, concluida := string(repository.StatusOsAberta), string(repository.StatusOsConcluda)
+		tipoReparo, tipoMaquinario := repository.TipoOsReparo, repository.TipoOsMaquinario
+		busca := "travando"
+
+		casos := []struct {
+			nome     string
+			params   repository.ListarOrdensServicoParams
+			esperado []int64
+		}{
+			// Toda OS nasce 'Aberta' -- o ciclo de vida é fase 2.
+			{"status Aberta pega todas", repository.ListarOrdensServicoParams{Status: []string{aberta}}, ordenados(osForno.Id, osSerra.Id, osBalanca.Id, osReparo.Id)},
+			{"status Concluída não pega nenhuma", repository.ListarOrdensServicoParams{Status: []string{concluida}}, []int64{}},
+			{"status aceita mais de um valor", repository.ListarOrdensServicoParams{Status: []string{aberta, concluida}}, ordenados(osForno.Id, osSerra.Id, osBalanca.Id, osReparo.Id)},
+			{"tipo reparo", repository.ListarOrdensServicoParams{Tipo: &tipoReparo}, ordenados(osReparo.Id)},
+			{"tipo maquinário", repository.ListarOrdensServicoParams{Tipo: &tipoMaquinario}, ordenados(osForno.Id, osSerra.Id, osBalanca.Id)},
+			{"tecnicoId", repository.ListarOrdensServicoParams{TecnicoID: &tecnicoB.Id}, ordenados(osBalanca.Id)},
+			{"busca na descrição", repository.ListarOrdensServicoParams{Busca: &busca}, ordenados(osSerra.Id)},
+			// Combinar estreita: o técnico A atende a Loja B, mas nenhuma OS
+			// dele está lá.
+			{"tecnicoId + lojaId", repository.ListarOrdensServicoParams{TecnicoID: &tecnicoA.Id, LojaID: &lojaB}, []int64{}},
+		}
+		for _, caso := range casos {
+			t.Run(caso.nome, func(t *testing.T) {
+				got := ids(listar(t, caso.params))
+				if !slices.Equal(got, caso.esperado) {
+					t.Errorf("ids = %v, esperado %v", got, caso.esperado)
+				}
+			})
+		}
+	})
+
+	t.Run("busca cobre o item do reparo, que não tem máquina", func(t *testing.T) {
+		item := "Lâmpada"
+		got := ids(listar(t, repository.ListarOrdensServicoParams{Busca: &item}))
+		if !slices.Equal(got, ordenados(osReparo.Id)) {
+			t.Errorf("ids = %v, esperado só o reparo", got)
+		}
+	})
+
+	t.Run("denormalizados que o front tipa como obrigatórios", func(t *testing.T) {
+		linhas := listar(t, repository.ListarOrdensServicoParams{TecnicoID: &tecnicoB.Id})
+		if len(linhas) != 1 {
+			t.Fatalf("esperava 1 OS, veio %d", len(linhas))
+		}
+		l := linhas[0]
+
+		if l.SetorNome != "Hortifruti" || l.LojaNome != "Loja B" || l.LojaID != lojaB {
+			t.Errorf("setor/loja não vieram denormalizados: %q / %q / %d", l.SetorNome, l.LojaNome, l.LojaID)
+		}
+		if l.TecnicoNome != "Ivo" {
+			t.Errorf("tecnicoNome = %q, esperado Ivo", l.TecnicoNome)
+		}
+		if l.TecnicoArea == nil || *l.TecnicoArea != area {
+			t.Errorf("tecnicoArea = %v, esperado %q", l.TecnicoArea, area)
+		}
+		if l.MaquinaNome == nil || *l.MaquinaNome != "Balanca" {
+			t.Errorf("maquinaNome = %v", l.MaquinaNome)
+		}
+		if l.SolicitanteNome == nil || *l.SolicitanteNome != "Caio" {
+			t.Errorf("solicitanteNome = %v", l.SolicitanteNome)
+		}
+		if !l.AfetaProducao {
+			t.Error("afetaProducao devia vir true (o solicitante marcou o impacto)")
+		}
+		if l.Urgencia != repository.NivelUrgenciaAlta {
+			t.Errorf("urgencia = %v, esperado Alta", l.Urgencia)
+		}
+		if l.Status != repository.StatusOsAberta {
+			t.Errorf("status = %v, esperado Aberta", l.Status)
+		}
+		// dataSolicitacao é o criado_em da solicitação de origem, e é dela que
+		// parte o relógio de máquina parada -- tem que vir antes da abertura.
+		if !l.DataSolicitacao.Valid || !l.AbertaEm.Valid {
+			t.Fatalf("datas inválidas: solicitacao=%v abertura=%v", l.DataSolicitacao, l.AbertaEm)
+		}
+		if l.DataSolicitacao.Time.After(l.AbertaEm.Time) {
+			t.Errorf("dataSolicitacao (%v) depois da dataAbertura (%v)", l.DataSolicitacao.Time, l.AbertaEm.Time)
+		}
+		// Ninguém acionou terceiro: os dois campos NULL é o que satisfaz
+		// ck_os_executor pela metade "não-terceiros".
+		if l.EmpresaTerceirizadaNome != nil || l.EmpresaTerceirizadaID != nil {
+			t.Errorf("empresa terceirizada não devia existir: %v / %v", l.EmpresaTerceirizadaID, l.EmpresaTerceirizadaNome)
+		}
+	})
+
+	t.Run("reparo vem sem máquina e com item", func(t *testing.T) {
+		tipoReparo := repository.TipoOsReparo
+		linhas := listar(t, repository.ListarOrdensServicoParams{Tipo: &tipoReparo})
+		if len(linhas) != 1 {
+			t.Fatalf("esperava 1 reparo, veio %d", len(linhas))
+		}
+		l := linhas[0]
+		if l.MaquinaID != nil || l.MaquinaNome != nil || l.MaquinaCodigo != nil {
+			t.Errorf("reparo não tem máquina: %v / %v / %v", l.MaquinaID, l.MaquinaNome, l.MaquinaCodigo)
+		}
+		if l.ItemDescricao == nil || *l.ItemDescricao != "Lâmpada queimada" {
+			t.Errorf("itemDescricao = %v", l.ItemDescricao)
+		}
+		// O setor do reparo vem do escopo do solicitante, não de uma máquina.
+		if l.SetorNome != "Padaria" {
+			t.Errorf("setorNome do reparo = %q, esperado Padaria", l.SetorNome)
+		}
+	})
+
+	t.Run("mais nova primeiro", func(t *testing.T) {
+		linhas := listar(t, repository.ListarOrdensServicoParams{})
+		for i := 1; i < len(linhas); i++ {
+			if linhas[i-1].AbertaEm.Time.Before(linhas[i].AbertaEm.Time) {
+				t.Fatalf("ordem quebrada em %d: %v antes de %v", i, linhas[i-1].AbertaEm.Time, linhas[i].AbertaEm.Time)
+			}
+		}
+	})
+
+	// ------------------------------------------------------------------
+	// Sub-dados do ciclo de vida: encerramento, custo, horas e pausas.
+	//
+	// Daqui pra baixo o estado das OS muda -- os subtestes acima contam com
+	// todas 'Aberta', que é como AbrirOS as deixa.
+	//
+	// Os INSERTs são na mão, diferente das OS (que vão por AbrirOS) -- não
+	// porque falte caminho de escrita (o ciclo de vida inteiro existe, ver
+	// TestIniciar/TestPausar/TestRetomar/TestAcionarTerceiro/TestEncerrar/
+	// TestCorrigirCusto mais abaixo neste arquivo), mas porque uma chamada de
+	// service grava os timestamps com `now()` na hora, e os dois relógios
+	// (Horas Trabalhadas/Parada) só ficam testáveis com um passado EXATO e
+	// controlável -- `criado_em`/`iniciada_em`/pausas deslocados por
+	// `interval` fixo (ver o comentário do Forno logo abaixo).
+	// ------------------------------------------------------------------
+	t.Run("prepara o ciclo de vida das OS", func(t *testing.T) {
+		exec := func(sql string, args ...any) {
+			t.Helper()
+			if _, err := pool.Exec(ctx, sql, args...); err != nil {
+				t.Fatalf("erro em %q: %v", sql, err)
+			}
+		}
+
+		// Forno: encerrada e com custo -- a única "finalizada" de maquinário.
+		// A linha do tempo é escolhida para separar os dois relógios: o
+		// Solicitante relatou 8h atrás, o Gestor demorou e a OS só começou 5h
+		// atrás, com 1h de pausa no meio. Trabalhadas ~4h, parada ~8h. Trocar
+		// s.criado_em por os.aberta_em em vw_os_horas (o que a migration 000002
+		// desfez) derrubaria a parada para ~5h e o teste pega.
+		exec(`UPDATE solicitacao_os SET criado_em = now() - interval '8 hours' WHERE id = $1`, osForno.SolicitacaoId)
+		exec(`UPDATE ordem_servico SET status = 'Concluída', iniciada_em = now() - interval '5 hours' WHERE id = $1`, osForno.Id)
+		exec(`INSERT INTO os_pausa (ordem_servico_id, status_anterior, motivo, pausada_em, retomada_em)
+		      VALUES ($1, 'Em Andamento', 'aguardando peça', now() - interval '4 hours', now() - interval '3 hours')`, osForno.Id)
+		exec(`INSERT INTO os_encerramento (tenant_id, ordem_servico_id, tipo, tipo_defeito, encerrado_por_id, data_fim, defeito_constatado, causa_raiz, solucao)
+		      VALUES ($1, $2, 'maquinario', 'Corretiva', $3, now(), 'Resistência queimada', 'Fim de vida útil', 'Troca da resistência')`, tenantID, osForno.Id, tecnicoA.Id)
+		exec(`INSERT INTO os_custo (tenant_id, ordem_servico_id, tipo, custo_hora_tecnico, custo_manutencao, lancado_por_id)
+		      VALUES ($1, $2, 'maquinario', 150.50, 320.25, $3)`, tenantID, osForno.Id, admin.Id)
+
+		// Serra: pausada agora, com a pausa em aberto -- é o pausaAtual que o
+		// Gestor vê em destaque na aba "OS em Andamento".
+		exec(`UPDATE ordem_servico SET status = 'Pausada', iniciada_em = now() - interval '2 hours' WHERE id = $1`, osSerra.Id)
+		exec(`INSERT INTO os_pausa (ordem_servico_id, status_anterior, motivo, pausada_em)
+		      VALUES ($1, 'Em Andamento', 'peça em falta no estoque', now() - interval '30 minutes')`, osSerra.Id)
+
+		// Balança: encerrada e SEM custo -- Concluída não é o mesmo que
+		// finalizada. É exatamente a fila de "Custos Pendentes".
+		exec(`UPDATE ordem_servico SET status = 'Concluída', iniciada_em = now() - interval '3 hours' WHERE id = $1`, osBalanca.Id)
+		exec(`INSERT INTO os_encerramento (tenant_id, ordem_servico_id, tipo, tipo_defeito, encerrado_por_id, data_fim, defeito_constatado, causa_raiz, solucao)
+		      VALUES ($1, $2, 'maquinario', 'Predial', $3, now(), 'Descalibrada', 'Uso', 'Recalibração')`, tenantID, osBalanca.Id, tecnicoB.Id)
+
+		// Reparo: encerrada e com custo, mas sem custo_hora_tecnico -- como os
+		// reparos gravados antes da 000017. E sem
+		// impacto marcado, então afeta_producao é falsa: é a OS que prova
+		// horasParada nula ("Não se aplica").
+		exec(`UPDATE ordem_servico SET status = 'Concluída', iniciada_em = now() - interval '1 hour' WHERE id = $1`, osReparo.Id)
+		exec(`INSERT INTO os_encerramento (tenant_id, ordem_servico_id, tipo, tipo_defeito, encerrado_por_id, data_fim, defeito_constatado, causa_raiz, solucao)
+		      VALUES ($1, $2, 'reparo', 'Predial', $3, now(), 'Lâmpada queimada', 'Fim de vida útil', 'Substituição')`, tenantID, osReparo.Id, tecnicoA.Id)
+		exec(`INSERT INTO os_custo (tenant_id, ordem_servico_id, tipo, custo_manutencao, lancado_por_id)
+		      VALUES ($1, $2, 'reparo', 18.90, $3)`, tenantID, osReparo.Id, admin.Id)
+	})
+
+	porID := func(t *testing.T, id int64) repository.ListarOrdensServicoRow {
+		t.Helper()
+		for _, l := range listar(t, repository.ListarOrdensServicoParams{}) {
+			if l.ID == id {
+				return l
+			}
+		}
+		t.Fatalf("OS %d não veio na listagem", id)
+		return repository.ListarOrdensServicoRow{}
+	}
+
+	// "Finalizada" é derivado, não status: o Técnico encerrou E o custo foi
+	// lançado. É a regra que separa a aba "OS Finalizadas" do Gestor da fila
+	// "Custos Pendentes" do Administrador, e as duas telas leem a mesma rota.
+	t.Run("finalizada é encerramento MAIS custo", func(t *testing.T) {
+		casos := []struct {
+			nome     string
+			id       int64
+			esperado bool
+		}{
+			{"encerrada com custo", osForno.Id, true},
+			{"encerrada com custo, sem hora técnica", osReparo.Id, true},
+			{"encerrada sem custo ainda", osBalanca.Id, false},
+			{"nem encerrada", osSerra.Id, false},
+		}
+		for _, caso := range casos {
+			t.Run(caso.nome, func(t *testing.T) {
+				if got := porID(t, caso.id).Finalizada; got != caso.esperado {
+					t.Errorf("finalizada = %v, esperado %v", got, caso.esperado)
+				}
+			})
+		}
+	})
+
+	t.Run("filtro finalizada", func(t *testing.T) {
+		sim, nao := true, false
+		got := ids(listar(t, repository.ListarOrdensServicoParams{Finalizada: &sim}))
+		if !slices.Equal(got, ordenados(osForno.Id, osReparo.Id)) {
+			t.Errorf("?finalizada=true = %v, esperado Forno+Reparo", got)
+		}
+		got = ids(listar(t, repository.ListarOrdensServicoParams{Finalizada: &nao}))
+		if !slices.Equal(got, ordenados(osSerra.Id, osBalanca.Id)) {
+			t.Errorf("?finalizada=false = %v, esperado Serra+Balança", got)
+		}
+		// A projeção e o filtro repetem a mesma expressão -- se divergirem, a
+		// listagem se contradiz. Aqui é onde isso apareceria.
+		for _, l := range listar(t, repository.ListarOrdensServicoParams{Finalizada: &sim}) {
+			if !l.Finalizada {
+				t.Errorf("OS %d veio no filtro finalizada=true com o campo false", l.ID)
+			}
+		}
+	})
+
+	// A fila de Custos Pendentes do Administrador é ?status=Concluída, não
+	// ?finalizada=false: ela lista TODA OS concluída, com ou sem custo, porque
+	// virou fila de conferência contra a nota fiscal.
+	t.Run("status Concluída pega finalizada e pendente de custo", func(t *testing.T) {
+		got := ids(listar(t, repository.ListarOrdensServicoParams{Status: []string{string(repository.StatusOsConcluda)}}))
+		if !slices.Equal(got, ordenados(osForno.Id, osBalanca.Id, osReparo.Id)) {
+			t.Errorf("?status=Concluída = %v", got)
+		}
+	})
+
+	t.Run("encerramento e custo denormalizados", func(t *testing.T) {
+		l := porID(t, osForno.Id)
+
+		if l.TipoDefeito == nil || *l.TipoDefeito != repository.TipoDefeitoCorretiva {
+			t.Errorf("tipoDefeito = %v, esperado Corretiva", l.TipoDefeito)
+		}
+		if l.DefeitoConstatado == nil || *l.DefeitoConstatado != "Resistência queimada" {
+			t.Errorf("defeitoConstatado = %v", l.DefeitoConstatado)
+		}
+		if l.CausaRaiz == nil || l.Solucao == nil {
+			t.Errorf("causaRaiz/solucao vazios: %v / %v", l.CausaRaiz, l.Solucao)
+		}
+		if l.EncerradoPorNome == nil || *l.EncerradoPorNome != "Eder" {
+			t.Errorf("encerradoPorNome = %v, esperado Eder", l.EncerradoPorNome)
+		}
+		if !l.DataFim.Valid {
+			t.Error("dataFim devia estar preenchida")
+		}
+		if !l.CustoHoraTecnico.Valid || l.CustoHoraTecnico.Float64 != 150.50 {
+			t.Errorf("custoHoraTecnico = %+v, esperado 150.50", l.CustoHoraTecnico)
+		}
+		if !l.CustoManutencao.Valid || l.CustoManutencao.Float64 != 320.25 {
+			t.Errorf("custoManutencao = %+v, esperado 320.25", l.CustoManutencao)
+		}
+		if l.LancadoPorNome == nil || *l.LancadoPorNome != "Ana" {
+			t.Errorf("lancadoPorNome = %v, esperado Ana", l.LancadoPorNome)
+		}
+		if !l.LancadoEm.Valid {
+			t.Error("lancadoEm devia estar preenchida")
+		}
+	})
+
+	// As quatro grandezas numéricas são pgtype.Float8 justamente por isto: as
+	// quatro são NULL em algum estado legítimo, e um float64 cru quebraria o
+	// Scan no primeiro. Ver a nota no sqlc.yaml.
+	t.Run("nulo é estado legítimo em horas e custo", func(t *testing.T) {
+		aberta := porID(t, osSerra.Id) // nem encerrada: sem horas, sem custo
+		if aberta.HorasTrabalhadas.Valid || aberta.HorasParada.Valid {
+			t.Errorf("OS não encerrada não tem horas: %+v / %+v", aberta.HorasTrabalhadas, aberta.HorasParada)
+		}
+		if aberta.CustoManutencao.Valid || aberta.CustoHoraTecnico.Valid {
+			t.Errorf("OS sem custo lançado: %+v / %+v", aberta.CustoManutencao, aberta.CustoHoraTecnico)
+		}
+		if aberta.TipoDefeito != nil || aberta.DataFim.Valid || aberta.EncerradoPorNome != nil {
+			t.Error("OS não encerrada não tem encerramento")
+		}
+
+		semCusto := porID(t, osBalanca.Id) // encerrada: tem horas, não tem custo
+		if !semCusto.HorasTrabalhadas.Valid {
+			t.Error("OS encerrada tem horas trabalhadas")
+		}
+		if semCusto.CustoManutencao.Valid || semCusto.LancadoPorNome != nil {
+			t.Error("custo ainda não lançado devia vir nulo")
+		}
+
+		// Reparo lançado sem mão de obra (como os anteriores à 000017): a
+		// hora técnica vem nula e a manutenção não -- os dois são independentes.
+		reparo := porID(t, osReparo.Id)
+		if reparo.CustoHoraTecnico.Valid {
+			t.Errorf("reparo não tem hora técnica: %+v", reparo.CustoHoraTecnico)
+		}
+		if !reparo.CustoManutencao.Valid || reparo.CustoManutencao.Float64 != 18.90 {
+			t.Errorf("custoManutencao do reparo = %+v, esperado 18.90", reparo.CustoManutencao)
+		}
+	})
+
+	// REGRA DE NEGÓCIO (docs/modelagem seção 4 + migration 000002): parada
+	// corre desde a SOLICITAÇÃO, sem descontar pausa; trabalhadas correm desde
+	// iniciada_em, descontando pausa. Só conta parada quem parou.
+	t.Run("os dois relógios", func(t *testing.T) {
+		forno := porID(t, osForno.Id)
+		// Iniciada 5h atrás, 1h de pausa no meio -> ~4h trabalhadas.
+		if !forno.HorasTrabalhadas.Valid {
+			t.Fatal("horasTrabalhadas nula numa OS encerrada")
+		}
+		if h := forno.HorasTrabalhadas.Float64; h < 3.9 || h > 4.1 {
+			t.Errorf("horasTrabalhadas = %v, esperado ~4 (5h de OS menos 1h de pausa)", h)
+		}
+		// Solicitada 8h atrás. Parada corre desde AÍ (não desde a abertura da
+		// OS, 5h atrás) e não desconta a pausa: ~8h, não ~5h nem ~4h. Este é
+		// o número que a migration 000002 mudou.
+		if !forno.HorasParada.Valid {
+			t.Fatal("horasParada nula numa OS que afeta produção")
+		}
+		if h := forno.HorasParada.Float64; h < 7.9 || h > 8.1 {
+			t.Errorf("horasParada = %v, esperado ~8 (desde a solicitação, sem descontar pausa)", h)
+		}
+
+		// O reparo não teve "Afeta Produção" marcado: a máquina seguiu
+		// operando e não há parada para medir. O front exibe "Não se aplica"
+		// -- que é diferente de zero, e é por isso que a coluna é nullable.
+		reparo := porID(t, osReparo.Id)
+		if reparo.AfetaProducao {
+			t.Fatal("o reparo não deveria afetar produção")
+		}
+		if reparo.HorasParada.Valid {
+			t.Errorf("horasParada = %+v, esperado nulo (não afeta produção)", reparo.HorasParada)
+		}
+		if !reparo.HorasTrabalhadas.Valid {
+			t.Error("horasTrabalhadas existe mesmo sem afetar produção")
+		}
+	})
+
+	t.Run("pausas vêm em lote, sem N+1", func(t *testing.T) {
+		linhas := listar(t, repository.ListarOrdensServicoParams{})
+		todosIds := make([]int64, 0, len(linhas))
+		for _, l := range linhas {
+			todosIds = append(todosIds, l.ID)
+		}
+
+		pausas, err := repo.ObterPausasDasOrdensServico(ctx, todosIds)
+		if err != nil {
+			t.Fatalf("erro ao buscar pausas: %v", err)
+		}
+		if len(pausas) != 2 {
+			t.Fatalf("esperava 2 pausas (Forno fechada, Serra aberta), veio %d", len(pausas))
+		}
+
+		porOS := map[int64][]repository.OsPausa{}
+		for _, p := range pausas {
+			porOS[p.OrdemServicoID] = append(porOS[p.OrdemServicoID], p)
+		}
+
+		fechada := porOS[osForno.Id]
+		if len(fechada) != 1 || !fechada[0].RetomadaEm.Valid {
+			t.Errorf("pausa do Forno devia estar fechada: %+v", fechada)
+		}
+		if fechada[0].Motivo != "aguardando peça" || fechada[0].StatusAnterior != repository.StatusOsEmAndamento {
+			t.Errorf("pausa do Forno: %+v", fechada[0])
+		}
+
+		// pausaAtual é a de retomada_em nula -- uq_pausa_aberta garante no
+		// máximo uma por OS.
+		aberta := porOS[osSerra.Id]
+		if len(aberta) != 1 || aberta[0].RetomadaEm.Valid {
+			t.Errorf("pausa da Serra devia estar aberta: %+v", aberta)
+		}
+		if aberta[0].Motivo != "peça em falta no estoque" {
+			t.Errorf("motivo da pausa atual = %q", aberta[0].Motivo)
+		}
+
+		// A listagem NÃO duplica a OS por pausa -- é o motivo de as pausas
+		// virem numa query separada em vez de um JOIN.
+		if len(ids(linhas)) != 4 {
+			t.Errorf("a listagem devia ter 4 OS, veio %d", len(linhas))
+		}
+	})
+
+	// ------------------------------------------------------------------
+	// Service. O escopo e os filtros já estão trancados nos subtestes da
+	// query acima -- aqui só o que o service acrescenta: traduzir perfil em
+	// escopo, agrupar as pausas na OS certa e nunca devolver nil.
+	// ------------------------------------------------------------------
+	svcOS := NewRepoOrdemServico(pool)
+	listarPeloService := func(t *testing.T, ator model.Usuario, perfil string, filtros FiltrosOrdemServico) []model.OrdemServico {
+		t.Helper()
+		ordens, err := svcOS.ListarOrdensServico(ctx, tenantID, ator.Id, perfil, filtros)
+		if err != nil {
+			t.Fatalf("erro ao listar pelo service: %v", err)
+		}
+		return ordens
+	}
+
+	// O escopo vem do PERFIL, não do filtro: é escopoDe que decide entre
+	// "não filtra" (administrador, que não tem linha em usuario_escopo) e o
+	// usuario.id. Passar o id do administrador como escopo devolveria zero
+	// justamente para quem enxerga tudo.
+	t.Run("service traduz perfil em escopo", func(t *testing.T) {
+		if n := len(listarPeloService(t, admin, "administrador", FiltrosOrdemServico{})); n != 4 {
+			t.Errorf("administrador viu %d OS, esperado 4", n)
+		}
+		ordens := listarPeloService(t, gestorParcial, "gestor", FiltrosOrdemServico{})
+		if len(ordens) != 1 || ordens[0].Id != osSerra.Id {
+			t.Errorf("gestor parcial viu %d OS, esperado só a Serra", len(ordens))
+		}
+	})
+
+	// O front tipa OrdemServico[] -- `null` quebraria o .map da tela, e a aba
+	// vazia é o estado normal de um gestor sem OS no escopo.
+	t.Run("lista vazia é slice, não nil", func(t *testing.T) {
+		naoExiste := int64(-1)
+		ordens := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{TecnicoId: &naoExiste})
+		if ordens == nil {
+			t.Fatal("lista vazia veio nil")
+		}
+		if len(ordens) != 0 {
+			t.Errorf("esperava lista vazia, veio %d", len(ordens))
+		}
+	})
+
+	// A montagem em lote busca as pausas de todas as OS numa query só e
+	// distribui por id -- um erro de agrupamento aqui daria a pausa de uma OS
+	// para outra, e o Gestor leria "aguardando peça" no card errado.
+	t.Run("pausas vão para a OS certa", func(t *testing.T) {
+		porId := map[int64]model.OrdemServico{}
+		for _, o := range listarPeloService(t, admin, "administrador", FiltrosOrdemServico{}) {
+			porId[o.Id] = o
+		}
+
+		forno := porId[osForno.Id]
+		if len(forno.Pausas) != 1 || forno.Pausas[0].Motivo != "aguardando peça" {
+			t.Errorf("pausas do Forno = %+v", forno.Pausas)
+		}
+		if forno.PausaAtual != nil {
+			t.Errorf("o Forno foi retomado e encerrado: pausaAtual devia ser nil, veio %+v", forno.PausaAtual)
+		}
+
+		serra := porId[osSerra.Id]
+		if serra.PausaAtual == nil || serra.PausaAtual.Motivo != "peça em falta no estoque" {
+			t.Errorf("pausaAtual da Serra = %+v", serra.PausaAtual)
+		}
+
+		for _, id := range []int64{osBalanca.Id, osReparo.Id} {
+			if len(porId[id].Pausas) != 0 {
+				t.Errorf("OS %d não tem pausa, veio %+v", id, porId[id].Pausas)
+			}
+		}
+	})
+
+	// ?setorId= é filtro do CLIENTE (OS Finalizadas / Custos Pendentes), então
+	// só estreita: nunca devolve OS de setor que o escopo de quem chama não
+	// alcança. O setor sai da solicitação de origem, não da OS.
+	t.Run("filtro por setor estreita, nunca amplia", func(t *testing.T) {
+		ordens := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{SetorId: &setorB})
+		if len(ordens) != 1 || ordens[0].Id != osSerra.Id {
+			t.Errorf("?setorId=B devia trazer só a Serra, veio %d OS", len(ordens))
+		}
+
+		// Combinado com a loja: setorC é de lojaB, então cruzar com lojaA não
+		// pode "puxar" a OS da outra loja de volta.
+		vazio := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{
+			LojaId: &lojaA, SetorId: &setorC,
+		})
+		if len(vazio) != 0 {
+			t.Errorf("setor de outra loja devia dar vazio, veio %d OS", len(vazio))
+		}
+
+		// O gestor parcial só enxerga setorB. Pedir setorA não amplia o escopo
+		// dele -- é o ponto do "filtro estreita, nunca amplia".
+		fora := listarPeloService(t, gestorParcial, "gestor", FiltrosOrdemServico{SetorId: &setorA})
+		if len(fora) != 0 {
+			t.Errorf("gestor pedindo setor fora do escopo devia dar vazio, veio %d OS", len(fora))
+		}
+	})
+
+	// Spot check de ponta a ponta: query -> model -> resposta, com os blocos
+	// opcionais nascendo só onde a linha existe.
+	t.Run("service monta a OS inteira", func(t *testing.T) {
+		sim := true
+		ordens := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{Finalizada: &sim})
+		var forno model.OrdemServico
+		for _, o := range ordens {
+			if o.Id == osForno.Id {
+				forno = o
+			}
+		}
+		if forno.Id == 0 {
+			t.Fatal("Forno não veio em ?finalizada=true")
+		}
+
+		if forno.Custo == nil || forno.Custo.CustoTotal != 470.75 {
+			t.Errorf("custo = %+v, esperado total 470.75", forno.Custo)
+		}
+		if forno.Encerramento == nil || forno.Encerramento.EncerradoPorNome != "Eder" {
+			t.Errorf("encerramento = %+v", forno.Encerramento)
+		}
+		if forno.TipoDefeito == nil || *forno.TipoDefeito != "Corretiva" {
+			t.Errorf("tipoDefeito = %v", forno.TipoDefeito)
+		}
+		if forno.HorasParada == nil || forno.HorasTrabalhadas == nil {
+			t.Errorf("horas = %v / %v", forno.HorasParada, forno.HorasTrabalhadas)
+		}
+		if forno.TecnicoNome == nil || *forno.TecnicoNome != "Eder" {
+			t.Errorf("tecnicoNome = %v", forno.TecnicoNome)
+		}
+		if forno.DataAbertura == nil || forno.DataSolicitacao == nil || forno.DataFim == nil {
+			t.Error("as três datas deviam estar preenchidas numa OS encerrada")
+		}
+	})
+
+	// area_tecnico é LEFT JOIN de propósito: fk_os_tecnico não checa perfil, e
+	// AtualizarUsuario zera area_tecnico_id ao tirar alguém do perfil técnico
+	// (é a única forma de a coluna ficar nula -- ck_usuario_area_tecnico
+	// impede zerar mantendo o perfil). Com INNER, promover a gestor um técnico
+	// com OS aberta apagaria essas OS da listagem inteira, calado -- e é
+	// justamente o Gestor quem olha a listagem.
+	//
+	// Por último de propósito: promover tecnicoB troca o perfil e o escopo
+	// dele, e os subtestes acima o usam como técnico.
+	t.Run("técnico promovido a gestor não some com a OS dele", func(t *testing.T) {
+		if _, err := svcUsuario.AtualizarUsuario(ctx, tecnicoB.Id, model.AtualizarUsuarioPayload{
+			Nome: "Ivo", Email: "ivo@os.com", Perfil: "gestor",
+			LojasIds: []int64{lojaB}, AcessoTotalSetores: true,
+		}, tenantID); err != nil {
+			t.Fatalf("erro ao promover o técnico: %v", err)
+		}
+
+		linhas := listar(t, repository.ListarOrdensServicoParams{TecnicoID: &tecnicoB.Id})
+		if len(linhas) != 1 {
+			t.Fatalf("a OS sumiu da listagem: veio %d, esperado 1", len(linhas))
+		}
+		if linhas[0].TecnicoArea != nil {
+			t.Errorf("tecnicoArea = %v, esperado nil", linhas[0].TecnicoArea)
+		}
+		if linhas[0].TecnicoNome != "Ivo" {
+			t.Errorf("tecnicoNome = %q, esperado Ivo", linhas[0].TecnicoNome)
+		}
+	})
+
+	// Paginação (?pagina=): mesmo WHERE da listagem inteira, uma fatia por vez.
+	// Tamanho 3 com as 4 OS do fixture dá duas páginas, a última incompleta.
+	t.Run("paginada fatia a listagem inteira na mesma ordem, com o total certo", func(t *testing.T) {
+		inteira := listarPeloService(t, admin, "administrador", FiltrosOrdemServico{})
+
+		var juntas []model.OrdemServico
+		for pagina := int32(1); pagina <= 3; pagina++ {
+			resp, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{}, pagina, 3)
+			if err != nil {
+				t.Fatalf("página %d: %v", pagina, err)
+			}
+			if resp.Total != int64(len(inteira)) || resp.TotalPaginas != 2 || resp.Pagina != pagina {
+				t.Errorf("página %d: total=%d totalPaginas=%d pagina=%d, esperado total=%d totalPaginas=2", pagina, resp.Total, resp.TotalPaginas, resp.Pagina, len(inteira))
+			}
+			if resp.Dados == nil {
+				t.Errorf("página %d: dados nil -- o front faz .map", pagina)
+			}
+			juntas = append(juntas, resp.Dados...)
+		}
+		// Página além da última volta vazia, e as duas primeiras juntas são a
+		// lista inteira, na mesma ordem (o desempate por id deixa estável).
+		if len(juntas) != len(inteira) {
+			t.Fatalf("páginas somaram %d OS, a listagem inteira tem %d", len(juntas), len(inteira))
+		}
+		for i := range inteira {
+			if juntas[i].Id != inteira[i].Id {
+				t.Errorf("posição %d: paginada %d, inteira %d", i, juntas[i].Id, inteira[i].Id)
+			}
+		}
+
+		// Escopo continua valendo: o gestor parcial só tem a OS da serra.
+		doGestor, err := svcOS.listarPaginada(ctx, tenantID, gestorParcial.Id, "gestor", FiltrosOrdemServico{}, 1, 3)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		if doGestor.Total != 1 || len(doGestor.Dados) != 1 || doGestor.Dados[0].Id != osSerra.Id {
+			t.Errorf("gestor parcial: total=%d com %d OS na página, esperado só a OS da serra", doGestor.Total, len(doGestor.Dados))
+		}
+	})
+
+	t.Run("revisado separa as abas sem perder nem repetir OS", func(t *testing.T) {
+		sim, nao := true, false
+		todas, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		revisadas, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{Revisado: &sim}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		pendentes, err := svcOS.listarPaginada(ctx, tenantID, admin.Id, "administrador", FiltrosOrdemServico{Revisado: &nao}, 1, 50)
+		if err != nil {
+			t.Fatalf("erro: %v", err)
+		}
+		if revisadas.Total+pendentes.Total != todas.Total {
+			t.Errorf("revisadas (%d) + pendentes (%d) != total (%d)", revisadas.Total, pendentes.Total, todas.Total)
+		}
+		for _, o := range revisadas.Dados {
+			if o.Custo == nil || o.Custo.RevisadoEm == nil {
+				t.Errorf("OS %d veio em revisadas sem revisadoEm", o.Id)
+			}
+		}
+		for _, o := range pendentes.Dados {
+			if o.Custo != nil && o.Custo.RevisadoEm != nil {
+				t.Errorf("OS %d veio em pendentes já revisada", o.Id)
+			}
+		}
+	})
+}
+
+// TestIniciar cobre POST /ordens-servico/:id/iniciar: dono muda Aberta ->
+// Em Andamento, quem não é dono nem enxerga a OS (ErrNaoEncontrado, nunca
+// 403 -- ver a nota em ObterOrdemServicoPorID), e chamar de novo depois de
+// já iniciada é conflito (ErrConflitoIntegridade), não um 500 silencioso.
+func TestIniciar(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, lojaID, setorID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-iniciar', 'Empresa OS Iniciar') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+
+	maquina, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+		SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: "PAT-INI", Nome: "Forno",
+		Preventivas: []model.PreventivaPayload{{
+			TecnicoId: tecnicoPrev,
+			Descricao: "Revisão", IntervaloDias: 30,
+			ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("erro ao criar máquina: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-iniciar.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-iniciar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	tecnicoOutro := cadastrar("Ivo", "ivo@os-iniciar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-iniciar.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+		MaquinaId: maquina.Id, Descricao: "Forno não aquece", Impactos: []string{"Afeta Produção"},
+		FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+	})
+	if err != nil {
+		t.Fatalf("erro ao criar solicitação: %v", err)
+	}
+	os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+		Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+	})
+	if err != nil {
+		t.Fatalf("erro ao abrir OS: %v", err)
+	}
+
+	t.Run("técnico que não é dono não encontra a OS", func(t *testing.T) {
+		_, err := svcOS.Iniciar(ctx, tenantID, tecnicoOutro.Id, os.Id)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("dono inicia com sucesso", func(t *testing.T) {
+		iniciada, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id)
+		if err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		if iniciada.StatusExecucao != "Em Andamento" {
+			t.Errorf("statusExecucao = %q, esperado Em Andamento", iniciada.StatusExecucao)
+		}
+		if iniciada.DataInicio == nil {
+			t.Error("dataInicio veio nula, esperada preenchida")
+		}
+		// Denormalizados que o dono de OrdemServico completa exige (mesmo
+		// contrato de ListarOrdensServico) -- prova que montarOrdemServicoUnica
+		// não devolveu uma resposta incompleta como a de AbrirOS.
+		if iniciada.MaquinaNome == nil || *iniciada.MaquinaNome != "Forno" {
+			t.Errorf("maquinaNome = %v, esperado Forno", iniciada.MaquinaNome)
+		}
+	})
+
+	t.Run("iniciar de novo é conflito, não 500", func(t *testing.T) {
+		_, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id)
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, 999999999)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+}
+
+// TestPausar cobre POST /ordens-servico/:id/pausar: as duas origens válidas
+// (Aberta e Em Andamento, docs/modelagem -- StatusRetomavel), motivo
+// obrigatório, dono, e que status_anterior gravado em os_pausa é o que a OS
+// tinha ANTES de pausar, não um valor fixo.
+func TestPausar(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, lojaID, setorID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-pausar', 'Empresa OS Pausar') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-pausar.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-pausar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	tecnicoOutro := cadastrar("Ivo", "ivo@os-pausar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-pausar.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	// Uma máquina + solicitação + AbrirOS por caso, mesmo caminho de verdade
+	// de TestIniciar -- cada uma nasce Aberta, e o subteste decide se
+	// iniciar antes de pausar.
+	abrirOS := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: patrimonio, Nome: patrimonio,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		return os
+	}
+
+	t.Run("motivo vazio é erro de validação", func(t *testing.T) {
+		os := abrirOS("PAT-PAUSA-1", "Motivo vazio")
+		_, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "   ")
+		if !errors.Is(err, helper.ErrValidacao) {
+			t.Fatalf("erro = %v, esperado ErrValidacao", err)
+		}
+	})
+
+	t.Run("técnico que não é dono não encontra a OS", func(t *testing.T) {
+		os := abrirOS("PAT-PAUSA-2", "Não é dono")
+		_, err := svcOS.Pausar(ctx, tenantID, tecnicoOutro.Id, os.Id, "Aguardando peça")
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("pausa a partir de Aberta", func(t *testing.T) {
+		os := abrirOS("PAT-PAUSA-3", "Pausa direto")
+		pausada, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "Aguardando peça")
+		if err != nil {
+			t.Fatalf("erro ao pausar: %v", err)
+		}
+		if pausada.StatusExecucao != "Pausada" {
+			t.Errorf("statusExecucao = %q, esperado Pausada", pausada.StatusExecucao)
+		}
+		if pausada.PausaAtual == nil {
+			t.Fatal("pausaAtual veio nula")
+		}
+		if pausada.PausaAtual.StatusAnterior != "Aberta" {
+			t.Errorf("statusAnterior = %q, esperado Aberta", pausada.PausaAtual.StatusAnterior)
+		}
+		if pausada.PausaAtual.Motivo != "Aguardando peça" {
+			t.Errorf("motivo = %q, esperado %q", pausada.PausaAtual.Motivo, "Aguardando peça")
+		}
+
+		t.Run("pausar de novo é conflito, não 500", func(t *testing.T) {
+			_, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "De novo")
+			if !errors.Is(err, helper.ErrConflitoIntegridade) {
+				t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+			}
+		})
+	})
+
+	t.Run("pausa a partir de Em Andamento", func(t *testing.T) {
+		os := abrirOS("PAT-PAUSA-4", "Pausa depois de iniciar")
+		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		pausada, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "Almoço")
+		if err != nil {
+			t.Fatalf("erro ao pausar: %v", err)
+		}
+		if pausada.PausaAtual == nil || pausada.PausaAtual.StatusAnterior != "Em Andamento" {
+			t.Errorf("statusAnterior = %v, esperado Em Andamento", pausada.PausaAtual)
+		}
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, 999999999, "Motivo")
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+}
+
+// TestRetomar cobre POST /ordens-servico/:id/retomar: volta pro status que a
+// OS tinha ANTES de pausar (Aberta ou Em Andamento, nunca fixo), fecha a
+// pausa (retomada_em preenchido) e preserva o histórico em `pausas`.
+func TestRetomar(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, lojaID, setorID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-retomar', 'Empresa OS Retomar') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-retomar.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-retomar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	tecnicoOutro := cadastrar("Ivo", "ivo@os-retomar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-retomar.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	abrirOS := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: patrimonio, Nome: patrimonio,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		return os
+	}
+
+	t.Run("retomar sem estar pausada é conflito", func(t *testing.T) {
+		os := abrirOS("PAT-RETOMA-1", "Ainda aberta")
+		_, err := svcOS.Retomar(ctx, tenantID, tecnicoDono.Id, os.Id)
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	t.Run("técnico que não é dono não encontra a OS", func(t *testing.T) {
+		os := abrirOS("PAT-RETOMA-2", "Não é dono")
+		if _, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "Aguardando peça"); err != nil {
+			t.Fatalf("erro ao pausar: %v", err)
+		}
+		_, err := svcOS.Retomar(ctx, tenantID, tecnicoOutro.Id, os.Id)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("retoma de volta pra Aberta", func(t *testing.T) {
+		os := abrirOS("PAT-RETOMA-3", "Pausada direto")
+		if _, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "Aguardando peça"); err != nil {
+			t.Fatalf("erro ao pausar: %v", err)
+		}
+		retomada, err := svcOS.Retomar(ctx, tenantID, tecnicoDono.Id, os.Id)
+		if err != nil {
+			t.Fatalf("erro ao retomar: %v", err)
+		}
+		if retomada.StatusExecucao != "Aberta" {
+			t.Errorf("statusExecucao = %q, esperado Aberta", retomada.StatusExecucao)
+		}
+		if retomada.PausaAtual != nil {
+			t.Errorf("pausaAtual = %v, esperado nil (pausa fechada)", retomada.PausaAtual)
+		}
+		if len(retomada.Pausas) != 1 || retomada.Pausas[0].RetomadaEm == nil {
+			t.Errorf("pausas = %+v, esperada 1 pausa com retomadaEm preenchido", retomada.Pausas)
+		}
+
+		t.Run("retomar de novo é conflito, não 500", func(t *testing.T) {
+			_, err := svcOS.Retomar(ctx, tenantID, tecnicoDono.Id, os.Id)
+			if !errors.Is(err, helper.ErrConflitoIntegridade) {
+				t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+			}
+		})
+	})
+
+	t.Run("retoma de volta pra Em Andamento", func(t *testing.T) {
+		os := abrirOS("PAT-RETOMA-4", "Pausada depois de iniciar")
+		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		if _, err := svcOS.Pausar(ctx, tenantID, tecnicoDono.Id, os.Id, "Almoço"); err != nil {
+			t.Fatalf("erro ao pausar: %v", err)
+		}
+		retomada, err := svcOS.Retomar(ctx, tenantID, tecnicoDono.Id, os.Id)
+		if err != nil {
+			t.Fatalf("erro ao retomar: %v", err)
+		}
+		if retomada.StatusExecucao != "Em Andamento" {
+			t.Errorf("statusExecucao = %q, esperado Em Andamento", retomada.StatusExecucao)
+		}
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.Retomar(ctx, tenantID, tecnicoDono.Id, 999999999)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+}
+
+// TestAcionarTerceiro cobre POST /ordens-servico/:id/acionar-terceiro:
+// promove tipo pra 'terceiros' SEM mexer em statusExecucao (docs/modelagem,
+// 1.4.2), dono, idempotência (não deixa acionar duas vezes), OS concluída
+// não pode mais ser encaminhada, e empresa terceirizada de outro tenant é
+// rejeitada pela FK composta -- não por uma checagem manual desta query.
+func TestAcionarTerceiro(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, outroTenantID, lojaID, setorID, empresaTercID, empresaTercOutroTenantID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-terceiro', 'Empresa OS Terceiro') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-terceiro-b', 'Empresa OS Terceiro B') RETURNING id`).Scan(&outroTenantID); err != nil {
+		t.Fatalf("erro ao criar empresa (outro tenant): %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa_terceirizada (tenant_id, nome) VALUES ($1, 'Refrigeração ABC') RETURNING id`, tenantID).Scan(&empresaTercID); err != nil {
+		t.Fatalf("erro ao criar empresa terceirizada: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa_terceirizada (tenant_id, nome) VALUES ($1, 'De Outro Tenant') RETURNING id`, outroTenantID).Scan(&empresaTercOutroTenantID); err != nil {
+		t.Fatalf("erro ao criar empresa terceirizada de outro tenant: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-terceiro.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-terceiro.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	tecnicoOutro := cadastrar("Ivo", "ivo@os-terceiro.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-terceiro.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	abrirOS := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: patrimonio, Nome: patrimonio,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		return os
+	}
+
+	t.Run("técnico que não é dono não encontra a OS", func(t *testing.T) {
+		os := abrirOS("PAT-TERC-1", "Não é dono")
+		_, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoOutro.Id, os.Id, empresaTercID)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("aciona com sucesso sem mexer no status de execução", func(t *testing.T) {
+		os := abrirOS("PAT-TERC-2", "Aciona terceiro")
+		acionada, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, os.Id, empresaTercID)
+		if err != nil {
+			t.Fatalf("erro ao acionar terceiro: %v", err)
+		}
+		if acionada.Tipo != "terceiros" {
+			t.Errorf("tipo = %q, esperado terceiros", acionada.Tipo)
+		}
+		if acionada.StatusExecucao != "Aberta" {
+			t.Errorf("statusExecucao = %q, esperado Aberta (acionar não muda status)", acionada.StatusExecucao)
+		}
+		if acionada.EmpresaTerceirizadaNome == nil || *acionada.EmpresaTerceirizadaNome != "Refrigeração ABC" {
+			t.Errorf("empresaTerceirizadaNome = %v, esperado Refrigeração ABC", acionada.EmpresaTerceirizadaNome)
+		}
+
+		t.Run("acionar de novo é conflito, não 500", func(t *testing.T) {
+			_, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, os.Id, empresaTercID)
+			if !errors.Is(err, helper.ErrConflitoIntegridade) {
+				t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+			}
+		})
+	})
+
+	t.Run("OS concluída não pode mais ser encaminhada", func(t *testing.T) {
+		os := abrirOS("PAT-TERC-3", "Já concluída")
+		// Encerrar (fase 2) ainda não existe -- força o status direto pra
+		// testar só a trava desta transição, não o ciclo inteiro.
+		if _, err := pool.Exec(ctx, `UPDATE ordem_servico SET status = 'Concluída' WHERE id = $1`, os.Id); err != nil {
+			t.Fatalf("erro ao forçar status Concluída: %v", err)
+		}
+		_, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, os.Id, empresaTercID)
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	t.Run("empresa terceirizada de outro tenant é rejeitada pela FK", func(t *testing.T) {
+		os := abrirOS("PAT-TERC-4", "Empresa de outro tenant")
+		_, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, os.Id, empresaTercOutroTenantID)
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, 999999999, empresaTercID)
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+}
+
+// TestEncerrar cobre POST /ordens-servico/:id/encerrar: Em Andamento ->
+// Concluída, gravando os_encerramento E os_custo na mesma escrita
+// (docs/modelagem, 2.3 revisão 4), custoHoraTecnico em todo tipo de OS
+// (000017) e `finalizada` virando true na
+// hora, já que custo nasce junto do encerramento.
+func TestEncerrar(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, lojaID, setorID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-encerrar', 'Empresa OS Encerrar') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-encerrar.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-encerrar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	tecnicoOutro := cadastrar("Ivo", "ivo@os-encerrar.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-encerrar.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	// OS de maquinário, já Em Andamento -- ponto de partida da maioria dos
+	// subtestes.
+	osEmAndamento := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: patrimonio, Nome: patrimonio,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		return os
+	}
+
+	payloadPadrao := func() model.EncerramentoOrdemServicoPayload {
+		return model.EncerramentoOrdemServicoPayload{
+			TipoDefeito:       "Corretiva",
+			DefeitoConstatado: "Resistência queimada",
+			CausaRaiz:         "Desgaste natural",
+			Solucao:           "Troca da resistência",
+			Itens:             itensMaquinario(45, 120.5),
+		}
+	}
+
+	t.Run("técnico que não é dono não encontra a OS", func(t *testing.T) {
+		os := osEmAndamento("PAT-ENC-1", "Não é dono")
+		_, err := svcOS.Encerrar(ctx, tenantID, tecnicoOutro.Id, os.Id, payloadPadrao())
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	t.Run("OS ainda Aberta não pode ser encerrada", func(t *testing.T) {
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: "PAT-ENC-2", Nome: "PAT-ENC-2",
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: "Ainda aberta", Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		_, err = svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	// A regra "maquinário exige hora técnica" saiu na 000012: ela vinha de o
+	// campo ser um escalar obrigatório e, com uma linha por TAREFA, obrigava o
+	// Técnico a inventar uma tarefa só para carregar a mão de obra. Sem nenhuma
+	// hora lançada o agregado é ZERO, não nulo -- em maquinário a coluna existe
+	// sempre.
+	t.Run("maquinário sem hora técnica soma zero, não é erro", func(t *testing.T) {
+		os := osEmAndamento("PAT-ENC-3", "Só peça, sem mão de obra")
+		payload := payloadPadrao()
+		payload.Itens = itensSemHoraTecnica(120.5)
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payload)
+		if err != nil {
+			t.Fatalf("tarefa sem hora técnica devia ser aceita em maquinário: %v", err)
+		}
+		if encerrada.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if encerrada.Custo.CustoHoraTecnico == nil || *encerrada.Custo.CustoHoraTecnico != 0 {
+			t.Errorf("custoHoraTecnico = %v, esperado 0 (a coluna existe em maquinário)", encerrada.Custo.CustoHoraTecnico)
+		}
+		if encerrada.Custo.CustoTotal != 120.5 {
+			t.Errorf("custoTotal = %v, esperado 120.5", encerrada.Custo.CustoTotal)
+		}
+	})
+
+	// Migration 000017: reparo passou a cobrar mão de obra como qualquer OS.
+	t.Run("reparo com mão de obra é aceito e soma no total", func(t *testing.T) {
+		sol, err := svcSolicitacao.CadastrarSolicitacaoReparo(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoReparoPayload{
+			Item: "Lâmpada queimada", Descricao: "Corredor",
+			FotoChave: "tenant/1/reparo.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar reparo: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Baixa", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS do reparo: %v", err)
+		}
+		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
+		if err != nil {
+			t.Fatalf("reparo com mão de obra devia ser aceito: %v", err)
+		}
+		if encerrada.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if encerrada.Custo.CustoHoraTecnico == nil || *encerrada.Custo.CustoHoraTecnico != 45 {
+			t.Errorf("custoHoraTecnico = %v, esperado 45", encerrada.Custo.CustoHoraTecnico)
+		}
+		if encerrada.Custo.CustoTotal != 165.5 {
+			t.Errorf("custoTotal = %v, esperado 165.5", encerrada.Custo.CustoTotal)
+		}
+	})
+
+	t.Run("encerra com sucesso e finalizada vira true na hora", func(t *testing.T) {
+		os := osEmAndamento("PAT-ENC-4", "Encerra com sucesso")
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
+		if err != nil {
+			t.Fatalf("erro ao encerrar: %v", err)
+		}
+		if encerrada.StatusExecucao != "Concluída" {
+			t.Errorf("statusExecucao = %q, esperado Concluída", encerrada.StatusExecucao)
+		}
+		if !encerrada.Finalizada {
+			t.Error("finalizada = false, esperado true (custo nasce junto do encerramento)")
+		}
+		if encerrada.TipoDefeito == nil || *encerrada.TipoDefeito != "Corretiva" {
+			t.Errorf("tipoDefeito = %v, esperado Corretiva", encerrada.TipoDefeito)
+		}
+		if encerrada.Encerramento == nil {
+			t.Fatal("encerramento veio nulo")
+		}
+		if encerrada.Encerramento.Solucao != "Troca da resistência" {
+			t.Errorf("solucao = %q, esperado %q", encerrada.Encerramento.Solucao, "Troca da resistência")
+		}
+		if encerrada.Encerramento.EncerradoPorNome != "Eder" {
+			t.Errorf("encerradoPorNome = %q, esperado Eder", encerrada.Encerramento.EncerradoPorNome)
+		}
+		if encerrada.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if encerrada.Custo.CustoHoraTecnico == nil || *encerrada.Custo.CustoHoraTecnico != 45.0 {
+			t.Errorf("custoHoraTecnico = %v, esperado 45", encerrada.Custo.CustoHoraTecnico)
+		}
+		if encerrada.Custo.CustoManutencao != 120.5 {
+			t.Errorf("custoManutencao = %v, esperado 120.5", encerrada.Custo.CustoManutencao)
+		}
+		if encerrada.Custo.CustoTotal != 165.5 {
+			t.Errorf("custoTotal = %v, esperado 165.5", encerrada.Custo.CustoTotal)
+		}
+		if encerrada.Custo.LancadoPorNome != "Eder" {
+			t.Errorf("lancadoPorNome = %q, esperado Eder (o próprio Técnico)", encerrada.Custo.LancadoPorNome)
+		}
+
+		t.Run("encerrar de novo é conflito, não 500", func(t *testing.T) {
+			_, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payloadPadrao())
+			if !errors.Is(err, helper.ErrConflitoIntegridade) {
+				t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+			}
+		})
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, 999999999, payloadPadrao())
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	// A declaração de nota fiscal é do Técnico, no encerramento (migration
+	// 000011): é ela que decide se a tela do Administrador vai pedir número e
+	// série depois. O padrão é "não teve" -- serviço só de mão de obra.
+	t.Run("declaração de nota fiscal viaja do encerramento", func(t *testing.T) {
+		semNota := osEmAndamento("PAT-ENC-NF1", "Só mão de obra")
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, semNota.Id, payloadPadrao())
+		if err != nil {
+			t.Fatalf("erro ao encerrar: %v", err)
+		}
+		if encerrada.Custo == nil || encerrada.Custo.TemNotaFiscal {
+			t.Errorf("payload sem declaração devia gravar temNotaFiscal false, veio %+v", encerrada.Custo)
+		}
+
+		comNota := osEmAndamento("PAT-ENC-NF2", "Trocou peça comprada")
+		payloadComNota := payloadPadrao()
+		payloadComNota.TemNotaFiscal = true
+		encerradaComNota, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, comNota.Id, payloadComNota)
+		if err != nil {
+			t.Fatalf("erro ao encerrar: %v", err)
+		}
+		if encerradaComNota.Custo == nil || !encerradaComNota.Custo.TemNotaFiscal {
+			t.Errorf("temNotaFiscal devia ser true, veio %+v", encerradaComNota.Custo)
+		}
+		// O Técnico declara, mas quem preenche é o Administrador depois: a
+		// lista nasce vazia mesmo com a declaração marcada. É esse par
+		// (declarou=true, lista vazia) que forma a fila de conferência.
+		if len(encerradaComNota.Custo.NotasFiscais) != 0 {
+			t.Errorf("nota não é do encerramento, veio %+v", encerradaComNota.Custo.NotasFiscais)
+		}
+	})
+
+	// 0 é valor de negócio legítimo já no encerramento: serviço sem peça,
+	// conserto em garantia. `gte=0`, nunca `required` -- ver o payload.
+	t.Run("encerra com custo zero", func(t *testing.T) {
+		os := osEmAndamento("PAT-ENC-ZERO", "Sem custo nenhum")
+		payload := payloadPadrao()
+		payload.Itens = itensMaquinario(0, 0)
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payload)
+		if err != nil {
+			t.Fatalf("custo zero devia ser aceito no encerramento: %v", err)
+		}
+		if encerrada.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if encerrada.Custo.CustoHoraTecnico == nil || *encerrada.Custo.CustoHoraTecnico != 0 {
+			t.Errorf("custoHoraTecnico = %v, esperado 0", encerrada.Custo.CustoHoraTecnico)
+		}
+		if encerrada.Custo.CustoManutencao != 0 || encerrada.Custo.CustoTotal != 0 {
+			t.Errorf("custoManutencao/custoTotal = %v/%v, esperado 0/0",
+				encerrada.Custo.CustoManutencao, encerrada.Custo.CustoTotal)
+		}
+		// A OS com custo zero continua finalizada: o custo FOI lançado, só vale
+		// zero -- é `os_custo` existir que conta, não o valor ser positivo.
+		if !encerrada.Finalizada {
+			t.Error("finalizada = false; custo zero é custo lançado")
+		}
+	})
+}
+
+// TestCorrigirCusto cobre POST /ordens-servico/:id/custo: o Administrador
+// corrigindo o que o Técnico já lançou em Encerrar -- sem dono pra checar
+// (RBAC da rota é quem restringe o perfil), exigindo a OS já Concluída, e
+// repetindo ck_custo_por_tipo (custoHoraTecnico só em maquinário, nota fiscal
+// só em terceiros) pelo mesmo motivo de TestEncerrar: a mensagem tem que
+// dizer qual campo está errado, não estourar o CHECK do banco calado.
+func TestCorrigirCusto(t *testing.T) {
+
+	ctx := context.Background()
+	pool := bancoDeTeste(t)
+	svcUsuario := NewRepoUsuario(pool)
+	svcMaquina := NewRepoMaquinario(pool)
+	svcSolicitacao := NewRepoSolicitacao(pool)
+	svcOS := NewRepoOrdemServico(pool)
+
+	var tenantID, lojaID, setorID, empresaTercID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa (subdominio, nome) VALUES ('os-custo', 'Empresa OS Custo') RETURNING id`).Scan(&tenantID); err != nil {
+		t.Fatalf("erro ao criar empresa: %v", err)
+	}
+
+	tecnicoPrev := tecnicoParaPreventiva(t, ctx, pool, tenantID)
+	if err := pool.QueryRow(ctx, `INSERT INTO loja (tenant_id, nome) VALUES ($1, 'Loja') RETURNING id`, tenantID).Scan(&lojaID); err != nil {
+		t.Fatalf("erro ao criar loja: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO setor (tenant_id, loja_id, nome) VALUES ($1, $2, 'Setor') RETURNING id`, tenantID, lojaID).Scan(&setorID); err != nil {
+		t.Fatalf("erro ao criar setor: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO empresa_terceirizada (tenant_id, nome) VALUES ($1, 'Refrigeração ABC') RETURNING id`, tenantID).Scan(&empresaTercID); err != nil {
+		t.Fatalf("erro ao criar empresa terceirizada: %v", err)
+	}
+
+	area, senha := "Elétrica", "senha-forte-123"
+	cadastrar := func(nome, email, perfil string, p model.NovoUsuarioPayload) model.Usuario {
+		t.Helper()
+		p.Nome, p.Email, p.Perfil, p.Senha = nome, email, perfil, senha
+		u, err := svcUsuario.CadastrarUsuario(ctx, p, tenantID)
+		if err != nil {
+			t.Fatalf("erro ao cadastrar %s: %v", perfil, err)
+		}
+		return u
+	}
+	admin := cadastrar("Ana", "ana@os-custo.com", "administrador", model.NovoUsuarioPayload{})
+	adminCorretor := cadastrar("Carla", "carla@os-custo.com", "administrador", model.NovoUsuarioPayload{})
+	tecnicoDono := cadastrar("Eder", "eder@os-custo.com", "tecnico", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, Area: &area,
+	})
+	solicitante := cadastrar("Bruno", "bruno@os-custo.com", "solicitante", model.NovoUsuarioPayload{
+		LojasIds: []int64{lojaID}, SetoresIds: []int64{setorID},
+	})
+
+	abrirOSMaquinario := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		m, err := svcMaquina.CadastrarMaquina(ctx, tenantID, model.MaquinarioInsert{
+			SetorID: setorID, Criticidade: "Alta", NumeroPatrimonio: patrimonio, Nome: patrimonio,
+			Preventivas: []model.PreventivaPayload{{
+				TecnicoId: tecnicoPrev,
+				Descricao: "Revisão", IntervaloDias: 30,
+				ProximaData: config.NewDataBrPtr(time.Now().AddDate(0, 0, 7)), Ativa: true,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar máquina: %v", err)
+		}
+		sol, err := svcSolicitacao.CadastrarSolicitacaoMaquinario(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoMaquinarioPayload{
+			MaquinaId: m.Id, Descricao: descricao, Impactos: []string{"Afeta Produção"},
+			FotoChave: "tenant/1/foto.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar solicitação: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Alta", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS: %v", err)
+		}
+		return os
+	}
+
+	// Encerra a OS aberta por abrirOSMaquinario com o payload que o próprio
+	// Técnico mandaria -- CorrigirCusto só existe depois disso, ver a nota em
+	// service.CorrigirCusto.
+	encerrar := func(os model.OrdemServico, payload model.EncerramentoOrdemServicoPayload) model.OrdemServico {
+		t.Helper()
+		if _, err := svcOS.Iniciar(ctx, tenantID, tecnicoDono.Id, os.Id); err != nil {
+			t.Fatalf("erro ao iniciar: %v", err)
+		}
+		encerrada, err := svcOS.Encerrar(ctx, tenantID, tecnicoDono.Id, os.Id, payload)
+		if err != nil {
+			t.Fatalf("erro ao encerrar: %v", err)
+		}
+		return encerrada
+	}
+
+	custoHoraOriginal := 45.0
+	osConcluidaMaquinario := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		return encerrar(abrirOSMaquinario(patrimonio, descricao), model.EncerramentoOrdemServicoPayload{
+			TipoDefeito: "Corretiva", DefeitoConstatado: "Resistência queimada",
+			CausaRaiz: "Desgaste natural", Solucao: "Troca da resistência",
+			Itens: itensMaquinario(custoHoraOriginal, 120.5),
+		})
+	}
+
+	osConcluidaReparo := func(patrimonio string) model.OrdemServico {
+		t.Helper()
+		sol, err := svcSolicitacao.CadastrarSolicitacaoReparo(ctx, tenantID, solicitante.Id, model.NovaSolicitacaoReparoPayload{
+			Item: "Lâmpada queimada", Descricao: patrimonio,
+			FotoChave: "tenant/1/reparo.jpg", FotoMime: "image/jpeg", FotoTamanho: 1,
+		})
+		if err != nil {
+			t.Fatalf("erro ao criar reparo: %v", err)
+		}
+		os, err := svcSolicitacao.AbrirOS(ctx, tenantID, admin.Id, "administrador", sol.Id, model.AberturaOrdemServicoPayload{
+			Urgencia: "Baixa", TecnicoId: tecnicoDono.Id,
+		})
+		if err != nil {
+			t.Fatalf("erro ao abrir OS do reparo: %v", err)
+		}
+		return encerrar(os, model.EncerramentoOrdemServicoPayload{
+			TipoDefeito: "Corretiva", DefeitoConstatado: "Lâmpada queimada",
+			CausaRaiz: "Fim de vida útil", Solucao: "Substituição",
+			Itens: itensSemHoraTecnica(30),
+		})
+	}
+
+	osConcluidaTerceiros := func(patrimonio, descricao string) model.OrdemServico {
+		t.Helper()
+		os := abrirOSMaquinario(patrimonio, descricao)
+		acionada, err := svcOS.AcionarTerceiro(ctx, tenantID, tecnicoDono.Id, os.Id, empresaTercID)
+		if err != nil {
+			t.Fatalf("erro ao acionar terceiro: %v", err)
+		}
+		return encerrar(acionada, model.EncerramentoOrdemServicoPayload{
+			TipoDefeito: "Corretiva", DefeitoConstatado: "Compressor travado",
+			CausaRaiz: "Falta de manutenção", Solucao: "Serviço da empresa externa",
+			Itens: itensSemHoraTecnica(800),
+		})
+	}
+
+	t.Run("corrige com sucesso e o lançamento passa a ser do Administrador", func(t *testing.T) {
+		os := osConcluidaMaquinario("PAT-CUSTO-1", "Corrige com sucesso")
+		if os.Custo == nil || os.Custo.RevisadoEm != nil {
+			t.Fatalf("custo recém-lançado pelo Técnico devia ter revisadoEm nil, veio %+v", os.Custo)
+		}
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensMaquinario(60, 200),
+		})
+		if err != nil {
+			t.Fatalf("erro ao corrigir custo: %v", err)
+		}
+		if corrigida.Custo == nil {
+			t.Fatal("custo veio nulo")
+		}
+		if corrigida.Custo.RevisadoEm == nil {
+			t.Error("revisadoEm devia estar preenchida após a conferência do Administrador")
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != 60 {
+			t.Errorf("custoHoraTecnico = %v, esperado 60", corrigida.Custo.CustoHoraTecnico)
+		}
+		if corrigida.Custo.CustoManutencao != 200 {
+			t.Errorf("custoManutencao = %v, esperado 200", corrigida.Custo.CustoManutencao)
+		}
+		if corrigida.Custo.CustoTotal != 260 {
+			t.Errorf("custoTotal = %v, esperado 260", corrigida.Custo.CustoTotal)
+		}
+		if corrigida.Custo.LancadoPorNome != "Carla" {
+			t.Errorf("lancadoPorNome = %q, esperado Carla (quem corrigiu, não Eder que encerrou)", corrigida.Custo.LancadoPorNome)
+		}
+	})
+
+	t.Run("OS ainda não encerrada não pode ter custo corrigido", func(t *testing.T) {
+		os := abrirOSMaquinario("PAT-CUSTO-2", "Ainda aberta")
+		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensMaquinario(custoHoraOriginal, 100),
+		})
+		if !errors.Is(err, helper.ErrConflitoIntegridade) {
+			t.Fatalf("erro = %v, esperado ErrConflitoIntegridade", err)
+		}
+	})
+
+	// Espelho do mesmo caso em TestEncerrar: sem hora lançada o agregado é zero
+	// em maquinário, não erro. Ver a nota lá.
+	t.Run("maquinário sem hora técnica soma zero, não é erro", func(t *testing.T) {
+		os := osConcluidaMaquinario("PAT-CUSTO-3", "Só peça")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(100),
+		})
+		if err != nil {
+			t.Fatalf("tarefa sem hora técnica devia ser aceita: %v", err)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != 0 {
+			t.Errorf("custoHoraTecnico = %v, esperado 0", corrigida.Custo.CustoHoraTecnico)
+		}
+	})
+
+	// Migration 000017: reparo passou a cobrar mão de obra como qualquer OS.
+	t.Run("reparo com item de mão de obra é aceito", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-4")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensMaquinario(custoHoraOriginal, 50),
+		})
+		if err != nil {
+			t.Fatalf("reparo com mão de obra devia ser aceito: %v", err)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != custoHoraOriginal {
+			t.Errorf("custoHoraTecnico = %v, esperado %v", corrigida.Custo.CustoHoraTecnico, custoHoraOriginal)
+		}
+	})
+
+	// Migration 000010: nota fiscal deixou de ser exclusividade de 'terceiros'
+	// -- reparo consome material comprado com nota, e o Administrador precisa
+	// registrar o documento que embasa o custo.
+	t.Run("nota fiscal fora de terceiros é aceita e persiste", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-5")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: true,
+			NotasFiscais: []model.NotaFiscalPayload{{Numero: "NF-001", Serie: "3"}},
+		})
+		if err != nil {
+			t.Fatalf("nota fiscal em OS de reparo devia ser aceita: %v", err)
+		}
+		if len(corrigida.Custo.NotasFiscais) != 1 {
+			t.Fatalf("notasFiscais = %+v, esperado 1 nota", corrigida.Custo.NotasFiscais)
+		}
+		nota := corrigida.Custo.NotasFiscais[0]
+		if nota.Numero != "NF-001" {
+			t.Errorf("numero = %q, esperado NF-001", nota.Numero)
+		}
+		if nota.Serie == nil || *nota.Serie != "3" {
+			t.Errorf("serie = %v, esperado 3", nota.Serie)
+		}
+	})
+
+	// A razão de a lista existir (migration 000012): duas peças compradas em
+	// lojas diferentes chegam com dois documentos, e o par escalar antigo só
+	// comportava o primeiro.
+	t.Run("duas notas na mesma OS persistem as duas", func(t *testing.T) {
+		os := osConcluidaMaquinario("PAT-CUSTO-5D", "Rolamento e fita")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: []model.ItemCustoPayload{
+				{Descricao: "Troca do rolamento", CustoManutencao: 180, CustoHoraTecnico: ptrFloat(50)},
+				{Descricao: "Troca da fita", CustoManutencao: 240, CustoHoraTecnico: ptrFloat(40)},
+			},
+			TemNotaFiscal: true,
+			NotasFiscais: []model.NotaFiscalPayload{
+				{Numero: "NF-4471", Serie: "1"},
+				{Numero: "NF-9002"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("duas notas deviam ser aceitas: %v", err)
+		}
+		if len(corrigida.Custo.NotasFiscais) != 2 {
+			t.Fatalf("notasFiscais = %+v, esperado 2", corrigida.Custo.NotasFiscais)
+		}
+		// Série ausente vira NULL, não string vazia -- é o NULLIF da query.
+		if corrigida.Custo.NotasFiscais[1].Serie != nil {
+			t.Errorf("série ausente devia vir nil, veio %v", *corrigida.Custo.NotasFiscais[1].Serie)
+		}
+		// Os agregados são a SOMA dos itens, e é o servidor quem soma: o
+		// payload não carrega total nenhum. É a trava contra os_custo divergir
+		// de os_custo_item.
+		if len(corrigida.Custo.Itens) != 2 {
+			t.Fatalf("itens = %+v, esperado 2 tarefas", corrigida.Custo.Itens)
+		}
+		// Cada tarefa carrega os dois valores dela, e é isso que deixa o
+		// Administrador conferir "o rolamento custou 180" contra a nota certa.
+		if corrigida.Custo.Itens[0].CustoManutencao != 180 ||
+			corrigida.Custo.Itens[0].CustoHoraTecnico == nil ||
+			*corrigida.Custo.Itens[0].CustoHoraTecnico != 50 {
+			t.Errorf("primeira tarefa = %+v, esperado 180 de peça e 50 de mão de obra", corrigida.Custo.Itens[0])
+		}
+		if corrigida.Custo.CustoManutencao != 420 {
+			t.Errorf("custoManutencao = %v, esperado 420 (180+240)", corrigida.Custo.CustoManutencao)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != 90 {
+			t.Errorf("custoHoraTecnico = %v, esperado 90 (50+40)", corrigida.Custo.CustoHoraTecnico)
+		}
+		if corrigida.Custo.CustoTotal != 510 {
+			t.Errorf("custoTotal = %v, esperado 510", corrigida.Custo.CustoTotal)
+		}
+	})
+
+	// uq_nota_fiscal_os com NULLS NOT DISTINCT: o clique duplo no formulário
+	// bate na constraint em vez de gravar o mesmo documento duas vezes.
+	t.Run("nota repetida na mesma OS é duplicidade", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-5E")
+		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: true,
+			NotasFiscais: []model.NotaFiscalPayload{
+				{Numero: "NF-IGUAL"},
+				{Numero: "NF-IGUAL"},
+			},
+		})
+		if !errors.Is(err, helper.ErrDadoDuplicado) {
+			t.Fatalf("erro = %v, esperado ErrDadoDuplicado", err)
+		}
+	})
+
+	// A descrição, essa sim, continua presa a 'terceiros': ela conta o que a
+	// empresa externa fez -- ver o CHECK que sobrou em ck_custo_por_tipo.
+	t.Run("descrição de serviço de terceiro fora de terceiros é erro de validação", func(t *testing.T) {
+		os := osConcluidaMaquinario("PAT-CUSTO-5C", "Descrição indevida")
+		descricao := "Serviço executado pela empresa"
+		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens:                    itensMaquinario(custoHoraOriginal, 100),
+			DescricaoServicoTerceiro: &descricao,
+		})
+		if !errors.Is(err, helper.ErrValidacao) {
+			t.Fatalf("erro = %v, esperado ErrValidacao", err)
+		}
+	})
+
+	// Com a lista, o "campo em branco" do formulário virou lista vazia -- o
+	// modal só manda uma linha de nota quando o Administrador clica no "+".
+	// A descrição de terceiro continua sendo campo de texto e continua
+	// chegando como espaços do React Hook Form.
+	t.Run("lista de notas vazia e descrição em branco passam (defaultValues do front)", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-5B")
+		vazio := "   "
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens:                    itensSemHoraTecnica(50),
+			DescricaoServicoTerceiro: &vazio,
+		})
+		if err != nil {
+			t.Fatalf("lista vazia e descrição em branco não deviam barrar OS de reparo: %v", err)
+		}
+		// Slice não-nil mesmo vazia: o front faz .map direto.
+		if corrigida.Custo.NotasFiscais == nil {
+			t.Error("notasFiscais devia ser lista vazia, não null -- o front faz .map")
+		}
+	})
+
+	t.Run("corrige nota fiscal com sucesso numa OS de terceiros", func(t *testing.T) {
+		os := osConcluidaTerceiros("PAT-CUSTO-6", "Serviço de terceiro")
+		descricao := "Troca do compressor"
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(950), TemNotaFiscal: true,
+			NotasFiscais:             []model.NotaFiscalPayload{{Numero: "NF-42", Serie: "1"}},
+			DescricaoServicoTerceiro: &descricao,
+		})
+		if err != nil {
+			t.Fatalf("erro ao corrigir custo: %v", err)
+		}
+		if corrigida.Custo.CustoManutencao != 950 {
+			t.Errorf("custoManutencao = %v, esperado 950", corrigida.Custo.CustoManutencao)
+		}
+		if len(corrigida.Custo.NotasFiscais) != 1 || corrigida.Custo.NotasFiscais[0].Numero != "NF-42" {
+			t.Errorf("notasFiscais = %+v, esperado uma NF-42", corrigida.Custo.NotasFiscais)
+		}
+		if corrigida.Custo.DescricaoServicoTerceiro == nil || *corrigida.Custo.DescricaoServicoTerceiro != "Troca do compressor" {
+			t.Errorf("descricaoServicoTerceiro = %v, esperado %q", corrigida.Custo.DescricaoServicoTerceiro, "Troca do compressor")
+		}
+	})
+
+	// 000016: a OS de terceiros separa peças (custo_manutencao) de mão de obra
+	// da empresa (custo_hora_tecnico), e as duas entram no total.
+	t.Run("OS de terceiros aceita valor de peças e de mão de obra", func(t *testing.T) {
+		os := osConcluidaTerceiros("PAT-CUSTO-8", "Terceiro com mão de obra")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: []model.ItemCustoPayload{
+				{Descricao: "Compressor", CustoManutencao: 950, CustoHoraTecnico: ptrFloat(300)},
+				{Descricao: "Carga de gás", CustoManutencao: 200},
+			},
+		})
+		if err != nil {
+			t.Fatalf("mão de obra em terceiros devia ser aceita: %v", err)
+		}
+		if corrigida.Custo.CustoManutencao != 1150 {
+			t.Errorf("custoManutencao (peças) = %v, esperado 1150", corrigida.Custo.CustoManutencao)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != 300 {
+			t.Errorf("custoHoraTecnico (mão de obra) = %v, esperado 300", corrigida.Custo.CustoHoraTecnico)
+		}
+		if corrigida.Custo.CustoTotal != 1450 {
+			t.Errorf("custoTotal = %v, esperado 1450", corrigida.Custo.CustoTotal)
+		}
+	})
+
+	t.Run("id inexistente é não encontrado", func(t *testing.T) {
+		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, 999999999, model.LancamentoCustoManutencaoPayload{
+			Itens: itensMaquinario(custoHoraOriginal, 100),
+		})
+		if !errors.Is(err, helper.ErrNaoEncontrado) {
+			t.Fatalf("erro = %v, esperado ErrNaoEncontrado", err)
+		}
+	})
+
+	// A declaração do Técnico é o que decide se a tela do Administrador pede
+	// número e série -- ck_custo_nota_fiscal, migration 000011.
+	t.Run("número de nota sem declarar a nota é erro de validação", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-7")
+		_, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: false,
+			NotasFiscais: []model.NotaFiscalPayload{{Numero: "NF-999"}},
+		})
+		if !errors.Is(err, helper.ErrValidacao) {
+			t.Fatalf("erro = %v, esperado ErrValidacao", err)
+		}
+	})
+
+	// Técnico esquecer de marcar não pode deixar a OS sem onde lançar a nota:
+	// o Administrador sobrescreve a declaração no mesmo POST.
+	t.Run("Administrador marca a nota que o Técnico não declarou", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-8")
+		if os.Custo.TemNotaFiscal {
+			t.Fatal("encerramento sem declaração devia nascer com temNotaFiscal false")
+		}
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: true,
+			NotasFiscais: []model.NotaFiscalPayload{{Numero: "NF-777"}},
+		})
+		if err != nil {
+			t.Fatalf("Administrador devia poder marcar a nota: %v", err)
+		}
+		if !corrigida.Custo.TemNotaFiscal {
+			t.Error("temNotaFiscal devia ter virado true")
+		}
+	})
+
+	// Desmarcar limpa o que já estava gravado -- senão ck_custo_nota_fiscal
+	// barraria o UPDATE e o Administrador levaria um 500 genérico.
+	t.Run("Administrador desmarcando a nota apaga as notas gravadas", func(t *testing.T) {
+		os := osConcluidaReparo("PAT-CUSTO-9")
+		if _, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: true,
+			NotasFiscais: []model.NotaFiscalPayload{{Numero: "NF-555", Serie: "2"}},
+		}); err != nil {
+			t.Fatalf("erro ao lançar a nota: %v", err)
+		}
+
+		limpa, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensSemHoraTecnica(50), TemNotaFiscal: false,
+		})
+		if err != nil {
+			t.Fatalf("erro ao desmarcar a nota: %v", err)
+		}
+		if limpa.Custo.TemNotaFiscal {
+			t.Error("temNotaFiscal devia ter virado false")
+		}
+		// Direção que trg_nota_fiscal_declarada não cobre de propósito: quem
+		// apaga é gravarNotasFiscais, na mesma escrita (ver migration 000012).
+		if len(limpa.Custo.NotasFiscais) != 0 {
+			t.Errorf("notas deviam ter sido apagadas, veio %+v", limpa.Custo.NotasFiscais)
+		}
+	})
+
+	// 0 é valor de negócio legítimo (serviço sem peça, conserto em garantia) --
+	// ck_custo_nao_negativo permite e o binding é `gte=0`, não `required`. Sem
+	// este teste nada impede alguém de trocar por `required` e transformar uma
+	// OS sem custo em "campo obrigatório não preenchido".
+	t.Run("custo zero é aceito e volta como zero", func(t *testing.T) {
+		os := osConcluidaMaquinario("PAT-CUSTO-10", "Conserto em garantia")
+		corrigida, err := svcOS.CorrigirCusto(ctx, tenantID, adminCorretor.Id, os.Id, model.LancamentoCustoManutencaoPayload{
+			Itens: itensMaquinario(0, 0),
+		})
+		if err != nil {
+			t.Fatalf("custo zero devia ser aceito: %v", err)
+		}
+		if corrigida.Custo.CustoHoraTecnico == nil || *corrigida.Custo.CustoHoraTecnico != 0 {
+			t.Errorf("custoHoraTecnico = %v, esperado 0", corrigida.Custo.CustoHoraTecnico)
+		}
+		if corrigida.Custo.CustoManutencao != 0 || corrigida.Custo.CustoTotal != 0 {
+			t.Errorf("custoManutencao/custoTotal = %v/%v, esperado 0/0",
+				corrigida.Custo.CustoManutencao, corrigida.Custo.CustoTotal)
+		}
+	})
+}

@@ -1,0 +1,292 @@
+# API: autenticação, rotas, RBAC e o contrato com o front
+
+Leia antes de registrar rota nova, mexer em middleware ou montar corpo de resposta.
+
+> Parte do contexto do back-end. O índice é o [CLAUDE.md](../CLAUDE.md) na raiz.
+
+---
+
+## Autenticação (sessão no banco)
+- **A sessão mora na tabela `sessao`** (migration `000022`, 17/10/2026 — substituiu o JWT
+  de 8h). O login gera um segredo de 256 bits (`criarSessao`), que vai no cookie HttpOnly
+  `token`; o banco guarda só o SHA-256 dele. **Prazos** (`service/sessaoService.go`): estica
+  com o uso, cai com **14 dias sem uso** e **60 dias depois do login** mesmo usada todo dia.
+  **Cai na hora:** `POST /autenticacao/logout` (só aquele aparelho — `EncerrarSessao`),
+  desativar o usuário, trocar a senha dele (edição do Administrador ou recuperação) — os
+  três apagam todas as sessões do usuário (`apagarSessoesDoUsuario`) — e desativar a
+  empresa. O JWT não dava nada disso: "Sair" só apagava o cookie daquele navegador (uma
+  cópia seguia valendo até o `exp`), usuário desativado seguia usando as rotas e o perfil
+  gravado no token só mudava no próximo login. `JWT_SECRET` não é mais lida.
+- Cada request roda `ValidarSessao` (uma query com JOIN em `usuario` e `empresa`: ativo,
+  ativa e o **perfil atual**), e o `ultimo_uso_em` só é regravado quando o último toque tem
+  mais de 1 minuto. Para ~20 usuários é custo desprezível — mesma premissa de não ter
+  cache. `nome`/`escoposGestor`/`lojaId`/`setorId`/`tecnicoId` continuam resolvidos no
+  `ObterSessao` (`GET /autenticacao/sessao`).
+- **Depois do login, `tenant_id` autoritativo é o da sessão, não o header
+  `X-tenant-ID`** — o header só importa em `POST /autenticacao/login`, antes de existir
+  sessão, pra saber contra qual `empresa` autenticar. Trocar o header depois de logado
+  não pode mudar de tenant. Na prática: **`Login` é o único handler que chama
+  `middleware.GetTenantID` (header); todo o resto chama `GetTenantIDToken`.** Usar o do
+  header numa rota autenticada deixa um administrador do tenant A escrever no tenant B
+  só trocando o `X-tenant-ID` — o banco aceita calado, é só um `int64`. Já foi bug uma
+  vez.
+- `middleware.Autenticacao(validador)` lê o segredo do cookie `token` (produção) ou do
+  header `Authorization: Bearer <segredo>` (Postman/Insomnia, sem cookie), confere no
+  banco (`service.SessaoService`) e injeta no contexto: `userId`, `user_perfil`,
+  `user_TenantId`. **Três respostas, e o front depende delas:** sem segredo → 401 sem
+  código; sessão que existia e não vale mais → 401 com `"codigo": "sessao_expirada"` e o
+  cookie apagado (a tela de login diz "sua sessão expirou"); falha do banco → **500, não
+  401** (um 401 deslogaria todo mundo por um soluço do Postgres). O nome do cookie
+  continua `token` de propósito: o JWT de quem estava logado no deploy cai como sessão
+  expirada e ganha o aviso, em vez de um 401 mudo.
+- `service.UsuarioService.Login(ctx, model.Login, tenantId)` devolve `(segredo, sessão,
+  erro)` — o service já criou a linha em `sessao` (e apagou as vencidas de todo mundo),
+  o controller só põe no cookie (`middleware.GravarCookieSessao`, 60 dias). Sem transação
+  de propósito: são leituras, a sessão nova e o `UPDATE` de `ultimo_acesso`.
+- **E-mail inexistente, senha errada e usuário inativo devolvem todos
+  `helper.ErrCredenciaisInvalidas`**, a mesma mensagem — senão o login vira um oráculo
+  de quais e-mails existem no tenant. (`ObterUsuarioPorEmail` já filtra `AND ativo`, então
+  usuário desativado cai sozinho no mesmo `ErrNoRows`.)
+- ⚠️ **`model.Login` NÃO tem campo `perfil`, e a ausência é deliberada.** Ele existiu, o
+  service o comparava com `usuario.perfil` e devolvia `ErrCredenciaisInvalidas` quando não
+  batia. Ou seja: nunca autorizou nada — quem manda no token e na `SessaoUsuario` é sempre
+  a linha do banco. O que o campo fazia, na prática, era transformar "o usuário clicou na
+  aba errada da tela de login" em "e-mail ou senha inválidos", que é a mensagem genérica
+  de propósito e por isso não tinha como explicar o erro real. O seletor de perfil saiu da
+  tela junto (`front-end`, item 1); ele continua existindo em **CadastrarUsuario**, onde
+  decide de verdade o que o usuário será.
+  Campo extra no corpo é ignorado pelo binding, então um front antigo mandando `perfil`
+  continua logando — o back pode subir antes, ao contrário da mudança de custo da
+  migration `000012`. `TestLogin/perfil da sessao vem do banco, nao do corpo` é o teste
+  que substituiu a comparação removida.
+- `SessaoUsuario` é montada por perfil em `montarSessao`: administrador não tem nada
+  (a ausência de escopo É o acesso total), técnico leva `tecnicoId` = o próprio
+  `usuario.id` (`fk_os_tecnico` aponta pra `usuario`; não existe tabela `tecnico`),
+  gestor leva `escoposGestor`, solicitante leva `lojaId`/`setorId`/`setorNome`.
+- Cookie de sessão: `HttpOnly` + `Secure` + `SameSite=Lax`, `maxAge` 86400 (24h), nome
+  `token` (tem que bater com o que o middleware lê). **O `maxAge` do cookie (24h) é
+  maior que o `exp` do JWT (8h) — não é intencional, é só sobra**: passadas as 8h o
+  browser ainda manda o cookie, o middleware rejeita e o front desloga no 401 do
+  `/sessao` (que apaga o cookie). Se for igualar, mexa nos dois: `auth/jwt.go` e
+  `cookieSessao`. Sai só de `cookieSessao` em
+  `controller/loginController.go`. `Lax` basta porque front e API ficam sob o mesmo
+  domínio registrável (`*.radaptech.com.br`, `localhost` em dev); só vira `None` (que
+  obriga `Secure`) se o front sair pra outro domínio.
+- Mapa de erro → status nos handlers de auth: `ErrValidacao` → 400,
+  `ErrCredenciaisInvalidas` → 401, `ErrSessaoExpirada` → 401 **+ cookie apagado** (o
+  front desloga no 401; sem limpar o cookie ele reenvia a mesma sessão morta em loop),
+  `ErrDadoDuplicado` → 409, `ErrNaoEncontrado`/`ErrConflitoIntegridade` → 422, resto →
+  500 **com o erro só no `log`**: o erro cru do pgx carrega nome de constraint/coluna e
+  às vezes o SQL, não pode ir no corpo da resposta.
+- **Revogação: metade feita.** `ObterSessao` já derruba sessão de usuário desativado e
+  de **empresa desativada** (`EmpresaAtiva`), e o front desloga sozinho no 401 do
+  `/sessao`. Mas isso fecha só o caminho do browser: o `AutenticacaoJwt` valida
+  assinatura e não vai ao banco, então **um token cru na mão continua escrevendo em todas
+  as outras rotas até o `exp` de 8h**. Trocar senha e logout também não matam token
+  emitido, e `HttpOnly` não impede o dono do navegador de
+  copiar o cookie no DevTools (ele protege contra XSS, não contra o usuário). O `exp`
+  de 8h limita a janela a um turno. Conserto barato quando for mexer: `token_version`
+  na `usuario`, o JWT carrega o valor e o middleware compara — dá pra juntar na mesma
+  query que o RBAC de escopo vai precisar fazer.
+
+## Recuperação de senha (`esqueci-senha` / `redefinir-senha`)
+- **Públicas, com o tenant do header**, como o login: ainda não existe token de sessão. O
+  `TenantMiddleware` resolve o subdomínio, e isso também impede um link vazado de valer no
+  subdomínio de outra empresa (`RedefinirSenhaPorToken` filtra `tenant_id`).
+- `POST /autenticacao/esqueci-senha` `{email}` → **sempre 200 com a mesma mensagem**, exista
+  o e-mail ou não (mesmo motivo de `ErrCredenciaisInvalidas`: senão vira oráculo de e-mails).
+  O envio roda em **goroutine** com `context.Background()` + 15s pelo mesmo motivo — esperar
+  o Resend deixaria o e-mail cadastrado centenas de ms mais lento. Falha de envio só no `log`.
+- O token é `rand.Text()` (130 bits); o banco guarda só o **SHA-256** (sem salt: não é
+  senha de humano) e a validade de **30 minutos**, calculada com o `now()` do banco — o
+  mesmo relógio que a troca compara. ⚠️ Os 30 minutos também estão escritos no texto do
+  e-mail (`EmailService.go`): mudou na query, muda lá.
+- `POST /autenticacao/redefinir-senha` `{token, senha}` (`min=6`, mesma regra do login) troca
+  a senha **e queima o token no mesmo `UPDATE`** — dois cliques no mesmo link não passam os
+  dois. Pedido novo sobrescreve o anterior (só o último link vale). Usuário desativado não
+  pede nem redefine.
+- **Token ruim é 400** (`ErrTokenRecuperacaoInvalido`, mensagem única para inexistente,
+  expirado ou usado), **nunca 401** — 401 fora do `/login` desloga o front.
+- Rate limit **mais apertado** em `esqueci-senha` (`rate.Every(time.Minute), 3`): cada pedido
+  aceito dispara um e-mail real. `redefinir-senha` usa o mesmo do login.
+- O link sai de `URL_FRONTEND_FORMATO` (com um `%s` onde entra o subdomínio; default
+  `http://%s.localhost:8090`) + `/redefinir-senha?token=...`, que é a rota da tela
+  `RedefinirSenha` no front. Remetente fixo `contato@radaptech.com.br` — o domínio precisa
+  estar verificado no Resend, senão todo envio falha (calado para o usuário, visível no log).
+- ⚠️ Redefinir a senha **não derruba sessão já aberta** (ver "Revogação" acima): o JWT
+  emitido antes continua valendo até o `exp`.
+
+## Rotas e rate limit
+- Tudo em `internal/router/router.go`, sob o grupo `/api`. Registradas hoje:
+
+  | rota | RBAC |
+  |---|---|
+  | `GET /api` (healthcheck) | pública |
+  | `POST /autenticacao/login` | pública (rate limit + `TenantMiddleware`) |
+  | `POST /autenticacao/logout` | pública, ver abaixo |
+  | `POST /autenticacao/esqueci-senha`, `/redefinir-senha` | pública (rate limit + `TenantMiddleware`, como o login) |
+  | `GET /autenticacao/sessao` | autenticada |
+  | `GET·POST /usuarios`, `GET·PUT·DELETE /usuarios/:id` | administrador |
+  | `GET /empresas` | administrador |
+  | `GET /tecnicos` | gestor, administrador |
+  | `GET /lojas`, `GET /setores` | **qualquer perfil autenticado** |
+  | `GET·PUT·DELETE /lojas/:id`, `POST /lojas` | administrador |
+  | `GET·PUT·DELETE /setores/:id`, `POST /setores` | administrador |
+  | `GET /maquinas`, `GET /preventivas`, `GET /preventivas/:id/historico` | **qualquer perfil autenticado** (filtrado por escopo) |
+  | `GET·PUT·DELETE /maquinas/:id`, `POST /maquinas` | administrador |
+  | `GET·PUT·DELETE /preventivas/:id`, `POST /preventivas` | administrador |
+  | `GET /empresas-terceirizadas` | **técnico**, administrador |
+  | `GET·PUT·DELETE /empresas-terceirizadas/:id`, `POST /empresas-terceirizadas` | administrador |
+  | `POST /solicitacoes/maquinario`, `/reparo` | **solicitante** |
+  | `GET /solicitacoes/minhas`, `/resumo` | **qualquer perfil autenticado** (o service filtra pelo próprio ator) |
+  | `GET /solicitacoes` (fila) | gestor, administrador |
+  | `GET /solicitacoes/:id` | **qualquer perfil autenticado** (escopo no `WHERE`) |
+  | `POST /solicitacoes/:id/abrir-os`, `/:id/rejeitar` | gestor, administrador |
+  | `POST /solicitacoes/direta` | gestor, administrador (escopo checado no service) |
+  | `GET /ordens-servico` | gestor, administrador, **técnico** (escopo no `WHERE`) |
+  | `POST /ordens-servico/:id/{iniciar,pausar,retomar,acionar-terceiro,encerrar}` | **técnico** (dono da OS — checado no service, não aqui: de outro técnico é 404, não 403) |
+  | `POST /ordens-servico/:id/custo` | **administrador** (correção pós-encerramento, sem dono pra checar) |
+  | `GET /ordens-servico/resumo`, `GET /ordens-servico/:id` | gestor, administrador, **técnico** (mesmo escopo da listagem; `:id` fora dele é 404) |
+  | `GET /ordens-servico/:id/historico` | gestor (escopo no `WHERE`), administrador, técnico dono — 404 fora do alcance; solicitante não |
+  | `GET /indicadores/maquinas/:id` | gestor, administrador (escopo no `WHERE`, 404 fora dele) |
+  | `GET /indicadores/lojas/:id/ordens` | gestor, administrador (a lista por trás de um card de custo: `?grupo=maquinario|reparos|preventivas` obrigatório, `&setorId=&maquinaId=&mes=MM/AAAA&pagina=`; `maquinaId` não vale em reparos; loja fora do escopo é 404) |
+  | `GET /indicadores/lojas/:id` | gestor, administrador (loja fora dos escopos é 404; o `WHERE` recorta os setores) |
+  | `GET /notificacoes`, `/notificacoes/nao-lidas`, `POST /notificacoes/lidas`, `/notificacoes/:id/lida` | **qualquer perfil autenticado** (sempre só as do próprio usuário) |
+  | `GET /push/chave-publica`, `POST /push/inscricoes`, `/push/inscricoes/remover` | **qualquer perfil autenticado** (o aparelho fica do usuário do token) |
+
+- **`/notificacoes` é a central do sininho** (`NotificacaoController`). O dono é o
+  usuário do token (`atorDaRota`), nunca um id da URL — nem o administrador vê as de
+  outro. `GET /notificacoes?pagina=` é `RespostaPaginada<Notificacao>` (20 por página,
+  mais novas primeiro); `Notificacao` = `{ id, tipo, titulo, corpo, url, lida, lidaEm,
+  criadoEm }`, com `url` um caminho relativo (`/painel-gestor?solicitacao=12`,
+  `/painel-tecnico?os=7`). `GET /nao-lidas` e as duas rotas de marcar respondem
+  `{ total }` — a contagem de não lidas **depois** da ação, pro front atualizar o sininho
+  sem outro request. Marcar uma alheia ou inexistente é **404**; marcar de novo é 200
+  (idempotente, não reescreve `lidaEm`).
+- **`/push` é a inscrição do aparelho no Web Push** (`PushController`, service é o
+  `NotificacaoService`). `GET /push/chave-publica` → `{ chavePublica }` (a VAPID pública
+  que o navegador usa no `pushManager.subscribe`; **`null` = push desligado** neste
+  servidor, sem VAPID no ambiente). `POST /push/inscricoes` recebe a `PushSubscription`
+  do navegador **como ela vem** (`subscription.toJSON()`: `{ endpoint, keys: { p256dh,
+  auth } }`, `expirationTime` ignorado) e responde **204**; re-inscrever o mesmo
+  aparelho, inclusive com outro usuário logado, troca o dono (upsert pelo endpoint).
+  **400** para endpoint fora dos serviços de push conhecidos ou chave malformada (ver
+  "SSRF" em `docs/fluxo-de-negocio.md`). `POST /push/inscricoes/remover` `{ endpoint }`
+  → **204 sempre** (idempotente; só apaga se o aparelho é do próprio usuário) — POST e
+  não DELETE porque o endpoint é uma URL longa e o `api.delete` do front não manda corpo.
+- **`GET /maquinas` e `GET /preventivas` são abertas mas não são amplas**: o RBAC libera
+  qualquer perfil e o **escopo é aplicado no `WHERE`** (ver "Escopo no `WHERE`" em "Queries
+  e repository"). O Solicitante escolhe máquina do próprio setor em Nova Solicitação e o
+  Gestor lista as preventivas das lojas dele — os dois chamam a mesma rota e recebem
+  recortes diferentes. `GET /maquinas/:id` e `GET /preventivas/:id` **são de
+  administrador**: a única tela que lê o registro inteiro é o formulário de edição dele.
+- **`GET /empresas-terceirizadas` é do técnico, não do gestor**: terceirizar é decisão
+  do Técnico (`front-end/CLAUDE.md` item 9), e é ele quem escolhe a empresa no
+  `ModalAcionarTerceiro`. O Gestor não consome essa lista — o nome da empresa chega
+  denormalizado na OS. **Sem escopo no `WHERE`**, diferente de `/maquinas` e
+  `/preventivas`: a entidade não pende de loja nem setor, é do tenant inteiro, e por isso
+  o service nem recebe `usuarioId`/`perfil`.
+- **`GET /preventivas/:id/historico`** devolve os ciclos da preventiva, mais recente primeiro: cada ciclo é a OS que o job abriu quando ela venceu (`solicitacao_os.preventiva_id` → `ordem_servico`), sem tabela própria. O front pinta `status === 'Concluída'` de verde e o resto de vermelho. Fora do escopo responde **404** (`PreventivaNoEscopo`), não lista vazia — vazio quer dizer "ainda não venceu".
+- **`maquinaPatrimonio` e `maquinaFotoUrl` em toda resposta de `/preventivas`**: máquinas iguais têm o mesmo nome, e é o patrimônio (com a foto) que diferencia uma da outra na aba "Manutenção Prev." do Gestor. A foto sai do banco como `foto_chave` e o `PreventivaController` assina a URL antes de responder, igual a `maquinaFotoUrl` da solicitação — falha na assinatura só tira a foto, não derruba a resposta.
+- **`GET /ordens-servico` pagina só quando pedido:** sem `?pagina=` devolve o array inteiro, como sempre (os painéis do Gestor e do Técnico montam a navegação Loja → Setor e as contagens a partir da lista toda); com `?pagina=N` devolve `RespostaPaginada` de **12** (`TamanhoPaginaOrdensServico`) com o total contado pelo mesmo `WHERE` (`ContarOrdensServico` — ⚠️ filtro novo na listagem tem que entrar nas duas queries). Quem pede página são as telas de histórico do Administrador (OS Finalizadas, Custos Pendentes), que só acumulam. `?revisado=true|false` separa as abas de Custos Pendentes (`custo_revisado_em`). Ordenação `aberta_em DESC, id DESC`: o desempate deixa as páginas estáveis.
+- **`GET /solicitacoes/minhas` aceita `?pagina=`, `?status=`, `?busca=` e `?maquinaId=`** (o filtro "de qual máquina" da tela Minhas Solicitações). Todos só estreitam: a query continua presa ao solicitante do token, e com `maquinaId` o pequeno reparo (sem máquina) nunca aparece.
+- **Loja, setor e empresa terceirizada têm foto (`fotoUrl`), como a máquina**: `POST`/`PUT` aceitam **multipart** (parte `dados` com o JSON + parte `foto` opcional — `corpoComFoto`, `controller/foto.go`) ou o **JSON puro** de antes, que vale como "sem foto nova". Cada um tem o próprio bucket (`R2_BUCKET_NAME_IMG_LOJAS`, `_IMG_SETORES`, `_IMG_TERCERIZADOS`); no `PUT`, sem foto mantém a atual (`COALESCE`). Toda resposta das três rotas sai com a URL assinada, e falha na assinatura só tira a foto. ⚠️ O tenant é lido **antes** do corpo nesses handlers: a foto sobe pro R2 na leitura, com a key prefixada pelo tenant.
+- **`POST /preventivas` é só a preventiva avulsa** (`ModalManutencaoPreventiva`). As
+  preventivas do formulário de máquina **não passam por essa rota**: viajam dentro do
+  corpo de `POST`/`PUT /maquinas` e gravam na mesma transação da máquina
+  (`gravarPreventivas`). O controller de máquina nunca toca no `PreventivaService`.
+- **As listagens de loja e setor sem `Permitir` são de propósito**: o painel do gestor agrupa por
+  loja e nomeia os blocos por setor (`acessoGestor.ts` procura o setor por id), e os
+  selects em cascata de cadastro dependem das duas. Restringir a administrador deixa o
+  painel do gestor sem nomes. Escrever continua só do administrador.
+- **`GET /tecnicos` é projeção somente-leitura sobre `usuario`**, não CRUD: técnico é
+  usuário com `perfil = 'tecnico'`, e escrever continua sendo `/usuarios` (duas superfícies
+  de escrita deixariam o mesmo e-mail entrar duas vezes). Existe separada de
+  `GET /usuarios?perfil=tecnico` por três motivos, sendo o primeiro o que obriga: (1) o
+  RBAC — `/usuarios` é só do administrador, e quem precisa da lista é o **Gestor**, no
+  select de "Técnico Responsável" do `ModalAbrirOrdemServico`; (2) a forma — o tipo
+  `Tecnico` do front pede `area` como **nome** e `lojasIds`, e `/usuarios` é paginada;
+  (3) a leitura não precisa de nada que o CRUD de usuário faz. Mora no `LoginController`
+  pelo mesmo motivo de `GET /empresas` morar no de loja.
+  **`GET /tecnicos/:id` não foi feito**: `servicoTecnicos.obterPorId` existe no front mas
+  não é chamado em lugar nenhum. Entra quando a tela do Administrador existir — que
+  também não existe (o `front-end/CLAUDE.md` descreve `AdministradorTecnicos`, mas não há
+  pasta, card no painel nem rota no código).
+- `GET /empresas` mora no `LojaController` porque empresa **não tem CRUD** — o tenant
+  nasce pela CLI de provisionamento, e a única tela que pergunta por ela é a de loja.
+- **As duas criações de `/solicitacoes` são só do solicitante** — é a única tela que
+  chama (`NovaSolicitacao` no front). A terceira, `POST /solicitacoes/direta`, é do
+  gestor/administrador (OS aberta sem fila, ver "OS direta" em `docs/fluxo-de-negocio.md`). `/minhas` e `/resumo` ficam sem `Permitir` de
+  propósito, mesmo critério de `/lojas`/`/setores`: o service já filtra pelo
+  `usuario.id` de quem chama (nunca recebe `perfil`), então RBAC ali não filtraria nada
+  a mais, só barraria administrador/gestor de testar a própria rota. `GET /solicitacoes`
+  (a fila) é só gestor/administrador — Técnico não participa da aprovação, só recebe a
+  OS depois que ela existe. `GET /solicitacoes/:id` é aberta a qualquer perfil, recortada
+  pelo escopo no `WHERE` (mesmo `EXISTS` de `ListarSolicitacoes`) — sem isso um
+  Solicitante enumerando id leria foto/descrição de outro setor.
+- **`GET /indicadores/maquinas/:id` é do Gestor, e o `:id` é de MÁQUINA.** O Técnico
+  executa a OS, não acompanha indisponibilidade nem custo. A URL é `/indicadores/...` e
+  não `/maquinas/:id/indicadores` porque é a que o front já chama
+  (`servicos/servicoIndicadores.ts`) — o contrato manda. Quem responde é o
+  `OrdemServicoController`, pelo mesmo motivo de `GET /empresas` morar no de loja: o
+  painel inteiro sai do histórico de OS encerradas.
+  **Máquina fora do escopo é 404, não 200 com zeros** — o escopo entra como `narg`
+  opcional em `ObterMaquinaPorID` (NULL não filtra, que é o administrador e todos os
+  chamadores de escrita). Devolver zeros confirmaria a existência do id, que é o que a
+  enumeração procura; 403 faria o mesmo, e além disso 403 aqui é perfil errado, não
+  máquina alheia.
+- **`TenantMiddleware` entra só em `/autenticacao/login`** — é o único endpoint que lê o
+  header `X-tenant-ID`; ver "Autenticação". Rota autenticada que precise de tenant usa
+  `GetTenantIDToken`, não o middleware.
+- **`Logout` é de propósito a única rota de sessão sem `AutenticacaoJwt`**: logout tem
+  que apagar o cookie mesmo com token expirado/inválido. Exigir JWT ali devolveria 401 e
+  deixaria o cookie morto no browser em loop.
+- `LimitarPorIP(taxa, burst)` (`middleware/rateLimit.go`) é token bucket por IP com
+  `x/time/rate`: mapa `IP → *rate.Limiter` sob mutex + goroutine que varre inativos a
+  cada 5min (senão o mapa cresce sem fim). No login: `rate.Every(12*time.Second), 5`.
+  Responde **429**, nunca 401/403.
+- **Ordem no login: o limiter vem antes do `TenantMiddleware`.** Invertido, cada
+  tentativa de força bruta gasta um `ObterEmpresaPorSubdominio` (ida ao banco) antes de
+  o limite recusar — o ataque paga em CPU nossa. O limiter é em memória e não toca o
+  banco, então é ele que fica na frente.
+- **`ClientIP` só é confiável porque `main.go` chama `SetTrustedProxies`** com o que
+  vier em `TRUSTED_PROXIES` (IPs/CIDRs separados por vírgula; vazio = não confia em
+  ninguém e o `X-Forwarded-For` é ignorado). O padrão do Gin é confiar em **todo mundo**
+  — aí o `X-Forwarded-For` vira campo livre do cliente, um header diferente a cada
+  request ganha um bucket novo e o rate limit não limita nada. Já foi assim: 10 POSTs
+  com `-H 'X-Forwarded-For: 10.0.0.$i'` passavam os 10; hoje passam 5 e o resto é 429.
+- **Liste o endereço do proxy, nunca a faixa em volta dele.** O Gin caminha o
+  `X-Forwarded-For` da direita pra esquerda e para no primeiro IP não-confiável — mas se
+  a lista acabar, ele devolve o valor **mais à esquerda**, que é o que o cliente
+  escreveu. Uma faixa larga que também contenha o cliente (ex: `172.16.0.0/12` numa rede
+  Docker) faz a busca passar direto por ele e cair justamente no valor forjado. Por isso
+  o compose dá IP fixo ao traefik e a api confia só em `172.29.0.2/32`. Em produção o
+  valor é o endereço do proxy do Railway.
+- ⚠️ Duas limitações conhecidas do limiter, aceitas por ora: (1) o estado é **em memória,
+  por instância** — escalar o Railway pra 2 réplicas dobra o limite efetivo; (2) a chave
+  é **só o IP** — escritório atrás de NAT compartilha as 5 tentativas, e ataque
+  distribuído contra uma conta só não é limitado por nada. Se doer, a chave vira
+  `IP+email` e o estado vai pro Redis.
+
+## Regras herdadas do contrato com o front (não reinvente)
+- **401 é só "sem sessão"**; fora de escopo/perfil errado é sempre **403** — 401 fora de
+  `/login` desloga o usuário no front. O RBAC por perfil é `middleware.Permitir(...)`;
+  o escopo (loja/setor) **não** é middleware, é o `WHERE` da query.
+- **Datas** trafegam como texto `dd/mm/yyyy HH:MM:SS` (ou `dd/mm/yyyy` sem hora) — use
+  `config.DataBr` em todo campo de data de resposta, nunca `time.Time` cru.
+- **Multi-tenant por subdomínio**: header `X-tenant-ID`, tenant nunca vem por rota nem
+  por corpo.
+- **Empresa É o tenant** (decisão fechada). `loja.tenant_id` referencia `empresa (id)`
+  direto, não existe coluna `empresa_id` nem tabela intermediária — o front já tipa a
+  hierarquia como "Tenant = Empresa > Loja > Setor". Consequências:
+  `GET /empresas` devolve **uma lista de um item só** (a empresa do tenant autenticado,
+  `id` = `tenant_id`), e `Loja.empresaId` é o `tenant_id` da própria linha — campo
+  derivado, não coluna, que o front usa só para exibir o nome da empresa. **O front já
+  não manda `empresaId`**: `NovaLojaPayload` (lá) perdeu o campo e o select de empresa em
+  `CadastrarLoja` virou campo somente leitura, já que a lista sempre teve um item só.
+  Mesmo assim, **`empresaId` no corpo de `POST/PUT /lojas` continua ignorado aqui**: como empresa = tenant, aceitá-lo do cliente seria aceitar o tenant do
+  corpo — o mesmo buraco do `X-tenant-ID` em rota autenticada, por outra porta.
+- **Escopo (loja/setor/técnico) é sempre filtrado no `WHERE` do servidor**, nunca
+  devolvido inteiro pro cliente filtrar.
+- **Transições de estado são `POST` em sub-recurso** (`/iniciar`, `/pausar`,
+  `/acionar-terceiro`, etc.), nunca `PATCH` de um campo `status` genérico.

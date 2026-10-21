@@ -1,4 +1,2 @@
-# Os repos do back e do front são clonados aqui dentro (o compose monta as pastas),
-# mas cada um tem o próprio git -- não entram neste.
-/sistema-OSm--Back-end/
-/sistema-OSm--Front-end/
+# Arquivos de ambiente: cada pasta tem o seu .env, fora do git.
+.env

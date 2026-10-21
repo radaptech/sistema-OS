@@ -1,0 +1,53 @@
+PENDÊNCIAS — decidir depois
+===========================
+
+[ ] Histórico da preventiva: quando um ciclo conta como "não feito"?
+    (anotado em 12/10/2026)
+
+    Onde: Painel do Gestor > Manutenção Prev. > loja > setor > máquina > clicar na preventiva.
+
+    COMO ESTÁ HOJE:
+      - Verde (v)   = a OS do ciclo está "Concluída".
+      - Vermelho (x) = QUALQUER outro status (Aberta, Em Andamento, Pausada).
+      - Fica vermelho no mesmo instante em que a OS é aberta, mesmo que o técnico
+        ainda tenha o dia inteiro para fazer. Quando ele encerra, vira verde.
+
+    PROPOSTA: três estados em vez de dois
+      - Verde   = concluída
+      - Âmbar   = ainda não concluída, mas dentro do prazo (pendente)
+      - Vermelho = passou do prazo e não foi concluída
+
+    FALTA ESCOLHER O PRAZO:
+      1) Dias fixos de tolerância depois de vencer (ex: 1, 3 ou 7 dias).
+      2) Até o próximo ciclo (ex: preventiva de 30 dias só fica vermelha se
+         chegar o próximo vencimento sem ter feito a anterior).
+      3) Âmbar só no dia em que venceu, vermelho a partir do dia seguinte.
+
+    Qualquer opção é mudança só no front (a tela já recebe a data em que venceu
+    e o status da OS): src/paginas/PainelGestor/componentes/HistoricoPreventiva.tsx
+
+[ ] Paginar no SERVIDOR as listas de OS e solicitações
+    (anotado em 13/10/2026)
+
+    PROBLEMA:
+      GET /ordens-servico (e GET /solicitacoes) devolvem o histórico INTEIRO do
+      escopo, sem paginação no back. A paginação de hoje (12 por página no setor)
+      é só no navegador: a aba OS Finalizadas do Gestor e as abas do Técnico
+      baixam tudo e cortam na tela. Com meses de uso o JSON cresce sem parar
+      (o técnico de demo Carlos já tem 89 OS concluídas).
+
+    NÃO É PROBLEMA DE NÚMERO DE CHAMADAS (isso foi resolvido com o cache do
+    React Query em 13/10). É o TAMANHO de cada resposta.
+
+    IDEIA:
+      - Back: aceitar ?pagina=&tamanho= (e ?lojaId=&setorId=) em GET /ordens-servico,
+        devolvendo RespostaPaginada { dados, pagina, totalPaginas, total } -- o mesmo
+        formato que GET /usuarios e /solicitacoes/minhas já usam.
+      - As contagens dos cards de loja/setor (navegação por cliques) passariam a
+        precisar de um endpoint de resumo (contagem por loja/setor), porque a tela
+        deixaria de ter a lista inteira para contar.
+      - Começar pelas FINALIZADAS/CONCLUÍDAS (é a lista que só cresce); as abas de
+        em andamento/pendentes esvaziam com o fluxo e podem ficar como estão.
+
+    QUANDO: quando a aba de finalizadas começar a demorar para abrir, ou antes
+    de passar de alguns milhares de OS por tenant.

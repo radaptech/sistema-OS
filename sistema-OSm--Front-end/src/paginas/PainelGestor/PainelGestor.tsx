@@ -27,6 +27,7 @@ import { ModalDetalhesSolicitacao } from '../ModalDetalhesSolicitacao/ModalDetal
 import { AbasPainelGestor } from './componentes/AbasPainelGestor'
 import { ABAS_PAINEL_GESTOR, type AbaPainelGestor } from './abasPainelGestor'
 import { AcoesRapidas } from './componentes/AcoesRapidas'
+import { CardCustosDoMes } from './componentes/CardCustosDoMes'
 import { CardSolicitacaoGestor } from './componentes/CardSolicitacaoGestor'
 import {
   FiltroStatusSolicitacao,
@@ -273,6 +274,8 @@ export function PainelGestor() {
           aoAbrirFiltros={() => setModalFiltrosAberto(true)}
           quantidadeFiltrosAtivos={quantidadeFiltrosAtivos}
         />
+
+        {escoposGestor.length > 0 && <CardCustosDoMes />}
 
         <AbasPainelGestor
           abaSelecionada={abaSelecionada}

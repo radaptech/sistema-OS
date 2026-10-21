@@ -126,6 +126,9 @@ services:
 
 volumes:
   postgres_data:
+  evolution_postgres_data:
+  evolution_redis_data:
+  evolution_instances:
 
 # Sub-rede declarada (172.31 estava livre nesta máquina) só pro traefik poder ter IP
 # fixo -- ver TRUSTED_PROXIES na api. Mudou a sub-rede, muda o TRUSTED_PROXIES junto.

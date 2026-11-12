@@ -1,0 +1,13 @@
+# Fim de linha sempre LF, no repo e no working tree -- inclusive quando o clone é
+# aberto pelo Git do Windows. Sem isto os 530 arquivos já viraram CRLF uma vez e o
+# status mostrava tudo modificado sem nenhuma mudança real.
+* text=auto eol=lf
+
+# Binários: nunca converter.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary

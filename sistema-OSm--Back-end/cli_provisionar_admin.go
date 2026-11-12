@@ -15,8 +15,8 @@ import (
 // POST /usuarios exige um administrador já autenticado, e o primeiro não
 // existe até este comando rodar.
 //
-//	Uso: go run . provisionar-admin -subdominio=cooprata -empresa="Cooprata" \
-//	       -nome="Davi" -email=admin@cooprata.com -senha=SENHA_FORTE
+//	Uso:  go run . provisionar-admin -subdominio=demo -empresa="demo" \
+//	       -nome="davi" -email=demo@gmail.com -senha=123456
 func executarProvisionarAdmin(args []string) {
 	fs := flag.NewFlagSet("provisionar-admin", flag.ExitOnError)
 	subdominio := fs.String("subdominio", "", "subdomínio do tenant (ex: cooprata)")

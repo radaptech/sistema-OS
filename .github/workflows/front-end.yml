@@ -34,3 +34,34 @@ jobs:
 
       - name: build
         run: npm run build
+
+  # Imagem só da master, e só depois do lint/build passar. PR e dev param no teste.
+  docker:
+    needs: test
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    # Dois pushes seguidos na master: o segundo espera o primeiro, senão o
+    # latest podia terminar apontando pra imagem mais velha.
+    concurrency: docker-${{ github.workflow }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # REACT_APP_URL_API entra no bundle em build time (ver dockerfile do front).
+      # Variável do repositório (Settings > Variables) se quiser trocar sem editar aqui.
+      - uses: docker/build-push-action@v6
+        with:
+          context: sistema-OSm--Front-end
+          file: sistema-OSm--Front-end/dockerfile
+          push: true
+          build-args: |
+            REACT_APP_URL_API=${{ vars.REACT_APP_URL_API || 'https://api.radaptech.com.br' }}
+            VITE_USE_MOCKS=false
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:front-latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:front-${{ github.sha }}

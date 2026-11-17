@@ -1,0 +1,10 @@
+# Segredo nunca entra na imagem: em produção as variáveis vêm do Railway.
+.env
+.env.*
+!.env-example
+
+.git
+main
+tmp
+docs
+*.md

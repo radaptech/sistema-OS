@@ -52,3 +52,29 @@ jobs:
 
       - name: go test
         run: go test -race ./...
+
+  # Imagem só da master, e só depois do teste passar. PR e dev param no teste.
+  docker:
+    needs: test
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    # Dois pushes seguidos na master: o segundo espera o primeiro, senão o
+    # latest podia terminar apontando pra imagem mais velha.
+    concurrency: docker-${{ github.workflow }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: sistema-OSm--Back-end
+          file: sistema-OSm--Back-end/dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:back-latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:back-${{ github.sha }}

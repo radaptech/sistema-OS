@@ -196,7 +196,7 @@ export function CadastrarMaquina() {
       />
 
       <main className="flex flex-1 justify-center px-4 py-8">
-        <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
           <form
             onSubmit={handleSubmit(aoEnviar)}
             noValidate
@@ -330,11 +330,6 @@ export function CadastrarMaquina() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

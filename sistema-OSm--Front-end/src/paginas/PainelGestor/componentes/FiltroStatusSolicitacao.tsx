@@ -42,7 +42,7 @@ export function FiltroStatusSolicitacao({
           >
             {opcao.rotulo}
             <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+              className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
                 ativo
                   ? 'bg-white/20 text-white'
                   : 'border border-slate-200/60 bg-slate-50 text-slate-600'

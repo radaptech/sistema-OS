@@ -70,7 +70,7 @@ export function CampoMaquinaFiltro({ maquinas, valor, aoMudar }: CampoMaquinaFil
         aria-autocomplete="list"
         autoComplete="off"
         placeholder="Nome ou patrimônio da máquina..."
-        icone={<Search size={16} className="text-marca-500" />}
+        icone={<Search size={16} className="text-marca-600" />}
         value={valor}
         onChange={(evento) => {
           aoMudar(evento.target.value)
@@ -97,7 +97,7 @@ export function CampoMaquinaFiltro({ maquinas, valor, aoMudar }: CampoMaquinaFil
           className="shadow-pop absolute inset-x-0 top-full z-10 mt-1 max-h-60 overflow-y-auto rounded-xl bg-white p-1"
         >
           {sugestoes.length === 0 && (
-            <li className="px-3 py-2 text-xs text-slate-400">Nenhuma máquina encontrada.</li>
+            <li className="px-3 py-2 text-xs text-slate-500">Nenhuma máquina encontrada.</li>
           )}
           {sugestoes.map((maquina, indice) => (
             <li

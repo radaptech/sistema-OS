@@ -19,7 +19,7 @@ const OPCOES: OpcaoTipo[] = [
     descricao: 'Máquina cadastrada que apresentou defeito',
     Icone: CirclePlus,
     selecionado: 'border-marca-500 bg-marca-100',
-    iconeSelecionado: 'bg-gradient-to-br from-marca-800 to-marca-500',
+    iconeSelecionado: 'bg-marca-600',
   },
   {
     valor: 'reparo',
@@ -27,7 +27,7 @@ const OPCOES: OpcaoTipo[] = [
     descricao: 'Item sem cadastro: lâmpada, vidro, piso...',
     Icone: Hammer,
     selecionado: 'border-orange-500 bg-orange-50',
-    iconeSelecionado: 'bg-gradient-to-br from-orange-600 to-orange-400',
+    iconeSelecionado: 'bg-orange-600',
   },
 ]
 
@@ -42,7 +42,7 @@ export function SeletorTipoSolicitacao({
 }: SeletorTipoSolicitacaoProps) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-marca-500 font-mono text-xs font-semibold tracking-wider uppercase">
+      <span className="text-xs font-semibold text-slate-600">
         Tipo de Solicitação *
       </span>
 
@@ -69,7 +69,7 @@ export function SeletorTipoSolicitacao({
                 role="radio"
                 aria-checked={ativo}
                 onClick={() => aoSelecionar(opcao)}
-                className={`flex items-start gap-3 rounded-xl border-2 p-3 text-left transition-all duration-200 hover:-translate-y-0.5 ${
+                className={`flex items-start gap-3 rounded-xl border-2 p-3 text-left transition-all duration-200 ${
                   ativo
                     ? selecionado
                     : 'border-slate-200 bg-slate-50 hover:border-slate-300'

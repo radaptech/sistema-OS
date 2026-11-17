@@ -35,12 +35,12 @@ export function FolhaMaquinas({
   return createPortal(
     <div
       onClick={fechar}
-      className={`${classeFundo} fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4`}
+      className={`${classeFundo} fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center sm:p-4`}
     >
       <div
         {...propsDialogo}
         onClick={(evento) => evento.stopPropagation()}
-        className={`${classeCartao} shadow-pop flex max-h-[80svh] w-full max-w-md flex-col rounded-t-3xl bg-white sm:rounded-3xl`}
+        className={`${classeCartao} shadow-pop flex max-h-[80svh] w-full max-w-md flex-col rounded-t-xl bg-white sm:rounded-xl`}
       >
         {/* Alça: o sinal visual de "folha" que se fecha puxando/tocando fora. */}
         <div className="flex justify-center pt-2.5 sm:hidden">
@@ -58,7 +58,7 @@ export function FolhaMaquinas({
             type="button"
             aria-label="Fechar"
             onClick={fechar}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-600"
           >
             <X size={20} />
           </button>
@@ -120,7 +120,7 @@ function LinhaMaquina({ ativa, aoEscolher, miniatura, titulo, subtitulo }: Linha
       type="button"
       aria-pressed={ativa}
       onClick={aoEscolher}
-      className={`flex w-full items-center gap-3 rounded-2xl p-2.5 text-left transition active:scale-[0.99] ${
+      className={`flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition active:scale-[0.99] ${
         ativa ? 'bg-marca-100' : 'hover:bg-slate-50'
       }`}
     >

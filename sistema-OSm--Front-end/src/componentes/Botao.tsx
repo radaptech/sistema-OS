@@ -34,7 +34,7 @@ export function Botao({
     <button
       // `active:scale` fica sem transição de propósito: é resposta ao toque, e resposta
       // ao toque tem que ser imediata — animar aqui só atrasaria a sensação do clique.
-      className={`flex h-[46px] w-full items-center justify-center gap-2 rounded-xl px-6 text-sm font-bold transition-all duration-rapido ease-entrada active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 ${ESTILOS_VARIANTE[variante]} ${className}`}
+      className={`flex h-[46px] w-full items-center justify-center gap-2 rounded-lg px-6 text-sm font-bold transition-all duration-rapido ease-entrada active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 ${ESTILOS_VARIANTE[variante]} ${className}`}
       disabled={disabled || carregando}
       aria-busy={carregando}
       {...props}

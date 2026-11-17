@@ -71,7 +71,7 @@ export function PainelNotificacoes({
     <div
       role="dialog"
       aria-label="Notificações"
-      className="animate-pop-in shadow-pop fixed inset-x-4 top-16 z-50 flex max-h-[75svh] origin-top-right flex-col overflow-hidden rounded-2xl bg-white sm:absolute sm:inset-x-auto sm:top-12 sm:right-0 sm:w-96"
+      className="animate-pop-in shadow-pop fixed inset-x-4 top-16 z-50 flex max-h-[75svh] origin-top-right flex-col overflow-hidden rounded-xl bg-white sm:absolute sm:inset-x-auto sm:top-12 sm:right-0 sm:w-96"
     >
       <div className="flex items-center justify-between gap-3 border-b border-slate-200/60 px-4 py-3">
         <p className="font-display text-base font-bold text-slate-800">
@@ -113,13 +113,13 @@ export function PainelNotificacoes({
         )}
 
         {isError && (
-          <p className="px-4 py-10 text-center text-sm text-slate-400">
+          <p className="px-4 py-10 text-center text-sm text-slate-500">
             Não foi possível carregar as notificações.
           </p>
         )}
 
         {!isLoading && !isError && notificacoes.length === 0 && (
-          <div className="flex flex-col items-center gap-2 px-4 py-10 text-slate-400">
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-slate-500">
             <BellOff size={26} />
             <p className="text-sm">Nenhuma notificação por enquanto.</p>
           </div>
@@ -202,7 +202,7 @@ function ItemNotificacao({ notificacao, aoAbrir }: ItemNotificacaoProps) {
         <span className="line-clamp-2 text-xs text-slate-500">
           {notificacao.corpo}
         </span>
-        <span className="font-mono text-[10px] tracking-wide text-slate-400 uppercase">
+        <span className="font-mono text-xs tracking-wide text-slate-500 uppercase">
           {tempoRelativo(notificacao.criadoEm)}
         </span>
       </span>

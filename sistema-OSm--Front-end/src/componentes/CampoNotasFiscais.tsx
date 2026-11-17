@@ -51,7 +51,7 @@ export function CampoNotasFiscais({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <label className="text-marca-500 font-mono text-xs font-semibold tracking-wider uppercase">
+        <label className="text-xs font-semibold text-slate-600">
           Notas Fiscais
         </label>
         <button
@@ -66,7 +66,7 @@ export function CampoNotasFiscais({
       </div>
 
       {notas.length === 0 && (
-        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-400">
+        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-500">
           Nenhuma nota registrada. Compras em lojas diferentes geram uma nota cada.
         </p>
       )}

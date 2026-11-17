@@ -104,7 +104,7 @@ function ListaDoSnapshot({ snapshot }: { snapshot: SnapshotCustoOS }) {
             <span className="font-mono whitespace-nowrap text-slate-700">
               {formatarMoeda(item.custoManutencao)}
               {item.custoHoraTecnico !== null && (
-                <span className="text-slate-400"> + {formatarMoeda(item.custoHoraTecnico)}</span>
+                <span className="text-slate-500"> + {formatarMoeda(item.custoHoraTecnico)}</span>
               )}
             </span>
           </li>
@@ -146,7 +146,7 @@ function ItemDaLinha({ evento, custoAnterior, ultimo }: ItemDaLinhaProps) {
       </span>
       <div className="min-w-0 flex-1 pt-0.5">
         <p className="text-sm font-semibold text-slate-700">{tituloDe(evento)}</p>
-        <p className="font-mono text-xs text-slate-400">
+        <p className="font-mono text-xs text-slate-500">
           {formatarDataHora(evento.ocorridoEm)}
           {evento.usuarioPerfil && ` · ${evento.usuarioPerfil}`}
           {evento.tipo === 'aberta' && detalhes?.origem && ` · ${ORIGEM_ABERTURA[detalhes.origem]}`}
@@ -172,7 +172,7 @@ function ItemDaLinha({ evento, custoAnterior, ultimo }: ItemDaLinhaProps) {
               {custoAnterior && custoAnterior.custoTotal !== snapshot.custoTotal ? (
                 <>
                   Custo total{' '}
-                  <span className="font-mono text-slate-400 line-through">
+                  <span className="font-mono text-slate-500 line-through">
                     {formatarMoeda(custoAnterior.custoTotal)}
                   </span>{' '}
                   →{' '}
@@ -190,7 +190,7 @@ function ItemDaLinha({ evento, custoAnterior, ultimo }: ItemDaLinhaProps) {
         )}
 
         {ehAutoriaPresumida(evento) && (
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-slate-500">
             Registro anterior ao histórico: autor presumido (técnico da OS).
           </p>
         )}
@@ -229,13 +229,13 @@ export function LinhaDoTempoOS({ ordemServicoId }: LinhaDoTempoOSProps) {
         onClick={() => setAberta((valor) => !valor)}
         className="flex w-full items-center justify-between gap-2 text-left"
       >
-        <span className="flex items-center gap-2 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+        <span className="flex items-center gap-2 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
           <History size={14} />
           Histórico da OS
         </span>
         <ChevronDown
           size={16}
-          className={`text-slate-400 transition-transform ${aberta ? 'rotate-180' : ''}`}
+          className={`text-slate-500 transition-transform ${aberta ? 'rotate-180' : ''}`}
         />
       </button>
 

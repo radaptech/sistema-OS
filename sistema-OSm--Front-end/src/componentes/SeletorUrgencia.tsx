@@ -31,7 +31,7 @@ export function SeletorUrgencia({
 }: SeletorUrgenciaProps) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+      <span className="text-xs font-semibold text-slate-600">
         Nível de Urgência *
       </span>
       <div className="grid grid-cols-3 gap-2">

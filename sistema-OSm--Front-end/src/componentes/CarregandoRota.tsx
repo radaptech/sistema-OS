@@ -27,7 +27,7 @@ export function CarregandoRota() {
         <span className="relative block h-2 w-full overflow-hidden rounded-full bg-slate-200">
           <span className="animate-varrer absolute inset-0 bg-gradient-to-r from-transparent via-marca-500/60 to-transparent" />
         </span>
-        <p className="text-center font-mono text-[11px] font-semibold tracking-widest text-slate-400 uppercase">
+        <p className="text-center font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
           Carregando tela...
         </p>
       </div>

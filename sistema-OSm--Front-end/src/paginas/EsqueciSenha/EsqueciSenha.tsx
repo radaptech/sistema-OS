@@ -16,7 +16,7 @@ const esquemaEsqueciSenha = z.object({
 type DadosEsqueciSenha = z.infer<typeof esquemaEsqueciSenha>
 
 const CLASSE_LINK =
-  'text-marca-500 hover:text-marca-800 flex items-center justify-center gap-1.5 text-xs font-medium transition hover:underline'
+  'text-marca-600 hover:text-marca-800 flex items-center justify-center gap-1.5 text-xs font-medium transition hover:underline'
 
 export function EsqueciSenha() {
   const [emailEnviado, setEmailEnviado] = useState<string | null>(null)
@@ -48,7 +48,7 @@ export function EsqueciSenha() {
             estiver cadastrado, você receberá um link para criar uma nova senha.
             O link vale por 30 minutos.
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             Não chegou? Confira a caixa de spam.
           </p>
           <Link to="/login" className={CLASSE_LINK}>

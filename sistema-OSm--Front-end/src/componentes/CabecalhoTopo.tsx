@@ -11,23 +11,23 @@ export function CabecalhoTopo() {
   const aoSair = useSair()
 
   return (
-    // Barra clara e translúcida em vez da faixa verde cheia: o verde continua sendo a cor
+    // Barra clara e opaca em vez da faixa verde cheia: o verde continua sendo a cor
     // da marca, mas concentrado no selo do logo. Espalhado na largura toda ele competia
     // com o conteúdo da página em vez de emoldurá-lo.
     <header
       ref={referenciaCabecalho}
-      className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg"
+      className="sticky top-0 z-50 border-b border-slate-200 bg-white"
     >
       <div className="flex w-full items-center justify-between px-4 py-3 sm:px-8">
         <div className="flex items-center gap-3">
-          <span className="bg-marca-600 shadow-marca-600/20 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white shadow-md">
+          <span className="bg-marca-600 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white">
             <Wrench size={20} strokeWidth={2.5} />
           </span>
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-slate-800 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-slate-800 uppercase">
               Solicitação OS
             </p>
-            <p className="text-sm text-slate-500">Olá, {nomeUsuario} 👋</p>
+            <p className="text-sm text-slate-500">Olá, {nomeUsuario}</p>
           </div>
         </div>
 
@@ -39,7 +39,7 @@ export function CabecalhoTopo() {
             type="button"
             aria-label="Sair"
             onClick={aoSair}
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-red-50 hover:text-red-500"
           >
             <LogOut size={20} />
           </button>

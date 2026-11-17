@@ -25,7 +25,7 @@ export function PainelAdministrador() {
         <div>
           <div className="mb-1 flex items-center gap-2">
             <UserCog className="text-marca-600" size={20} />
-            <h1 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               Painel do Administrador
             </h1>
           </div>
@@ -94,11 +94,6 @@ export function PainelAdministrador() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

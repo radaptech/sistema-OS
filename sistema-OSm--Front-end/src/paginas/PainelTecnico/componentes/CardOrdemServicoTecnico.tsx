@@ -67,7 +67,7 @@ export function CardOrdemServicoTecnico({
   )
 
   return (
-    <div className={`shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-2xl p-4 transition-shadow duration-200 ${fundoDoCardOS(ordemServico.origem)}`}>
+    <div className={`shadow-card hover:shadow-card-hover flex flex-col gap-3 rounded-xl p-4 transition-shadow duration-200 ${fundoDoCardOS(ordemServico.origem)}`}>
       <div className="flex items-start gap-4">
         <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white ${fundoDoNumeroOS(ordemServico.origem)}`}>
           #{ordemServico.id}
@@ -79,7 +79,7 @@ export function CardOrdemServicoTecnico({
               {obterNomeAlvo(ordemServico)}
             </span>
             {ordemServico.maquinaCodigo && (
-              <span className="font-mono text-sm text-slate-400">
+              <span className="font-mono text-sm text-slate-500">
                 · {ordemServico.maquinaCodigo}
               </span>
             )}
@@ -93,10 +93,10 @@ export function CardOrdemServicoTecnico({
           <p className="mt-1 text-sm text-slate-500">
             {ordemServico.descricao}
           </p>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-slate-500">
             {ordemServico.lojaNome} · {ordemServico.setorNome}
           </p>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-slate-500">
             Aberta em{' '}
             <span className="font-mono">
               {formatarDataHora(ordemServico.dataAbertura)}
@@ -175,7 +175,7 @@ export function CardOrdemServicoTecnico({
             <button
               type="button"
               onClick={() => aoIniciar(ordemServico)}
-              className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
+              className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
             >
               <PlayCircle size={14} />
               Iniciar Atendimento
@@ -186,7 +186,7 @@ export function CardOrdemServicoTecnico({
             <button
               type="button"
               onClick={() => aoFinalizar(ordemServico)}
-              className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
+              className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
             >
               <CheckCircle2 size={14} />
               Finalizar OS
@@ -203,7 +203,7 @@ export function CardOrdemServicoTecnico({
           <button
             type="button"
             onClick={() => aoRetomar(ordemServico)}
-            className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
+            className="bg-marca-600 font-display shadow-card hover:shadow-card-hover flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold whitespace-nowrap text-white transition-all duration-200 hover:bg-marca-800 active:scale-[0.98]"
           >
             <PlayCircle size={14} />
             Retomar Atendimento

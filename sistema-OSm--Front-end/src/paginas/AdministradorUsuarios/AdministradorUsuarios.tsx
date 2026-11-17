@@ -135,7 +135,7 @@ export function AdministradorUsuarios() {
           )}
 
           {!isLoading && usuarios.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Users size={28} />
               <p className="text-sm">Nenhum usuário encontrado para esses filtros.</p>
             </div>
@@ -156,7 +156,7 @@ export function AdministradorUsuarios() {
               <div
                 key={usuario.id}
                 style={atrasoEntrada(indice)}
-                className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+                className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -171,7 +171,7 @@ export function AdministradorUsuarios() {
                     )}
                   </div>
                   <p className="mt-1 font-mono text-sm text-slate-500">{usuario.email}</p>
-                  <p className="mt-1 text-xs text-slate-400">
+                  <p className="mt-1 text-xs text-slate-500">
                     {nomesLojas || 'Sem loja vinculada'}
                     {usuario.setoresIds.length > 0 && ` · ${nomesSetores}`}
                   </p>

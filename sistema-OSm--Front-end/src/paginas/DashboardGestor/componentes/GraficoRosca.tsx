@@ -37,16 +37,16 @@ export function GraficoRosca({
   )
 
   return (
-    <div className="shadow-card rounded-2xl bg-white p-4">
+    <div className="shadow-card rounded-xl bg-white p-4">
       <h3 className="font-display text-sm font-semibold text-slate-700">
         {titulo}
       </h3>
       {subtitulo && (
-        <p className="mt-0.5 text-xs text-slate-400">{subtitulo}</p>
+        <p className="mt-0.5 text-xs text-slate-500">{subtitulo}</p>
       )}
 
       {total === 0 ? (
-        <p className="py-10 text-center text-sm text-slate-400">
+        <p className="py-10 text-center text-sm text-slate-500">
           Sem paradas registradas no período.
         </p>
       ) : (
@@ -100,7 +100,7 @@ export function GraficoRosca({
               <p className="font-mono text-lg font-bold text-slate-800">
                 {valorCentral}
               </p>
-              <p className="font-mono text-[10px] text-slate-400 uppercase">
+              <p className="font-mono text-xs text-slate-500 uppercase">
                 {rotuloCentral}
               </p>
             </div>

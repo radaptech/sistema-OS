@@ -59,12 +59,12 @@ export function ModalManutencaoPreventiva({
   const { propsDialogo, idTitulo } = useDialogo(fechar)
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-pop`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md overflow-hidden rounded-xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
             {/* Só o cadastro de máquina abre este modal, e cadastro é do Administrador. */}
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Administrador
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">

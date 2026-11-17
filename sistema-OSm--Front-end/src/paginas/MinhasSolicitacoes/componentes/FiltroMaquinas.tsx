@@ -30,7 +30,7 @@ export function FiltroMaquinas({ maquinaSelecionada, aoSelecionar }: FiltroMaqui
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">
+      <span className="text-xs font-semibold text-slate-600">
         Máquina
       </span>
       <div className="flex gap-2">
@@ -65,7 +65,7 @@ export function FiltroMaquinas({ maquinaSelecionada, aoSelecionar }: FiltroMaqui
                 : `${maquinas.length} ${maquinas.length === 1 ? 'máquina' : 'máquinas'} · toque para escolher`}
             </span>
           </span>
-          <ChevronDown size={18} className="shrink-0 text-slate-400" />
+          <ChevronDown size={18} className="shrink-0 text-slate-500" />
         </button>
 
         {/* Limpar fica fora do botão principal (botão dentro de botão não é válido) e do

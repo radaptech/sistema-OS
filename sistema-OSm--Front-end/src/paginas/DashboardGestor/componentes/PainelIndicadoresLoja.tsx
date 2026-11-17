@@ -142,7 +142,7 @@ export function PainelIndicadoresLoja({
             {tituloTopo}
           </h2>
           {resumoTopo && (
-            <span className="font-mono text-[11px] text-slate-400">
+            <span className="font-mono text-xs text-slate-500">
               {resumoTopo.quantidadeOs}{' '}
               {resumoTopo.quantidadeOs === 1 ? 'OS de máquina encerrada' : 'OS de máquina encerradas'}
             </span>
@@ -157,7 +157,7 @@ export function PainelIndicadoresLoja({
             className="flex flex-col gap-4"
           >
             <EsqueletoGradeIndicadores />
-            <div className="shadow-card rounded-2xl bg-white p-5">
+            <div className="shadow-card rounded-xl bg-white p-5">
               <Esqueleto className="h-3 w-52" />
               <Esqueleto className="mt-4 h-40 w-full rounded-lg" />
             </div>
@@ -209,7 +209,7 @@ export function PainelIndicadoresLoja({
         </div>
 
         {setoresVisiveis.length === 0 && (
-          <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
+          <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500">
             <PackageSearch size={28} />
             <p className="text-sm">Nenhuma máquina encontrada.</p>
           </div>

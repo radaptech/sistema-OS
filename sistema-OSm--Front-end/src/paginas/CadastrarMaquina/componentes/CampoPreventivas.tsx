@@ -29,7 +29,7 @@ export function CampoPreventivas({ control, errors, nomeMaquina, lojaId }: Campo
   return (
     <div className="flex flex-col gap-3 border-t border-slate-100 pt-5">
       <div className="flex items-center justify-between">
-        <label className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+        <label className="text-xs font-semibold text-slate-600">
           Manutenções Preventivas *
         </label>
         {/* Sem loja escolhida o select de técnico do modal viria vazio, e o cadastro
@@ -46,7 +46,7 @@ export function CampoPreventivas({ control, errors, nomeMaquina, lojaId }: Campo
       </div>
 
       {fields.length === 0 && (
-        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-400">
+        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-500">
           {lojaId > 0
             ? 'Nenhuma preventiva cadastrada. Adicione ao menos uma para continuar.'
             : 'Escolha a loja acima para poder adicionar as preventivas.'}
@@ -64,16 +64,16 @@ export function CampoPreventivas({ control, errors, nomeMaquina, lojaId }: Campo
             </span>
             <div>
               <p className="text-sm font-semibold text-slate-700">{field.descricao}</p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 A cada {field.intervaloDias} dia(s) · Próxima: {converterDataFormularioParaBackend(field.proximaData)}
               </p>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 Técnico:{' '}
                 {tecnicos?.find((tecnico) => tecnico.id === field.tecnicoId)?.nome ??
                   'não definido'}
               </p>
               <span
-                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${
                   field.ativa
                     ? 'bg-emerald-100 text-emerald-700'
                     : 'bg-slate-200 text-slate-500'

@@ -131,14 +131,14 @@ export function CadastrarUsuario() {
       />
 
       <main className="flex flex-1 justify-center px-4 py-8">
-        <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
           <form
             onSubmit={handleSubmit(aoEnviar)}
             noValidate
             className="flex flex-col gap-5 p-6 sm:p-8"
           >
             <div className="flex flex-col gap-1.5">
-              <span className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+              <span className="text-xs font-semibold text-slate-600">
                 Perfil *
               </span>
               <SeletorPerfil
@@ -262,11 +262,6 @@ export function CadastrarUsuario() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

@@ -118,7 +118,7 @@ export function NavegacaoLojaSetorPaginada({
 
   if (resumo.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 px-4 py-8 text-center text-slate-400">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 px-4 py-8 text-center text-slate-500">
         <IconeVazio size={20} />
         <p className="max-w-sm text-xs">{mensagemVazio}</p>
       </div>
@@ -181,7 +181,7 @@ export function NavegacaoLojaSetorPaginada({
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 border-b border-slate-200/60 pb-2">
             <ClipboardList size={16} className="text-marca-600" />
-            <h2 className="font-display text-sm font-bold tracking-widest text-slate-800 uppercase">
+            <h2 className="font-display text-sm font-bold tracking-wide text-slate-800 uppercase">
               {nivelFinal.nome} · {rotuloOS(nivelFinal.quantidade)}
             </h2>
           </div>

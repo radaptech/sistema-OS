@@ -24,8 +24,8 @@ export function ModalConfirmarExclusao({
   const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !confirmando })
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-pop`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-sm overflow-hidden rounded-xl bg-white shadow-pop`}>
         <div className="flex items-start justify-between bg-red-600 px-6 py-4">
           <div className="flex items-center gap-2">
             <AlertTriangle className="text-white" size={20} />

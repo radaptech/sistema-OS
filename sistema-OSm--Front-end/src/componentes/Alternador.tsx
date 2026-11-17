@@ -12,7 +12,7 @@ export function Alternador({ marcado, aoAlternar, rotulo, descricao, id }: Alter
       {(rotulo || descricao) && (
         <div>
           {rotulo && <p className="text-sm font-semibold text-slate-700">{rotulo}</p>}
-          {descricao && <p className="text-xs text-slate-400">{descricao}</p>}
+          {descricao && <p className="text-xs text-slate-500">{descricao}</p>}
         </div>
       )}
 

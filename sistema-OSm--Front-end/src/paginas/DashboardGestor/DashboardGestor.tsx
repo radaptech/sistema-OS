@@ -148,7 +148,7 @@ export function DashboardGestor() {
         <div className="flex flex-col gap-2">
           {trilha.length > 1 && <TrilhaNavegacao etapas={trilha} />}
           <div>
-            <h1 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
               {titulo}
             </h1>
             <p className="mt-1 text-sm text-slate-500">{subtitulo}</p>
@@ -165,7 +165,7 @@ export function DashboardGestor() {
             {Array.from({ length: 2 }, (_, indice) => (
               <div
                 key={indice}
-                className="shadow-card flex flex-col gap-4 rounded-2xl bg-white p-5"
+                className="shadow-card flex flex-col gap-4 rounded-xl bg-white p-5"
               >
                 <div className="flex items-center gap-3">
                   <Esqueleto className="h-11 w-11 rounded-xl" />
@@ -181,8 +181,8 @@ export function DashboardGestor() {
         )}
 
         {!carregandoMaquinas && resumosLojas.length === 0 && (
-          <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
-            <PackageSearch size={28} className="text-slate-400" />
+          <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500">
+            <PackageSearch size={28} className="text-slate-500" />
             <p className="text-sm">Nenhuma loja vinculada ao seu acesso.</p>
           </div>
         )}

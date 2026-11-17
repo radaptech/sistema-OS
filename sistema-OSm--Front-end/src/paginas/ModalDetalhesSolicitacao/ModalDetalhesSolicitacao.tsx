@@ -35,15 +35,15 @@ export function ModalDetalhesSolicitacao({
 
   return createPortal(
     <div
-      className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}
+      className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}
     >
       <div
         {...propsDialogo}
-        className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}
+        className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}
       >
         <div className="bg-marca-600 flex items-start justify-between px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               {contexto}
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">
@@ -66,7 +66,7 @@ export function ModalDetalhesSolicitacao({
               <p className="font-semibold text-slate-800">
                 {obterNomeAlvo(solicitacao)}
               </p>
-              <p className="font-mono text-sm text-slate-400">
+              <p className="font-mono text-sm text-slate-500">
                 {obterCodigoAlvo(solicitacao)}
               </p>
             </div>
@@ -81,7 +81,7 @@ export function ModalDetalhesSolicitacao({
 
           {solicitacao.maquinaFotoUrl && (
             <div>
-              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Foto da Máquina (cadastro)
               </p>
               <ImagemProgressiva
@@ -94,7 +94,7 @@ export function ModalDetalhesSolicitacao({
 
           {fotoDefeito && (
             <div>
-              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 {solicitacao.tipo === 'reparo'
                   ? 'Foto do Item'
                   : 'Foto do Defeito'}
@@ -113,7 +113,7 @@ export function ModalDetalhesSolicitacao({
 
           {videoDefeito && (
             <div>
-              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <p className="mb-1 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Vídeo do Defeito
               </p>
               <video
@@ -139,19 +139,19 @@ export function ModalDetalhesSolicitacao({
           )}
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Loja
             </span>
-            <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Setor
             </span>
             <p className="text-slate-700">{solicitacao.lojaNome}</p>
             <p className="text-slate-700">{solicitacao.setorNome}</p>
 
-            <span className="mt-2 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <span className="mt-2 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Solicitante
             </span>
-            <span className="mt-2 font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <span className="mt-2 font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Data/Hora
             </span>
             <p className="text-slate-700">
@@ -166,7 +166,7 @@ export function ModalDetalhesSolicitacao({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Descrição
             </p>
             <p className="mt-1 text-sm text-slate-600">
@@ -175,11 +175,11 @@ export function ModalDetalhesSolicitacao({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Impacto na Produção
             </p>
             {solicitacao.impactos.length === 0 ? (
-              <p className="mt-1 text-sm text-slate-400">
+              <p className="mt-1 text-sm text-slate-500">
                 Máquina seguiu operando — não acumula tempo de parada.
               </p>
             ) : (

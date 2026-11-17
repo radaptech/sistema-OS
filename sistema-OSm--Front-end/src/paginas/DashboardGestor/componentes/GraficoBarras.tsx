@@ -45,13 +45,13 @@ export function GraficoBarras({
   const mostrarLegenda = seriesComValor.some((serie) => serie !== SERIES[0])
 
   return (
-    <div className="shadow-card rounded-2xl bg-white p-4">
+    <div className="shadow-card rounded-xl bg-white p-4">
       <h3 className="font-display text-sm font-semibold text-slate-700">
         {titulo}
       </h3>
 
       {mostrarLegenda && (
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-slate-500">
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-slate-500">
           {seriesComValor.map((serie) => (
             <li key={serie.nome} className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: serie.cor }} />
@@ -92,7 +92,7 @@ export function GraficoBarras({
               className="group relative flex h-full min-w-0 flex-1 cursor-pointer flex-col items-center rounded-md"
             >
               <div
-                className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-800 px-2 py-1 font-mono text-[10px] font-semibold whitespace-nowrap text-slate-50 opacity-0 transition group-hover:opacity-100"
+                className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-800 px-2 py-1 font-mono text-xs font-semibold whitespace-nowrap text-slate-50 opacity-0 transition group-hover:opacity-100"
                 role="tooltip"
               >
                 {item.valorFormatado}
@@ -116,7 +116,7 @@ export function GraficoBarras({
               {/* No celular 12 rótulos "MM/AA" encostam uns nos outros: mostra um sim, um não
                   (o valor de cada barra continua no tooltip). */}
               <span
-                className={`mt-1.5 font-mono text-[10px] whitespace-nowrap ${ativa ? 'text-marca-600 font-bold' : `text-slate-400 ${indice % 2 ? 'max-sm:invisible' : ''}`}`}
+                className={`mt-1.5 font-mono text-xs whitespace-nowrap ${ativa ? 'text-marca-600 font-bold' : `text-slate-500 ${indice % 2 ? 'max-sm:invisible' : ''}`}`}
               >
                 {item.rotulo}
               </span>

@@ -62,11 +62,11 @@ export function ModalAcionarTerceiro({
   const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}>
         <div className="flex items-start justify-between bg-blue-600 px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Técnico
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">

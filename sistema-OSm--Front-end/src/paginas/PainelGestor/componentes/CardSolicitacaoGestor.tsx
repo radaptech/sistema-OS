@@ -24,7 +24,7 @@ export function CardSolicitacaoGestor({
 
   return (
     <div
-      className={`shadow-card flex flex-col gap-3 rounded-2xl bg-white p-4 ${
+      className={`shadow-card flex flex-col gap-3 rounded-xl bg-white p-4 ${
         ehPreventiva ? 'bg-amber-50/70 ring-1 ring-amber-400/40 ring-inset' : ''
       }`}
     >
@@ -46,7 +46,7 @@ export function CardSolicitacaoGestor({
                 {obterNomeAlvo(solicitacao)}
               </span>
               {solicitacao.maquinaCodigo && (
-                <span className="font-mono text-sm text-slate-400">
+                <span className="font-mono text-sm text-slate-500">
                   · {solicitacao.maquinaCodigo}
                 </span>
               )}
@@ -57,7 +57,7 @@ export function CardSolicitacaoGestor({
             <p className="mt-1 text-sm text-slate-500">
               {solicitacao.descricao}
             </p>
-            <p className="mt-1 font-mono text-xs text-slate-400">
+            <p className="mt-1 font-mono text-xs text-slate-500">
               {formatarDataHora(solicitacao.criadoEm)} · Por{' '}
               <span className="font-medium text-slate-500">
                 {solicitacao.solicitanteNome}

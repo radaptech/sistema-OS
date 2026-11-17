@@ -90,7 +90,7 @@ export function TelaLogin() {
               <button
                 type="button"
                 onClick={() => setMostrarSenha((valor) => !valor)}
-                className="text-marca-500 hover:text-marca-800 transition"
+                className="text-marca-600 hover:text-marca-800 transition"
                 aria-label={mostrarSenha ? 'Ocultar senha' : 'Exibir senha'}
               >
                 {mostrarSenha ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -101,7 +101,7 @@ export function TelaLogin() {
 
           <Link
             to="/esqueci-senha"
-            className="text-marca-500 hover:text-marca-800 self-end text-xs font-medium transition hover:underline"
+            className="text-marca-600 hover:text-marca-800 self-end text-xs font-medium transition hover:underline"
           >
             Esqueci minha senha
           </Link>

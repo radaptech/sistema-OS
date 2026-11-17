@@ -115,7 +115,7 @@ export function AdministradorStatusMaquinas() {
           )}
 
           {!isLoading && maquinasFiltradas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Wrench size={28} />
               <p className="text-sm">
                 {mostrarInativas ? 'Nenhuma máquina desativada.' : 'Nenhuma máquina encontrada.'}
@@ -127,7 +127,7 @@ export function AdministradorStatusMaquinas() {
             <div
               key={maquina.id}
               style={atrasoEntrada(indice)}
-              className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+              className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               {/* Patrimônio numa linha própria e sem truncar: é ele que diferencia máquinas
                   iguais (mesmo nome), e na mesma linha do nome o truncate o cortava
@@ -147,7 +147,7 @@ export function AdministradorStatusMaquinas() {
                   <p className="mt-0.5 font-mono text-xs font-semibold whitespace-nowrap text-slate-600">
                     {maquina.numeroPatrimonio || `#${maquina.id}`}
                   </p>
-                  <p className="truncate text-xs text-slate-400">
+                  <p className="truncate text-xs text-slate-500">
                     {maquina.lojaNome ?? maquina.lojaId} · {maquina.setorNome}
                   </p>
                 </div>

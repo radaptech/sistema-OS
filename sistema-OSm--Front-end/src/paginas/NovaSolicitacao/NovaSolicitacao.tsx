@@ -176,12 +176,12 @@ export function NovaSolicitacao() {
       <CabecalhoPagina titulo="Nova Solicitação" />
 
       <main className="flex flex-1 justify-center px-4 py-8">
-        <div className="w-full max-w-3xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
           <div
             className={`relative isolate overflow-hidden py-3 text-center transition-colors duration-300 ${aparencia.cor}`}
           >
             <div className="bg-grade-industrial bg-grade pointer-events-none absolute inset-0 opacity-20" />
-            <p className="font-display relative text-sm font-bold tracking-widest text-white uppercase">
+            <p className="font-display relative text-sm font-bold tracking-wide text-white uppercase">
               {aparencia.faixa}
             </p>
           </div>
@@ -231,7 +231,7 @@ export function NovaSolicitacao() {
               />
 
               <div className="flex flex-col gap-1">
-                <span className="text-marca-500 font-mono text-xs font-semibold tracking-wider uppercase">
+                <span className="text-xs font-semibold text-slate-600">
                   Data/Hora
                 </span>
                 <p className="rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-2.5 text-slate-700 font-mono text-sm">
@@ -248,7 +248,7 @@ export function NovaSolicitacao() {
                   mensagemErro={errors.descricao?.message}
                   {...register('descricao')}
                 />
-                <p className="mt-1 text-right text-xs text-slate-400">
+                <p className="mt-1 text-right text-xs text-slate-500">
                   {descricao.length}/{limites.maximo}
                 </p>
               </div>
@@ -288,11 +288,6 @@ export function NovaSolicitacao() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

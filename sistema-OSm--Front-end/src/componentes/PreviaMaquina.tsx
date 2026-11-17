@@ -16,7 +16,7 @@ export function PreviaMaquina({ maquina }: PreviaMaquinaProps) {
           className="h-full w-full object-contain"
         />
       ) : (
-        <div className="flex flex-col items-center gap-2 text-slate-400">
+        <div className="flex flex-col items-center gap-2 text-slate-500">
           <PackageSearch size={28} />
           <span className="text-xs">
             {maquina ? 'Sem foto cadastrada' : 'Selecione uma máquina'}

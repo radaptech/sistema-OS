@@ -17,7 +17,7 @@ export function CabecalhoPagina({ titulo }: CabecalhoPaginaProps) {
   return (
     <header
       ref={referenciaCabecalho}
-      className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 shadow-sm backdrop-blur-lg"
+      className="sticky top-0 z-50 border-b border-slate-200 bg-white"
     >
       <div className="flex w-full items-center justify-between px-4 py-3 sm:px-8">
         <div className="flex items-center gap-2.5">
@@ -25,12 +25,12 @@ export function CabecalhoPagina({ titulo }: CabecalhoPaginaProps) {
             type="button"
             aria-label="Voltar"
             onClick={() => navegar(-1)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             <ArrowLeft size={20} />
           </button>
           <div>
-            <p className="text-marca-600 font-mono text-[10px] font-bold tracking-widest uppercase">
+            <p className="text-marca-600 font-mono text-xs font-bold tracking-wide uppercase">
               Solicitação OS
             </p>
             <p className="font-display text-base font-bold text-slate-800">
@@ -47,7 +47,7 @@ export function CabecalhoPagina({ titulo }: CabecalhoPaginaProps) {
             type="button"
             aria-label="Sair"
             onClick={aoSair}
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-red-50 hover:text-red-500"
           >
             <LogOut size={20} />
           </button>

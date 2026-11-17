@@ -11,7 +11,7 @@ export function CamposImpacto() {
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-marca-500 font-mono text-xs font-semibold tracking-wider uppercase">
+      <span className="text-xs font-semibold text-slate-600">
         Impacto na Produção
       </span>
 
@@ -52,7 +52,7 @@ export function CamposImpacto() {
         )}
       />
 
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-500">
         Marque apenas se a máquina{' '}
         <strong className="font-semibold">parou</strong>: é isso que faz a OS
         contar tempo de máquina parada. Sem o marcador, entende-se que a máquina

@@ -104,7 +104,7 @@ export function AdministradorSetores() {
           )}
 
           {!isLoading && setoresFiltrados.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Tag size={28} />
               <p className="text-sm">Nenhum setor encontrado para esses filtros.</p>
             </div>
@@ -114,13 +114,13 @@ export function AdministradorSetores() {
             <div
               key={setor.id}
               style={atrasoEntrada(indice)}
-              className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+              className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <MiniaturaFoto fotoUrl={setor.fotoUrl} alt={setor.nome} Icone={Tag} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-800">{setor.nome}</p>
-                  <p className="truncate text-xs text-slate-400">
+                  <p className="truncate text-xs text-slate-500">
                     {lojas.find((loja) => loja.id === setor.lojaId)?.nome ?? setor.lojaId}
                   </p>
                 </div>

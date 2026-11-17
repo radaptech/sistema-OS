@@ -261,7 +261,7 @@ export function PainelGestor() {
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-6 sm:px-8">
         <div>
-          <h1 className="font-display text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Painel do Gestor
           </h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -297,8 +297,8 @@ export function PainelGestor() {
         )}
 
         {escoposGestor.length === 0 && (
-          <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
-            <Inbox size={28} className="text-slate-400" />
+          <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500">
+            <Inbox size={28} className="text-slate-500" />
             <p className="text-sm">
               Nenhum setor/loja vinculado a este gestor.
             </p>
@@ -375,11 +375,6 @@ export function PainelGestor() {
         )}
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
 
       {solicitacaoParaAbrirOS && (
         <ModalAbrirOrdemServico

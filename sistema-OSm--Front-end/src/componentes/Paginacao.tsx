@@ -16,7 +16,7 @@ export function Paginacao({ pagina, totalPaginas, aoMudarPagina }: PaginacaoProp
   return (
     // Barra própria em vez de dois botões soltos: a paginação fica no fim de uma lista de
     // cards, e sem uma superfície embaixo ela lia como parte do último card.
-    <div className="flex items-center justify-between rounded-2xl border border-slate-200/60 bg-white p-3 shadow-sm sm:px-4">
+    <div className="flex items-center justify-between rounded-xl border border-slate-200/60 bg-white p-3 shadow-sm sm:px-4">
       <button
         type="button"
         disabled={desabilitarAnterior}

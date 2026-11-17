@@ -13,7 +13,7 @@ interface BadgeCriticidadeProps {
 export function BadgeCriticidade({ criticidade }: BadgeCriticidadeProps) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ring-1 ${ESTILO_POR_CRITICIDADE[criticidade]}`}
+      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-bold uppercase ring-1 ${ESTILO_POR_CRITICIDADE[criticidade]}`}
     >
       Criticidade {criticidade}
     </span>

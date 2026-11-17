@@ -48,7 +48,7 @@ export function PainelIndicadoresMaquina({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="shadow-card animate-surgir flex min-w-0 items-center gap-4 rounded-2xl bg-white p-4">
+      <div className="shadow-card animate-surgir flex min-w-0 items-center gap-4 rounded-xl bg-white p-4">
         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 sm:h-24 sm:w-24">
           {maquina.fotoUrl ? (
             <ImagemProgressiva
@@ -57,7 +57,7 @@ export function PainelIndicadoresMaquina({
               className="h-full w-full object-cover"
             />
           ) : (
-            <Wrench size={24} className="text-slate-400" />
+            <Wrench size={24} className="text-slate-500" />
           )}
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -69,7 +69,7 @@ export function PainelIndicadoresMaquina({
             {maquina.lojaNome && ` · ${maquina.lojaNome}`}
           </p>
           {detalhes.length > 0 && (
-            <p className="truncate font-mono text-[11px] text-slate-400">
+            <p className="truncate font-mono text-xs text-slate-500">
               {detalhes.join(' · ')}
             </p>
           )}
@@ -86,11 +86,11 @@ export function PainelIndicadoresMaquina({
       {carregandoIndicadores && (
         <div role="status" aria-busy="true" aria-label="Carregando indicadores">
           <EsqueletoGradeIndicadores />
-          <div className="shadow-card mt-4 rounded-2xl bg-white p-5">
+          <div className="shadow-card mt-4 rounded-xl bg-white p-5">
             <Esqueleto className="h-3 w-52" />
             <Esqueleto className="mt-4 h-40 w-full rounded-lg" />
           </div>
-          <div className="shadow-card mt-4 flex flex-col items-center gap-4 rounded-2xl bg-white p-5">
+          <div className="shadow-card mt-4 flex flex-col items-center gap-4 rounded-xl bg-white p-5">
             <Esqueleto className="h-3 w-44" />
             <Esqueleto className="h-40 w-40 rounded-full" />
           </div>

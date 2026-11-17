@@ -70,11 +70,11 @@ export function ModalFiltrosOS({
   const { propsDialogo, idTitulo } = useDialogo(fechar)
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md rounded-2xl bg-white shadow-pop`}>
-        <div className="flex items-start justify-between rounded-t-2xl bg-marca-600 px-6 py-4">
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} w-full max-w-md rounded-xl bg-white shadow-pop`}>
+        <div className="flex items-start justify-between rounded-t-xl bg-marca-600 px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Gestor
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">Filtrar OS</p>
@@ -160,7 +160,7 @@ export function ModalFiltrosOS({
             )}
           </div>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             O filtro de valor considera o custo total já lançado na OS (Custo Hora do
             Técnico + Custo de Manutenção) — solicitações e OS ainda em andamento não têm
             valor final e ficam de fora quando esse filtro está ativo.

@@ -34,7 +34,7 @@ body {
 /* Anel de foco visível e consistente para navegação via teclado, sem depender
    de cada componente reimplementar `focus-visible` manualmente. */
 :focus-visible {
-  outline: 2px solid #4bae70;
+  outline: 2px solid #2f6e42;
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -219,5 +219,12 @@ body {
   :root .Toastify__toast-container--top-center,
   :root .Toastify__toast-container--top-right {
     top: calc(var(--altura-cabecalho, 0px) + env(safe-area-inset-top));
+  }
+}
+
+/* No escuro o verde 600 do anel de foco some contra o fundo; volta pro tom claro. */
+@media screen {
+  :root[data-tema='escuro'] :focus-visible {
+    outline-color: #8ed3a4;
   }
 }

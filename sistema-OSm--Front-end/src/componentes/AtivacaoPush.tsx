@@ -105,7 +105,7 @@ export function AvisoAtivarPush({
 
 function Passo({ numero }: { numero: number }) {
   return (
-    <span className="shadow-card flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white font-mono text-[10px] font-bold text-slate-500">
+    <span className="shadow-card flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white font-mono text-xs font-bold text-slate-500">
       {numero}
     </span>
   )

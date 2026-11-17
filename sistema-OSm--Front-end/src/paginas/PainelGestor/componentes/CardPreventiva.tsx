@@ -13,7 +13,7 @@ export function CardPreventiva({ preventiva, aoClicar }: CardPreventivaProps) {
     <button
       type="button"
       onClick={aoClicar}
-      className="group flex w-full items-center justify-between gap-3 rounded-2xl bg-white p-4 text-left shadow-card transition-shadow duration-200 hover:shadow-card-hover"
+      className="group flex w-full items-center justify-between gap-3 rounded-xl bg-white p-4 text-left shadow-card transition-shadow duration-200 hover:shadow-card-hover"
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-marca-600 text-white">
@@ -22,7 +22,7 @@ export function CardPreventiva({ preventiva, aoClicar }: CardPreventivaProps) {
         <div>
           <p className="font-semibold text-slate-800">{preventiva.maquinaNome}</p>
           <p className="mt-0.5 text-sm text-slate-500">{preventiva.descricao}</p>
-          <p className="mt-1 font-mono text-xs text-slate-400">
+          <p className="mt-1 font-mono text-xs text-slate-500">
             A cada {preventiva.intervaloDias} dia(s) · Próxima:{' '}
             {formatarData(preventiva.proximaData)}
           </p>
@@ -31,7 +31,7 @@ export function CardPreventiva({ preventiva, aoClicar }: CardPreventivaProps) {
 
       <div className="flex shrink-0 items-center gap-2">
         <span
-          className={`rounded-full px-2.5 py-1 font-mono text-[10px] font-semibold whitespace-nowrap ${
+          className={`rounded-full px-2.5 py-1 font-mono text-xs font-semibold whitespace-nowrap ${
             preventiva.ativa
               ? 'bg-emerald-100 text-emerald-700'
               : 'bg-slate-200 text-slate-500'

@@ -45,7 +45,7 @@ export function EsqueletoLista({ quantidade = 4, children }: EsqueletoListaProps
 // número da OS, título, uma linha de apoio e o botão de ação à direita.
 export function EsqueletoCardOS() {
   return (
-    <div className="shadow-card flex flex-col gap-3 rounded-2xl bg-white p-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="shadow-card flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Esqueleto className="h-9 w-9 shrink-0 rounded-lg" />
@@ -64,7 +64,7 @@ export function EsqueletoCardOS() {
 // Empresas Terceirizadas): identificação à esquerda, ações à direita.
 export function EsqueletoLinhaCadastro() {
   return (
-    <div className="shadow-card flex flex-col gap-3 rounded-2xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="shadow-card flex flex-col gap-3 rounded-xl bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <Esqueleto className="h-4 w-36 max-w-[50%]" />

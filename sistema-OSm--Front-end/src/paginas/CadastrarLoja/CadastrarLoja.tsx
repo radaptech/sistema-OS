@@ -89,7 +89,7 @@ export function CadastrarLoja() {
       />
 
       <main className="flex flex-1 justify-center px-4 py-8">
-        <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
           <form
             onSubmit={handleSubmit(aoEnviar)}
             noValidate
@@ -143,11 +143,11 @@ export function CadastrarLoja() {
 
             {!emEdicao && (
               <div className="flex flex-col gap-2 border-t border-slate-100 pt-5">
-                <span className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+                <span className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
                   Lojas já cadastradas dessa empresa
                 </span>
                 {lojas.length === 0 ? (
-                  <p className="text-sm text-slate-400">Nenhuma loja cadastrada ainda.</p>
+                  <p className="text-sm text-slate-500">Nenhuma loja cadastrada ainda.</p>
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {lojas.map((loja) => (
@@ -167,11 +167,6 @@ export function CadastrarLoja() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

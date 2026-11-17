@@ -38,6 +38,10 @@ server {
         try_files $uri =404;
     }
 
+    # Só na imagem única (dockerfile da raiz) existe arquivo aqui: o proxy de /api.
+    # Na imagem só do front o glob não casa nada e o nginx segue sem ele.
+    include /etc/nginx/extras/*.conf;
+
     # SPA: React Router decide a rota no cliente, então qualquer caminho que
     # não bate em arquivo estático (ex: /painel-administrador, F5 numa rota
     # interna) precisa cair no index.html -- sem isso o nginx responde 404

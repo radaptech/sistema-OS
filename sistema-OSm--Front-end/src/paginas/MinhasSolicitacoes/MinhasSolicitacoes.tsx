@@ -100,13 +100,13 @@ export function MinhasSolicitacoes() {
           )}
 
           {isError && (
-            <p className="rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-10 text-center text-sm text-slate-400">
+            <p className="rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-10 text-center text-sm text-slate-500">
               Não foi possível carregar as solicitações.
             </p>
           )}
 
           {!isLoading && !isError && solicitacoes.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500">
               {busca || filtro !== 'Todos' || maquinaId !== undefined ? (
                 <SearchX size={28} />
               ) : (
@@ -136,11 +136,6 @@ export function MinhasSolicitacoes() {
         )}
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
 
       {solicitacaoParaVisualizar && (
         <ModalDetalhesSolicitacao

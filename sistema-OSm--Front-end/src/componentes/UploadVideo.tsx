@@ -184,7 +184,7 @@ export function UploadVideo({
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+      <label className="text-xs font-semibold text-slate-600">
         {rotulo}
       </label>
 

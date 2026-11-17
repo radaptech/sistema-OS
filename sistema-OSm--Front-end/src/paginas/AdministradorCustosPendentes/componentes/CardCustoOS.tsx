@@ -14,7 +14,7 @@ interface CardCustoOSProps {
 // Loja e setor não aparecem no card: a tela já está dentro deles (trilha Lojas › Loja › Setor).
 export function CardCustoOS({ ordem, aoEditarCustos }: CardCustoOSProps) {
   return (
-    <div className="shadow-card hover:shadow-card-hover flex h-full flex-col gap-3 rounded-2xl bg-white p-4 transition-shadow duration-200 sm:flex-row sm:items-start sm:justify-between">
+    <div className="shadow-card hover:shadow-card-hover flex h-full flex-col gap-3 rounded-xl bg-white p-4 transition-shadow duration-200 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 flex-1">
         {/* Uma linha só: sem flex-wrap o badge nunca cai para a linha de baixo,
               então todo card tem a mesma altura de cabeçalho e a coluna alinha. */}
@@ -24,18 +24,18 @@ export function CardCustoOS({ ordem, aoEditarCustos }: CardCustoOSProps) {
           </span>
           <span className="truncate font-semibold text-slate-800">{obterNomeAlvo(ordem)}</span>
           {ordem.maquinaCodigo && (
-            <span className="shrink-0 font-mono text-sm text-slate-400">
+            <span className="shrink-0 font-mono text-sm text-slate-500">
               · {ordem.maquinaCodigo}
             </span>
           )}
           <BadgeTipoOS tipo={ordem.tipo} />
         </div>
-        <p className="mt-1 truncate text-xs text-slate-400">
+        <p className="mt-1 truncate text-xs text-slate-500">
           Encerrada em {ordem.dataFim ? formatarDataHora(ordem.dataFim) : '—'}
         </p>
 
         <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
-          <p className="text-slate-400">
+          <p className="text-slate-500">
             {rotulosCustoOS.custoMaoDeObra}{' '}
             <span className="font-mono font-semibold text-slate-600">
               {ordem.custo?.custoHoraTecnico != null
@@ -43,7 +43,7 @@ export function CardCustoOS({ ordem, aoEditarCustos }: CardCustoOSProps) {
                 : '—'}
             </span>
           </p>
-          <p className="text-slate-400">
+          <p className="text-slate-500">
             {rotulosCustoOS.custoMaterial}{' '}
             <span className="font-mono font-semibold text-slate-600">
               {ordem.custo?.custoManutencao !== undefined
@@ -57,7 +57,7 @@ export function CardCustoOS({ ordem, aoEditarCustos }: CardCustoOSProps) {
               âmbar deixa de ser alarme falso e vira pendência de verdade: alguém
               disse que há um documento e ele ainda não foi registrado. */}
         {ordem.custo?.temNotaFiscal && (
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-slate-500">
             {ordem.custo.notasFiscais.length > 1 ? 'Notas Fiscais' : 'Nota Fiscal'}{' '}
             {ordem.custo.notasFiscais.length > 0 ? (
               <span className="font-mono font-semibold text-slate-600">

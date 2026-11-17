@@ -48,7 +48,7 @@ export function SecaoSetor({
   return (
     <section
       style={{ animationDelay: `${atraso}ms` }}
-      className="shadow-card animate-surgir flex min-w-0 flex-col gap-4 rounded-2xl bg-white p-4"
+      className="shadow-card animate-surgir flex min-w-0 flex-col gap-4 rounded-xl bg-white p-4"
     >
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1">
         {aoSelecionarSetor ? (
@@ -69,7 +69,7 @@ export function SecaoSetor({
             <TituloSetor setorNome={setorNome} fotoUrl={fotoUrl} />
           </div>
         )}
-        <p className="font-mono text-[11px] text-slate-400">
+        <p className="font-mono text-xs text-slate-500">
           {maquinas.length} {maquinas.length === 1 ? 'máquina' : 'máquinas'}
           {resumoSetor &&
             ` · ${resumoSetor.quantidadeOs} ${resumoSetor.quantidadeOs === 1 ? 'OS encerrada' : 'OS encerradas'}`}
@@ -102,7 +102,7 @@ export function SecaoSetor({
           type="button"
           onClick={aoVerMaquinario}
           title="Ver as OS que formam o custo do maquinário deste setor"
-          className="hover:text-marca-700 flex items-center gap-1 self-start font-mono text-[11px] font-semibold text-slate-500 transition-colors"
+          className="hover:text-marca-700 flex items-center gap-1 self-start font-mono text-xs font-semibold text-slate-500 transition-colors"
         >
           Ver as {resumoSetor.quantidadeOs} {resumoSetor.quantidadeOs === 1 ? 'OS de máquina' : 'OS de máquina'}
           <ChevronRight size={12} />
@@ -117,7 +117,7 @@ export function SecaoSetor({
           onClick={aoVerPreventivas}
           disabled={!aoVerPreventivas}
           title="Ver as manutenções preventivas deste setor"
-          className="flex items-center gap-2 rounded-xl border-l-4 border-amber-400 bg-slate-50/50 px-3 py-2 text-left font-mono text-[11px] text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
+          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-left font-mono text-xs text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
         >
           <CalendarCheck size={12} className="shrink-0 text-amber-500" />
           <span className="font-semibold">Preventivas</span>
@@ -136,7 +136,7 @@ export function SecaoSetor({
           onClick={aoVerReparos}
           disabled={!aoVerReparos}
           title="Ver os pequenos reparos deste setor"
-          className="flex items-center gap-2 rounded-xl border-l-4 border-orange-400 bg-slate-50/50 px-3 py-2 text-left font-mono text-[11px] text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
+          className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-left font-mono text-xs text-slate-600 enabled:cursor-pointer enabled:hover:bg-slate-100"
         >
           <Hammer size={12} className="shrink-0 text-orange-500" />
           <span className="font-semibold">Pequenos reparos</span>
@@ -148,7 +148,7 @@ export function SecaoSetor({
       )}
 
       {maquinas.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-200/60 px-4 py-3 text-xs text-slate-400">
+        <p className="rounded-xl border border-dashed border-slate-200/60 px-4 py-3 text-xs text-slate-500">
           Nenhuma máquina neste setor.
         </p>
       ) : (
@@ -198,7 +198,7 @@ interface MetricaProps {
 function Metrica({ rotulo, valor }: MetricaProps) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="truncate font-mono text-[10px] font-semibold text-slate-400 uppercase">
+      <span className="truncate font-mono text-xs font-semibold text-slate-500 uppercase">
         {rotulo}
       </span>
       {valor === undefined ? (
@@ -239,7 +239,7 @@ function CardMaquina({
             className="h-full w-full object-cover"
           />
         ) : (
-          <Wrench size={18} className="text-slate-400" />
+          <Wrench size={18} className="text-slate-500" />
         )}
       </div>
 
@@ -249,7 +249,7 @@ function CardMaquina({
         </p>
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {maquina.numeroPatrimonio && (
-            <span className="font-mono text-[10px] text-slate-400">
+            <span className="font-mono text-xs text-slate-500">
               {maquina.numeroPatrimonio}
             </span>
           )}
@@ -260,7 +260,7 @@ function CardMaquina({
         {carregando ? (
           <Esqueleto className="h-3 w-40" />
         ) : (
-          <p className="truncate font-mono text-[11px] text-slate-500">
+          <p className="truncate font-mono text-xs text-slate-500">
             {resumo && resumo.quantidadeOs + resumo.quantidadePreventivas > 0
               ? `${formatarHoras(resumo.horasParadaTotal)} parada · ${formatarMoeda(resumo.custoTotal)}${
                   // A preventiva vem à parte, como no painel: nunca somada ao custo da máquina.

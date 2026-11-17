@@ -24,7 +24,7 @@ const esquemaRedefinirSenha = z
 type DadosRedefinirSenha = z.infer<typeof esquemaRedefinirSenha>
 
 const CLASSE_LINK =
-  'text-marca-500 hover:text-marca-800 flex items-center justify-center gap-1.5 text-xs font-medium transition hover:underline'
+  'text-marca-600 hover:text-marca-800 flex items-center justify-center gap-1.5 text-xs font-medium transition hover:underline'
 
 export function RedefinirSenha() {
   const [parametros] = useSearchParams()
@@ -69,7 +69,7 @@ export function RedefinirSenha() {
     <button
       type="button"
       onClick={() => setMostrarSenha((valor) => !valor)}
-      className="text-marca-500 hover:text-marca-800 transition"
+      className="text-marca-600 hover:text-marca-800 transition"
       aria-label={mostrarSenha ? 'Ocultar senha' : 'Exibir senha'}
     >
       {mostrarSenha ? <EyeOff size={18} /> : <Eye size={18} />}

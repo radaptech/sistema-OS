@@ -91,12 +91,12 @@ export function SinoNotificacoes() {
         aria-haspopup="dialog"
         onClick={() => setAberto((valor) => !valor)}
         className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors hover:bg-slate-100 hover:text-slate-700 ${
-          aberto ? 'bg-slate-100 text-slate-700' : 'text-slate-400'
+          aberto ? 'bg-slate-100 text-slate-700' : 'text-slate-500'
         }`}
       >
         <Bell size={20} />
         {naoLidas > 0 && (
-          <span className="bg-marca-600 absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-[10px] leading-none font-bold text-white">
+          <span className="bg-marca-600 absolute top-1 right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 font-mono text-xs leading-none font-bold text-white">
             {naoLidas > LIMITE_SELO ? `${LIMITE_SELO}+` : naoLidas}
           </span>
         )}

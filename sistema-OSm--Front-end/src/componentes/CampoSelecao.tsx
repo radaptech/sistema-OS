@@ -18,7 +18,7 @@ export const CampoSelecao = forwardRef<HTMLSelectElement, CampoSelecaoProps>(
       <div className="flex flex-col gap-1.5">
         <label
           htmlFor={selectId}
-          className="text-[10px] font-bold tracking-widest text-slate-500 uppercase"
+          className="text-xs font-semibold text-slate-600"
         >
           {rotulo}
         </label>
@@ -26,7 +26,7 @@ export const CampoSelecao = forwardRef<HTMLSelectElement, CampoSelecaoProps>(
           id={selectId}
           name={name}
           ref={ref}
-          className={`h-[46px] w-full rounded-xl border bg-white px-4 text-sm font-medium text-slate-700 outline-none transition focus:ring-2 ${
+          className={`h-[46px] w-full rounded-lg border bg-white px-4 text-sm font-medium text-slate-700 outline-none transition focus:ring-2 ${
             mensagemErro
               ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
               : 'border-slate-200/60 focus:border-marca-500 focus:ring-marca-500/20'

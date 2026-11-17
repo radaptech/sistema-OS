@@ -54,11 +54,6 @@ export function HomeSolicitante() {
         </div>
       </main>
 
-      <footer className="py-4 text-center">
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
-          Solicitação OS © {new Date().getFullYear()}
-        </span>
-      </footer>
     </div>
   )
 }

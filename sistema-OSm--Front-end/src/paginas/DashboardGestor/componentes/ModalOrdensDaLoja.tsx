@@ -85,11 +85,11 @@ export function ModalOrdensDaLoja({
   return (
     <>
       {createPortal(
-        <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-          <div {...propsDialogo} className={`${classeCartao} shadow-pop flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white`}>
+        <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+          <div {...propsDialogo} className={`${classeCartao} shadow-pop flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white`}>
             <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
               <div>
-                <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+                <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
                   {escopoRotulo}{mes ? ` · ${mes}` : ''}
                 </p>
                 <p id={idTitulo} className="font-display text-lg font-bold text-white">{textos.titulo}</p>
@@ -114,7 +114,7 @@ export function ModalOrdensDaLoja({
               )}
 
               {!isLoading && ordens.length === 0 && (
-                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 px-4 py-8 text-center text-slate-400">
+                <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 px-4 py-8 text-center text-slate-500">
                   <Inbox size={20} />
                   <p className="max-w-sm text-xs">{textos.vazio}</p>
                 </div>
@@ -145,13 +145,13 @@ export function ModalOrdensDaLoja({
                     <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm font-bold text-slate-800">
                       <span className="truncate">{ordem.item || ordem.descricao}</span>
                       {ordem.codigo && (
-                        <span className="font-mono text-xs font-normal text-slate-400">· {ordem.codigo}</span>
+                        <span className="font-mono text-xs font-normal text-slate-500">· {ordem.codigo}</span>
                       )}
-                      <span className="font-mono text-xs font-normal text-slate-400">#{ordem.id}</span>
+                      <span className="font-mono text-xs font-normal text-slate-500">#{ordem.id}</span>
                       <BadgeOrigemOS origem={ordem.origem} />
                     </p>
                     <p className="truncate text-xs text-slate-500">{ordem.descricao}</p>
-                    <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
+                    <p className="mt-0.5 truncate font-mono text-xs text-slate-500">
                       {ordem.setorNome} · {ordem.tecnicoNome} ·{' '}
                       {ordem.encerradaEm ? formatarDataHora(ordem.encerradaEm) : '—'}
                     </p>
@@ -168,7 +168,7 @@ export function ModalOrdensDaLoja({
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-slate-200/60 px-4 py-3">
-              <p className="font-mono text-xs text-slate-400">
+              <p className="font-mono text-xs text-slate-500">
                 {data ? `${data.total} ${data.total === 1 ? textos.unidade[0] : textos.unidade[1]}` : ''}
               </p>
               <div className="w-32">

@@ -141,7 +141,7 @@ export function AdministradorMaquinas() {
           )}
 
           {!isLoading && maquinasFiltradas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Wrench size={28} />
               <p className="text-sm">Nenhuma máquina encontrada para esses filtros.</p>
             </div>
@@ -151,7 +151,7 @@ export function AdministradorMaquinas() {
             <div
               key={maquina.id}
               style={atrasoEntrada(indice)}
-              className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+              className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-3">
                 {maquina.fotoUrl ? (
@@ -171,11 +171,11 @@ export function AdministradorMaquinas() {
                     {/* Patrimônio, não o id do banco: é por ele que a busca desta
                         mesma tela filtra, e é o número que existe na etiqueta da
                         máquina. O id só aparece quando não há patrimônio. */}
-                    <span className="font-mono text-sm text-slate-400">
+                    <span className="font-mono text-sm text-slate-500">
                       · {maquina.numeroPatrimonio || maquina.id}
                     </span>
                   </p>
-                  <p className="truncate text-xs text-slate-400">
+                  <p className="truncate text-xs text-slate-500">
                     {lojas.find((loja) => loja.id === maquina.lojaId)?.nome ?? maquina.lojaId} ·{' '}
                     {maquina.setorNome}
                   </p>

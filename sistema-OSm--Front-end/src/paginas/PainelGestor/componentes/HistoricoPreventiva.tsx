@@ -19,13 +19,13 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="shadow-card flex items-start gap-3 rounded-2xl bg-white p-4">
+      <div className="shadow-card flex items-start gap-3 rounded-xl bg-white p-4">
         <span className="bg-marca-600 mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white">
           <CalendarClock size={18} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-slate-800">{preventiva.descricao}</p>
-          <p className="mt-1 font-mono text-xs text-slate-400">
+          <p className="mt-1 font-mono text-xs text-slate-500">
             {[
               preventiva.maquinaNome,
               preventiva.maquinaPatrimonio && `Patrimônio ${preventiva.maquinaPatrimonio}`,
@@ -37,7 +37,7 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
           </p>
         </div>
         <span
-          className={`shrink-0 rounded-full px-2.5 py-1 font-mono text-[10px] font-semibold whitespace-nowrap ${
+          className={`shrink-0 rounded-full px-2.5 py-1 font-mono text-xs font-semibold whitespace-nowrap ${
             preventiva.ativa ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
           }`}
         >
@@ -48,7 +48,7 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
       <div className="flex items-center justify-between gap-2 border-b border-slate-200/60 pb-2">
         <div className="flex items-center gap-2">
           <History size={16} className="text-marca-600" />
-          <h2 className="font-display text-sm font-bold tracking-widest text-slate-800 uppercase">
+          <h2 className="font-display text-sm font-bold tracking-wide text-slate-800 uppercase">
             Histórico
           </h2>
         </div>
@@ -76,7 +76,7 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
                 <p className="text-sm font-semibold text-slate-600">
                   Próxima: {formatarData(preventiva.proximaData)}
                 </p>
-                <p className="text-xs text-slate-400">A OS abre sozinha nessa data.</p>
+                <p className="text-xs text-slate-500">A OS abre sozinha nessa data.</p>
               </div>
             </li>
           )}
@@ -88,7 +88,7 @@ export function HistoricoPreventiva({ preventiva }: HistoricoPreventivaProps) {
           ))}
 
           {ciclos.length === 0 && (
-            <li className="py-6 text-center text-xs text-slate-400">
+            <li className="py-6 text-center text-xs text-slate-500">
               Esta preventiva ainda não venceu nenhuma vez.
             </li>
           )}
@@ -125,7 +125,7 @@ function LinhaCiclo({ ciclo }: { ciclo: CicloPreventiva }) {
             : `Não feita · ${ciclo.status} · ${ciclo.tecnicoNome}`}
         </p>
       </div>
-      <span className="shrink-0 font-mono text-xs text-slate-400">OS #{ciclo.id}</span>
+      <span className="shrink-0 font-mono text-xs text-slate-500">OS #{ciclo.id}</span>
     </div>
   )
 }

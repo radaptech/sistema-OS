@@ -90,11 +90,11 @@ export function ModalLancarCustoManutencao({
   const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Administrador
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">
@@ -129,7 +129,7 @@ export function ModalLancarCustoManutencao({
         >
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="font-mono text-xs font-semibold tracking-wider text-slate-400 uppercase">
+              <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Encerrada em
               </p>
               <p className="font-mono text-slate-700">
@@ -139,7 +139,7 @@ export function ModalLancarCustoManutencao({
               </p>
             </div>
             <div>
-              <p className="font-mono text-xs font-semibold tracking-wider text-slate-400 uppercase">
+              <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Horas Trabalhadas
               </p>
               <p className="font-mono text-slate-700">

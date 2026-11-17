@@ -33,11 +33,11 @@ export function ModalDetalhesEncerramento({
   const { propsDialogo, idTitulo } = useDialogo(fechar)
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Técnico
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">
@@ -60,7 +60,7 @@ export function ModalDetalhesEncerramento({
               <p className="font-display font-semibold text-slate-800">
                 {ordemServico.maquinaNome}
               </p>
-              <p className="font-mono text-sm text-slate-400">
+              <p className="font-mono text-sm text-slate-500">
                 {ordemServico.maquinaCodigo}
               </p>
             </div>
@@ -74,10 +74,10 @@ export function ModalDetalhesEncerramento({
               altura. */}
           <div className="flex flex-col gap-3 text-sm">
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Início
               </span>
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Término
               </span>
               <p className="font-mono text-slate-700">
@@ -93,10 +93,10 @@ export function ModalDetalhesEncerramento({
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Horas Trabalhadas
               </span>
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 Horas Parada
               </span>
               <p className="font-mono text-slate-700">
@@ -112,10 +112,10 @@ export function ModalDetalhesEncerramento({
             </div>
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 {rotulosCustoOS.custoMaoDeObra}
               </span>
-              <span className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+              <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 {rotulosCustoOS.custoMaterial}
               </span>
               <p className="font-mono text-slate-700">
@@ -134,7 +134,7 @@ export function ModalDetalhesEncerramento({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Tipo de OS
             </p>
             <p className="mt-1 text-sm text-slate-600">
@@ -143,7 +143,7 @@ export function ModalDetalhesEncerramento({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Defeito Constatado
             </p>
             <p className="mt-1 text-sm text-slate-600">
@@ -152,7 +152,7 @@ export function ModalDetalhesEncerramento({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Causa Raiz
             </p>
             <p className="mt-1 text-sm text-slate-600">
@@ -161,7 +161,7 @@ export function ModalDetalhesEncerramento({
           </div>
 
           <div>
-            <p className="font-mono text-xs font-semibold tracking-wide text-slate-400 uppercase">
+            <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Solução Aplicada
             </p>
             <p className="mt-1 text-sm text-slate-600">

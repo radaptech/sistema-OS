@@ -31,7 +31,7 @@ export function SeletorLoja({ lojas, aoSelecionar }: SeletorLojaProps) {
           type="button"
           onClick={() => aoSelecionar(resumo.loja.id)}
           style={{ animationDelay: `${indice * 40}ms` }}
-          className="group shadow-card hover:shadow-card-hover animate-surgir flex min-w-0 flex-col gap-4 rounded-2xl bg-white p-4 text-left transition-shadow sm:p-5"
+          className="group shadow-card hover:shadow-card-hover animate-surgir flex min-w-0 flex-col gap-4 rounded-xl bg-white p-4 text-left transition-shadow sm:p-5"
         >
           <div className="flex min-w-0 items-center gap-3">
             {resumo.loja.fotoUrl ? (
@@ -49,7 +49,7 @@ export function SeletorLoja({ lojas, aoSelecionar }: SeletorLojaProps) {
               <h2 className="font-display truncate text-base font-bold text-slate-900">
                 {resumo.loja.nome}
               </h2>
-              <p className="font-mono text-[10px] font-semibold tracking-widest text-slate-400 uppercase">
+              <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 {resumo.acessoTotal
                   ? 'Todos os setores'
                   : `${resumo.quantidadeSetores} ${resumo.quantidadeSetores === 1 ? 'setor' : 'setores'} no seu escopo`}
@@ -100,11 +100,11 @@ function Contador({ Icone, valor, rotulo, destaque = false }: ContadorProps) {
       >
         <Icone
           size={13}
-          className={destaque ? 'text-red-500' : 'text-slate-400'}
+          className={destaque ? 'text-red-500' : 'text-slate-500'}
         />
         {valor}
       </span>
-      <span className="truncate text-[10px] font-semibold text-slate-500 uppercase">
+      <span className="truncate text-xs font-semibold text-slate-500 uppercase">
         {rotulo}
       </span>
     </div>

@@ -142,7 +142,7 @@ export function AbrirOSDireta() {
       />
 
       <main className="flex flex-1 justify-center px-4 py-8">
-        <div className="w-full max-w-3xl overflow-hidden rounded-3xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm">
           <FormProvider {...formulario}>
             <form
               onSubmit={handleSubmit(aoEnviar)}
@@ -202,7 +202,7 @@ export function AbrirOSDireta() {
                   mensagemErro={errors.descricao?.message}
                   {...register('descricao')}
                 />
-                <p className="mt-1 text-right text-xs text-slate-400">
+                <p className="mt-1 text-right text-xs text-slate-500">
                   {descricao.length}/{limites.maximo}
                 </p>
               </div>

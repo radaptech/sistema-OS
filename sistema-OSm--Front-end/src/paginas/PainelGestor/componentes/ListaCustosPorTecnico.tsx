@@ -28,12 +28,12 @@ export function ListaCustosPorTecnico({
         onClick={() => setAberta((valor) => !valor)}
         className="flex w-full items-center justify-between gap-2 text-left"
       >
-        <span className="font-mono text-[10px] font-semibold tracking-widest text-slate-500 uppercase">
+        <span className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
           Por técnico ({tecnicos.length})
         </span>
         <ChevronDown
           size={16}
-          className={`duration-rapido text-slate-400 transition-transform ${aberta ? 'rotate-180' : ''}`}
+          className={`duration-rapido text-slate-500 transition-transform ${aberta ? 'rotate-180' : ''}`}
         />
       </button>
 

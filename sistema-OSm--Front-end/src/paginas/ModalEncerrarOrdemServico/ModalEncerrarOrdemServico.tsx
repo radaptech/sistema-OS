@@ -94,11 +94,11 @@ export function ModalEncerrarOrdemServico({
   const { propsDialogo, idTitulo } = useDialogo(fechar, { podeFechar: !isSubmitting })
 
   return createPortal(
-    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}>
-      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}>
+    <div className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}>
+      <div {...propsDialogo} className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}>
         <div className="flex items-start justify-between bg-marca-600 px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Técnico
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">
@@ -126,10 +126,10 @@ export function ModalEncerrarOrdemServico({
           className="flex max-h-[75vh] flex-col gap-5 overflow-y-auto p-6 pb-0"
         >
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+            <span className="text-xs font-semibold text-slate-600">
               Início do Atendimento
             </span>
-            <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+            <span className="text-xs font-semibold text-slate-600">
               Término do Atendimento
             </span>
             <p className="rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-2.5 text-slate-700 font-mono text-sm">
@@ -141,10 +141,10 @@ export function ModalEncerrarOrdemServico({
           </div>
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+            <span className="text-xs font-semibold text-slate-600">
               Horas Trabalhadas
             </span>
-            <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+            <span className="text-xs font-semibold text-slate-600">
               Horas Parada
             </span>
             <p className="text-marca-800 rounded-lg bg-lime-100 px-3 py-2.5 font-mono text-sm">
@@ -155,7 +155,7 @@ export function ModalEncerrarOrdemServico({
             </p>
           </div>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             {horasParada !== undefined
               ? 'Horas Trabalhadas desconta o tempo em que a OS ficou pausada (ex: esperando peça) — Horas Parada conta corrido desde a solicitação, sem descontar pausas nem a espera pela abertura da OS.'
               : 'Horas Trabalhadas desconta o tempo em que a OS ficou pausada (ex: esperando peça). Esta OS não foi marcada como "Afeta Produção": a máquina seguiu operando, então não acumula tempo de parada.'}

@@ -99,7 +99,7 @@ export function SeletorPreventivas({ preventivas, lojas, carregando }: SeletorPr
 
   if (preventivas.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 py-8 text-center text-slate-400">
+      <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-slate-200/60 bg-slate-50 py-8 text-center text-slate-500">
         <Inbox size={20} />
         <p className="text-xs">Nenhuma preventiva cadastrada nos seus setores.</p>
       </div>
@@ -180,7 +180,7 @@ export function SeletorPreventivas({ preventivas, lojas, carregando }: SeletorPr
               </span>
             )}
             <div className="min-w-0">
-              <h2 className="font-display truncate text-sm font-bold tracking-widest text-slate-800 uppercase">
+              <h2 className="font-display truncate text-sm font-bold tracking-wide text-slate-800 uppercase">
                 {maquina.nome}
               </h2>
               <p className="mt-0.5 font-mono text-xs text-slate-500">

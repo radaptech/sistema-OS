@@ -37,7 +37,7 @@ export function FiltroRevisaoCusto({
           >
             {opcao.rotulo}
             <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+              className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
                 ativo
                   ? 'bg-marca-100 text-marca-800'
                   : 'bg-white/10 text-slate-300'

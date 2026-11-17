@@ -54,7 +54,7 @@ export function UploadFoto({
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+      <label className="text-xs font-semibold text-slate-600">
         {rotulo}
       </label>
 
@@ -89,7 +89,7 @@ export function UploadFoto({
         </button>
       ) : (
         urlExistente && (
-          <span className="self-start text-xs text-slate-400">
+          <span className="self-start text-xs text-slate-500">
             Foto atual — escolha um arquivo para trocar
           </span>
         )

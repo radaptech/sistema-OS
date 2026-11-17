@@ -77,7 +77,7 @@ export function AdministradorOSFinalizadas() {
               (ordem.custo?.custoHoraTecnico ?? 0) + (ordem.custo?.custoManutencao ?? 0)
 
             return (
-              <div className="flex h-full flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex h-full flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
                   {/* Uma linha só: sem flex-wrap o badge nunca cai para a linha de baixo. */}
                   <div className="flex items-center gap-2">
@@ -88,13 +88,13 @@ export function AdministradorOSFinalizadas() {
                       {obterNomeAlvo(ordem)}
                     </span>
                     {ordem.maquinaCodigo && (
-                      <span className="shrink-0 font-mono text-sm text-slate-400">
+                      <span className="shrink-0 font-mono text-sm text-slate-500">
                         · {ordem.maquinaCodigo}
                       </span>
                     )}
                     <BadgeTipoOS tipo={ordem.tipo} />
                   </div>
-                  <p className="mt-1 truncate text-xs text-slate-400">
+                  <p className="mt-1 truncate text-xs text-slate-500">
                     Encerrada em {ordem.dataFim ? formatarDataHora(ordem.dataFim) : '—'}
                   </p>
                   <p className="mt-1 font-mono text-xs font-semibold text-emerald-700">

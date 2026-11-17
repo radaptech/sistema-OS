@@ -18,7 +18,7 @@ export const CampoTexto = forwardRef<HTMLInputElement, CampoTextoProps>(
       <div className="flex flex-col gap-1.5">
         <label
           htmlFor={inputId}
-          className="text-[10px] font-bold tracking-widest text-slate-500 uppercase"
+          className="text-xs font-semibold text-slate-600"
         >
           {rotulo}
         </label>
@@ -29,7 +29,7 @@ export const CampoTexto = forwardRef<HTMLInputElement, CampoTextoProps>(
             ref={ref}
             // Altura fixa em vez de padding: o campo fica lado a lado com botões e selects,
             // e alinhar isso por padding volta a desalinhar assim que o tamanho do texto muda.
-            className={`h-[46px] w-full rounded-xl border bg-white px-4 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-400 focus:ring-2 ${
+            className={`h-[46px] w-full rounded-lg border bg-white px-4 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-500 focus:ring-2 ${
               mensagemErro
                 ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
                 : 'border-slate-200/60 focus:border-marca-500 focus:ring-marca-500/20'

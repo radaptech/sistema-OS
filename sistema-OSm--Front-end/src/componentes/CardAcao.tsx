@@ -52,10 +52,10 @@ export function CardAcao({
     <button
       type="button"
       onClick={aoClicar}
-      className={`group flex w-full items-center gap-4 rounded-2xl border p-4 text-left shadow-sm transition-all duration-200 hover:shadow-md active:scale-[0.99] ${estilos.card}`}
+      className={`group flex w-full items-center gap-4 rounded-xl border p-4 text-left shadow-sm transition-all duration-200 hover:shadow-md active:scale-[0.99] ${estilos.card}`}
     >
       <span
-        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-transform duration-200 group-hover:scale-105 ${estilos.icone}`}
+        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${estilos.icone}`}
       >
         <Icone size={24} />
       </span>

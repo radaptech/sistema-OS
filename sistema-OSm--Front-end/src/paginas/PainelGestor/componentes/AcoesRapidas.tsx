@@ -40,7 +40,7 @@ export function AcoesRapidas({
         <Filter size={16} />
         Filtrar OS
         {quantidadeFiltrosAtivos > 0 && (
-          <span className="bg-marca-500 flex h-5 min-w-5 items-center justify-center rounded-full px-1 font-mono text-[11px] font-bold text-white">
+          <span className="bg-marca-500 flex h-5 min-w-5 items-center justify-center rounded-full px-1 font-mono text-xs font-bold text-white">
             {quantidadeFiltrosAtivos}
           </span>
         )}

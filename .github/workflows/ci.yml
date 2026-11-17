@@ -1,0 +1,146 @@
+name: CI
+
+# Testa back e front; na master, se os dois passarem, publica UMA imagem com os
+# dois juntos (dockerfile da raiz) e manda o Railway subir ela.
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+  # Rodar à mão pela aba Actions (ex: depois de trocar o secret BACK_ENV).
+  workflow_dispatch:
+
+jobs:
+  back:
+    runs-on: ubuntu-latest
+
+    # O teste de integração dá t.Skip sem Postgres alcançável -- sem este
+    # service o CI passaria verde sem ter rodado a metade que importa.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: sistema-OSm--Back-end
+
+    env:
+      TEST_DB_DSN: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: sistema-OSm--Back-end/go.mod
+          cache-dependency-path: sistema-OSm--Back-end/go.sum
+
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+  front:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: sistema-OSm--Front-end
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sistema-OSm--Front-end/package-lock.json
+
+      - run: npm ci
+
+      - name: lint
+        run: npm run lint
+
+      - name: build
+        run: npm run build
+
+  # Imagem só da master, e só com back E front verdes. PR e dev param nos testes.
+  docker:
+    needs: [back, front]
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    # Dois pushes seguidos na master: o segundo espera o primeiro, senão o
+    # latest podia terminar apontando pra imagem mais velha.
+    concurrency: docker
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:${{ github.sha }}
+
+  # As variáveis de produção do back moram num secret só do GitHub (BACK_ENV, o
+  # .env de produção colado inteiro). Este job grava elas no Railway e manda cada
+  # serviço puxar a imagem nova -- ninguém configura variável no painel, e a
+  # imagem continua sem segredo dentro.
+  railway:
+    needs: docker
+    concurrency: railway
+    runs-on: ubuntu-latest
+
+    env:
+      # Token de PROJETO do Railway (Project Settings > Tokens), já preso ao
+      # projeto e ao ambiente de produção.
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      BACK_ENV: ${{ secrets.BACK_ENV }}
+      # Serviços que rodam esta imagem, separados por vírgula: o app e os dois
+      # crons (backup-banco e preventivas-vencidas).
+      RAILWAY_SERVICES: ${{ vars.RAILWAY_SERVICES }}
+
+    steps:
+      - run: npm install -g @railway/cli@5.74.1
+
+      - name: Grava as variáveis e sobe a imagem nova em cada serviço
+        run: |
+          set -euo pipefail
+          test -n "$BACK_ENV" || { echo "secret BACK_ENV vazio"; exit 1; }
+          test -n "$RAILWAY_SERVICES" || { echo "variável RAILWAY_SERVICES vazia"; exit 1; }
+
+          # Linhas KEY=VALUE do .env; comentário e linha em branco ficam de fora.
+          mapfile -t pares < <(printf '%s\n' "$BACK_ENV" | tr -d '\r' | grep -E '^[A-Za-z_][A-Za-z0-9_]*=')
+          echo "${#pares[@]} variáveis"
+
+          IFS=',' read -ra servicos <<< "$RAILWAY_SERVICES"
+          for servico in "${servicos[@]}"; do
+            servico="$(echo "$servico" | xargs)"
+            echo "-> $servico"
+            # Sem --json: a saída JSON traz os valores em claro. --skip-deploys
+            # porque o redeploy logo abaixo já sobe com as variáveis novas.
+            railway variable set --service "$servico" --skip-deploys "${pares[@]}" > /dev/null
+            # --from-source puxa o :latest de novo do Docker Hub; sem ele o
+            # Railway redeployaria a imagem antiga que já tem.
+            railway redeploy --service "$servico" --from-source --yes > /dev/null
+          done

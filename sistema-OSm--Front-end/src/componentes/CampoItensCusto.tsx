@@ -83,7 +83,7 @@ export function CampoItensCusto({
   return (
     <div className="flex flex-col gap-3 border-t border-slate-100 pt-5">
       <div className="flex items-center justify-between">
-        <label className="text-marca-500 font-mono text-xs font-semibold tracking-wider uppercase">
+        <label className="text-xs font-semibold text-slate-600">
           Custos *
         </label>
         <button
@@ -97,14 +97,14 @@ export function CampoItensCusto({
         </button>
       </div>
 
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-500">
         {tipo === 'terceiros'
           ? 'Uma linha por serviço da empresa, separando o valor das peças e o da mão de obra, como vem na nota fiscal dela.'
           : 'Uma linha por serviço feito, com a peça e a mão de obra dele. Se a OS trocou duas peças, lance as duas separadas — é assim que dá para conferir cada uma contra a nota depois.'}
       </p>
 
       {itens.length === 0 && (
-        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-400">
+        <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-4 text-center text-xs text-slate-500">
           Nenhum custo lançado. Adicione ao menos um para continuar.
         </p>
       )}

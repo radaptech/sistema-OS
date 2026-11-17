@@ -8,7 +8,7 @@ interface BarraPeriodoProps {
 export function BarraPeriodo({ mesSelecionado, aoLimpar }: BarraPeriodoProps) {
   return (
     <div className="-mb-1 flex flex-wrap items-center justify-between gap-2">
-      <p className="font-mono text-[10px] font-bold tracking-widest text-slate-500 uppercase">
+      <p className="font-mono text-xs font-semibold text-slate-600">
         {mesSelecionado
           ? `Exibindo ${mesSelecionado}`
           : 'Exibindo histórico completo'}
@@ -22,7 +22,7 @@ export function BarraPeriodo({ mesSelecionado, aoLimpar }: BarraPeriodoProps) {
           Ver histórico completo
         </button>
       ) : (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-500">
           Clique num mês do gráfico para filtrar
         </p>
       )}

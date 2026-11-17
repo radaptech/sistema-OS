@@ -70,12 +70,12 @@ export function CardCustosDoMes() {
   return (
     <section
       aria-labelledby="titulo-custos-do-mes"
-      className="shadow-card flex flex-col gap-4 rounded-2xl bg-white p-4 sm:p-5"
+      className="shadow-card flex flex-col gap-4 rounded-xl bg-white p-4 sm:p-5"
     >
       <div className="flex items-center justify-between gap-3">
         <h2
           id="titulo-custos-do-mes"
-          className="flex shrink-0 items-center gap-2 font-mono text-[10px] font-bold tracking-widest whitespace-nowrap text-slate-500 uppercase"
+          className="flex shrink-0 items-center gap-2 font-mono text-xs font-bold tracking-wide whitespace-nowrap text-slate-500 uppercase"
         >
           <span className="bg-marca-600 flex h-6 w-6 items-center justify-center rounded-md text-white">
             <Wallet size={12} />
@@ -195,7 +195,7 @@ function ConteudoCustosDoMes({ custos }: { custos: CustosDoMes }) {
                 <div className="min-w-0">
                   <p className="text-sm text-slate-700">{parcela.nome}</p>
                   {detalhe && (
-                    <p className="text-xs text-slate-400">{detalhe}</p>
+                    <p className="text-xs text-slate-500">{detalhe}</p>
                   )}
                 </div>
               </div>
@@ -203,7 +203,7 @@ function ConteudoCustosDoMes({ custos }: { custos: CustosDoMes }) {
                 <p className="font-mono text-sm font-bold text-slate-800">
                   {formatarMoeda(valor)}
                 </p>
-                <p className="font-mono text-[11px] text-slate-400">
+                <p className="font-mono text-xs text-slate-500">
                   {porcentagem(valor, custos.custoTotal)}
                 </p>
               </div>

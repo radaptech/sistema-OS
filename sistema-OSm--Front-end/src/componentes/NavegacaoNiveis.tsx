@@ -82,7 +82,7 @@ export function ListaNavegacao({
 }: ListaNavegacaoProps) {
   return (
     <div className="flex flex-col gap-3">
-      <h2 className="font-display text-sm font-bold tracking-widest text-slate-800 uppercase">
+      <h2 className="font-display text-sm font-bold tracking-wide text-slate-800 uppercase">
         {titulo}
       </h2>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -92,7 +92,7 @@ export function ListaNavegacao({
             type="button"
             onClick={() => aoEntrar(item)}
             style={atrasoEntrada(indice)}
-            className="animate-surgir group shadow-card hover:shadow-card-hover flex items-center gap-3 rounded-2xl bg-white p-4 text-left transition-shadow duration-200"
+            className="animate-surgir group shadow-card hover:shadow-card-hover flex items-center gap-3 rounded-xl bg-white p-4 text-left transition-shadow duration-200"
           >
             {item.fotoUrl ? (
               <ImagemProgressiva
@@ -110,14 +110,14 @@ export function ListaNavegacao({
               {item.detalhe && (
                 <span className="block truncate text-xs text-slate-500">{item.detalhe}</span>
               )}
-              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-slate-400">
+              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-xs text-slate-500">
                 {item.filhos !== undefined && rotuloFilhos && (
                   <span>{rotuloFilhos(item.filhos)} ·</span>
                 )}
                 <span>{rotuloQuantidade(item.quantidade)}</span>
                 {item.destaques > 0 && rotuloDestaques && (
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                       tomDestaque === 'vermelho'
                         ? 'bg-red-100 text-red-700'
                         : 'bg-amber-100 text-amber-700'

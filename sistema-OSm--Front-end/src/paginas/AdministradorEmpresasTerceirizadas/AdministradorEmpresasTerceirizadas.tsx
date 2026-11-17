@@ -100,7 +100,7 @@ export function AdministradorEmpresasTerceirizadas() {
           )}
 
           {!isLoading && empresasFiltradas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Building2 size={28} />
               <p className="text-sm">Nenhuma empresa terceirizada encontrada para esses filtros.</p>
             </div>
@@ -110,17 +110,17 @@ export function AdministradorEmpresasTerceirizadas() {
             <div
               key={empresa.id}
               style={atrasoEntrada(indice)}
-              className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+              className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <MiniaturaFoto fotoUrl={empresa.fotoUrl} alt={empresa.nome} Icone={Building2} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-800">{empresa.nome}</p>
-                  <p className="truncate text-xs text-slate-400">
+                  <p className="truncate text-xs text-slate-500">
                     {empresa.especialidade ?? 'Sem especialidade informada'}
                   </p>
                   {empresa.telefone && (
-                    <p className="flex items-center gap-1 truncate font-mono text-xs text-slate-400">
+                    <p className="flex items-center gap-1 truncate font-mono text-xs text-slate-500">
                       <Phone size={10} />
                       {empresa.telefone}
                     </p>

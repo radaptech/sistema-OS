@@ -64,7 +64,7 @@ export function CamposAcesso({
   return (
     <div className={`flex flex-col gap-5 ${className}`}>
       <div className="flex flex-col gap-1.5">
-        <span className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+        <span className="text-xs font-semibold text-slate-600">
           Loja(s) * {perfil !== 'solicitante' && '(seleção múltipla)'}
         </span>
         <SeletorMultiplo
@@ -89,7 +89,7 @@ export function CamposAcesso({
 
       {perfil !== 'tecnico' && (
         <div className="flex flex-col gap-3">
-          <span className="font-mono text-xs font-semibold tracking-wider text-marca-500 uppercase">
+          <span className="text-xs font-semibold text-slate-600">
             Setor(es) * {perfil === 'gestor' && '(seleção múltipla)'}
           </span>
 

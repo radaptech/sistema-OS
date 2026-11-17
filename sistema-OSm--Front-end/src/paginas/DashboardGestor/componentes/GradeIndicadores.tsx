@@ -62,7 +62,6 @@ export function GradeIndicadores({
           custo={resumo.custoPreventivas}
           quantidade={resumo.quantidadePreventivas}
           unidade={['preventiva', 'preventivas']}
-          classeBorda="border-amber-400"
           classeIcone="bg-amber-500"
           dica="Ver as manutenções preventivas"
           aoClicar={aoVerPreventivas}
@@ -75,7 +74,6 @@ export function GradeIndicadores({
           custo={resumo.custoReparos}
           quantidade={resumo.quantidadeReparos}
           unidade={['reparo', 'reparos']}
-          classeBorda="border-orange-400"
           classeIcone="bg-orange-500"
           dica="Ver os pequenos reparos"
           aoClicar={aoVerReparos}
@@ -91,7 +89,6 @@ interface FaixaCustoAParteProps {
   custo: number
   quantidade: number
   unidade: [string, string]
-  classeBorda: string
   classeIcone: string
   dica: string
   // Ausente = faixa só de leitura.
@@ -104,7 +101,6 @@ function FaixaCustoAParte({
   custo,
   quantidade,
   unidade,
-  classeBorda,
   classeIcone,
   dica,
   aoClicar,
@@ -122,7 +118,7 @@ function FaixaCustoAParte({
         }
       }}
       title={aoClicar ? dica : undefined}
-      className={`shadow-card col-span-2 flex min-w-0 items-center gap-3 rounded-2xl border-l-4 ${classeBorda} bg-white p-3 sm:col-span-4 sm:p-4 ${
+      className={`shadow-card col-span-2 flex min-w-0 items-center gap-3 rounded-xl bg-white p-3 sm:col-span-4 sm:p-4 ${
         aoClicar ? 'hover:shadow-card-hover cursor-pointer transition-shadow' : ''
       }`}
     >
@@ -130,14 +126,14 @@ function FaixaCustoAParte({
         <Icone size={12} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-mono text-[10px] font-semibold text-slate-400 uppercase">
+        <p className="truncate font-mono text-xs font-semibold text-slate-500 uppercase">
           {titulo}
         </p>
         <p className="truncate font-mono text-base font-bold text-slate-800 sm:text-lg">
           {formatarMoeda(custo)}
         </p>
       </div>
-      <p className="shrink-0 font-mono text-[11px] text-slate-400">
+      <p className="shrink-0 font-mono text-xs text-slate-500">
         {quantidade} {quantidade === 1 ? unidade[0] : unidade[1]}
         {aoClicar && quantidade > 0 && ' ›'}
       </p>
@@ -149,7 +145,7 @@ export function EsqueletoGradeIndicadores() {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {Array.from({ length: 4 }, (_, indice) => (
-        <div key={indice} className="shadow-card rounded-2xl bg-white p-4">
+        <div key={indice} className="shadow-card rounded-xl bg-white p-4">
           <Esqueleto className="h-4 w-4 rounded" />
           <Esqueleto className="mt-3 h-3 w-20" />
           <Esqueleto className="mt-2 h-5 w-16" />

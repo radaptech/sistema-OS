@@ -28,7 +28,7 @@ export function SeletorPerfil({
   // espaço disponível não cresce com a tela — uma linha única com 4 abas nunca cabe o
   // texto completo, mesmo em telas grandes.
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-2xl border border-slate-200/60 bg-slate-50 p-1">
+    <div className="grid grid-cols-2 gap-1 rounded-xl border border-slate-200/60 bg-slate-50 p-1">
       {OPCOES_PERFIL.map(({ valor, rotulo, Icone }) => {
         const ativo = perfilSelecionado === valor
 
@@ -40,7 +40,7 @@ export function SeletorPerfil({
             className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm transition-all duration-200 ${
               ativo
                 ? 'bg-marca-600 font-semibold text-white shadow-sm shadow-marca-600/20'
-                : 'font-medium text-marca-500 hover:bg-white/60 hover:text-marca-800'
+                : 'font-medium text-marca-600 hover:bg-white/60 hover:text-marca-800'
             }`}
           >
             <Icone size={16} className="shrink-0" />

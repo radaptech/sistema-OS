@@ -86,7 +86,7 @@ export function AdministradorLojas() {
           )}
 
           {!isLoading && lojasFiltradas.length === 0 && (
-            <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-400 lg:col-span-2">
+            <div className="flex flex-col items-center gap-2 rounded-xl border-2 border-dashed border-slate-200/60 bg-white py-12 text-slate-500 lg:col-span-2">
               <Store size={28} />
               <p className="text-sm">Nenhuma loja encontrada para esses filtros.</p>
             </div>
@@ -96,13 +96,13 @@ export function AdministradorLojas() {
             <div
               key={loja.id}
               style={atrasoEntrada(indice)}
-              className="animate-surgir flex flex-col gap-3 rounded-2xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
+              className="animate-surgir flex flex-col gap-3 rounded-xl bg-white p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-3">
                 <MiniaturaFoto fotoUrl={loja.fotoUrl} alt={loja.nome} Icone={Store} />
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-800">{loja.nome}</p>
-                  <p className="truncate text-xs text-slate-400">
+                  <p className="truncate text-xs text-slate-500">
                     {empresas.find((empresa) => empresa.id === loja.empresaId)?.nome ??
                       loja.empresaId}
                   </p>

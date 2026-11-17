@@ -58,15 +58,15 @@ export function ModalAbrirOrdemServico({
 
   return createPortal(
     <div
-      className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm`}
+      className={`${classeFundo} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}
     >
       <div
         {...propsDialogo}
-        className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-2xl bg-white`}
+        className={`${classeCartao} shadow-pop w-full max-w-md overflow-hidden rounded-xl bg-white`}
       >
         <div className="bg-marca-600 flex items-start justify-between px-6 py-4">
           <div>
-            <p className="font-mono text-xs font-bold tracking-widest text-white/80 uppercase">
+            <p className="font-mono text-xs font-bold tracking-wide text-white/80 uppercase">
               Painel do Gestor
             </p>
             <p id={idTitulo} className="font-display text-lg font-bold text-white">
@@ -106,7 +106,7 @@ export function ModalAbrirOrdemServico({
           />
 
           <div className="flex flex-col gap-1">
-            <span className="text-marca-500 font-mono text-xs font-semibold tracking-wide uppercase">
+            <span className="text-xs font-semibold text-slate-600">
               Data/Hora
             </span>
             <p className="text-marca-800 rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-2.5 font-mono text-sm text-slate-700">

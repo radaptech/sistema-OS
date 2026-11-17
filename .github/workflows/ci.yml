@@ -84,9 +84,40 @@ jobs:
     # latest podia terminar apontando pra imagem mais velha.
     concurrency: docker
     runs-on: ubuntu-latest
+    # Pra criar a tag git da versão.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Histórico e tags inteiros: a versão nova sai da última tag v*.
+          fetch-depth: 0
+
+      # Versão automática: última tag vX.Y.Z + 1 no patch (sem tag nenhuma, 1.0.0).
+      # Pra subir maior/menor, crie a tag à mão (git tag v1.1.0 && git push origin
+      # v1.1.0) e o próximo merge sai 1.1.1.
+      - name: Calcula a versão
+        id: versao
+        run: |
+          set -euo pipefail
+          # Commit já versionado (rodou de novo pela aba Actions): reaproveita a versão.
+          atual="$(git tag --points-at HEAD -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+          if [ -n "$atual" ]; then
+            versao="${atual#v}"; nova=false
+          else
+            ultima="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+            if [ -z "$ultima" ]; then
+              versao=1.0.0
+            else
+              IFS=. read -r maior menor patch <<< "${ultima#v}"
+              versao="$maior.$menor.$((patch + 1))"
+            fi
+            nova=true
+          fi
+          echo "versão $versao"
+          echo "versao=$versao" >> "$GITHUB_OUTPUT"
+          echo "nova=$nova" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
         with:
@@ -100,7 +131,14 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/sistema-os:${{ steps.versao.outputs.versao }}
+
+      # Tag só depois da imagem publicada: build que falha não gasta número.
+      - name: Cria a tag git da versão
+        if: steps.versao.outputs.nova == 'true'
+        run: |
+          git tag "v${{ steps.versao.outputs.versao }}"
+          git push origin "v${{ steps.versao.outputs.versao }}"
 
   # As variáveis de produção do back moram num secret só do GitHub (BACK_ENV, o
   # .env de produção colado inteiro). Este job grava elas no Railway e manda cada

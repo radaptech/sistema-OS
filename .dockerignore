@@ -1,0 +1,13 @@
+# Contexto da imagem única (dockerfile da raiz).
+.git
+.github
+e2e
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env-example
+**/.impeccable
+sistema-OSm--Back-end/main
+sistema-OSm--Back-end/tmp

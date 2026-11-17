@@ -15,6 +15,6 @@ nginx
 
 # A API escuta só por dentro; quem atende a PORT pública é o nginx.
 # TRUSTED_PROXIES fixo: o único proxy que fala com a API é o nginx, que repassa
-# o X-Forwarded-For do Railway sem acrescentar nada (ver nginx-api.conf).
+# só o X-Real-IP do Railway (ver nginx-api.conf).
 cd /app
 PORT=8081 TRUSTED_PROXIES=127.0.0.1/32 exec ./main

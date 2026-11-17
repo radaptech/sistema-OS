@@ -7,7 +7,7 @@ cadastros (lojas, setores, usuários, máquinas, preventivas, terceirizadas). Pr
 vencidas abrem solicitação sozinhas, e os indicadores de cada máquina saem do histórico
 de OS concluídas.
 
-É **multi-tenant por subdomínio** (`<empresa>.radaptech.com.br`) e é consumida pelo
+É **multi-tenant por subdomínio** (`<empresa>.sistemaos.radaptech.com.br`) e é consumida pelo
 front em React ([`sistema-OSm--Front-end`](../sistema-OSm--Front-end)).
 
 ## Stack

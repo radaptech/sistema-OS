@@ -183,7 +183,7 @@ desfeito por engano.
 
 ## Domínio e build (antes de subir)
 
-Front e API ficam sob o **mesmo domínio registrável** — `*.radaptech.com.br` nos dois. O
+Em produção front e API saem na **mesma imagem e na mesma origem** (`../dockerfile`: nginx serve o site e repassa `/api` pra API; o bundle é buildado com `REACT_APP_URL_API=/api`), em `<tenant>.sistemaos.radaptech.com.br`. O tenant é a primeira parte do host (`api.ts`), então trocar o formato do domínio não exige mudar código — só o `empresa.subdominio` no banco. Se um dia front e API voltarem a ter endereços separados, os dois precisam ficar sob o **mesmo domínio registrável** (`*.radaptech.com.br`): o
 cookie de sessão é `HttpOnly` + `SameSite=Lax`: em domínios registráveis diferentes o login
 responde 200 e o navegador **descarta o cookie**, e o usuário volta pro login em loop sem
 erro visível. O CORS do back só libera `radaptech.com.br` e `localhost`.

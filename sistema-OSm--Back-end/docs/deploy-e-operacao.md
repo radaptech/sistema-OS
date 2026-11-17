@@ -169,7 +169,7 @@ bloqueio: (1) configurar o Cron Job no Railway apontando pra esse `dockerfile` (
    envio: **`VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT`** (Web Push — gere um
    par **próprio de produção** com `go run . chaves-vapid` e não troque depois: todo aparelho
    inscrito depende da pública; sem elas o push some e a notificação fica só no sininho) e
-   **`RESEND_API_KEY` + `URL_FRONTEND_FORMATO=https://%s.radaptech.com.br`**
+   **`RESEND_API_KEY` + `URL_FRONTEND_FORMATO=https://%s.sistemaos.radaptech.com.br`**
    (recuperação de senha — sem o formato, o link do e-mail aponta pra `localhost`; e o
    domínio do remetente `contato@radaptech.com.br` precisa estar verificado no Resend).
 2. ⚠️ **A URL da API é congelada no BUILD do front**, não em runtime: o `define` do
@@ -182,8 +182,7 @@ bloqueio: (1) configurar o Cron Job no Railway apontando pra esse `dockerfile` (
 4. `provisionar-admin` contra o banco de produção (`railway run`), com o subdomínio real.
 5. Só então apontar o DNS do front.
 
-**Front e API sob o mesmo domínio registrável** (`*.radaptech.com.br` nos dois, ex:
-`app.` + `api.`) — decisão fechada. O cookie é `SameSite=Lax`: em domínios registráveis
+**Front e API na mesma origem** (imagem única, `dockerfile` da raiz: o nginx serve o site e repassa `/api` pra API no mesmo container), cada tenant em `<subdominio>.sistemaos.radaptech.com.br` — domínio curinga `*.sistemaos.radaptech.com.br` no Railway, com o DNS do Cloudflare em **DNS only** (o SSL grátis do Cloudflare não cobre curinga de segundo nível). O `*.radaptech.com.br` é de outro projeto. O tenant é o que vem antes do primeiro ponto, e tem que bater com `empresa.subdominio`. Continua valendo: o cookie é `SameSite=Lax`: em domínios registráveis
 diferentes o login responde 200 e o navegador **descarta o cookie**, sem erro visível. O
 CORS (`middleware/cors.go`) também só libera `radaptech.com.br` e `localhost`.
 

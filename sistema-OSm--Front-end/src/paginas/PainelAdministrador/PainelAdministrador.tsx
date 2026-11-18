@@ -30,7 +30,7 @@ export function PainelAdministrador() {
             </h1>
           </div>
           <p className="text-sm text-slate-500">
-            Acesso total ao tenant — gerencie usuários, lojas, setores e
+            Acesso total ao sistema — gerencie usuários, lojas, setores e
             máquinas do sistema.
           </p>
         </div>
@@ -45,7 +45,7 @@ export function PainelAdministrador() {
           />
           <CardAcao
             titulo="Lojas"
-            descricao="Unidades e filiais do tenant"
+            descricao="Unidades e filiais da empresa"
             Icone={Store}
             aoClicar={() => navegar('/administrador/lojas')}
           />

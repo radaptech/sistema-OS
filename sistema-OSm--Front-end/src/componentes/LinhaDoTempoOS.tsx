@@ -20,6 +20,7 @@ import type {
   SnapshotCustoOS,
   TipoEventoOS,
 } from '../tipos/eventoOrdemServico'
+import { ROTULO_PERFIL } from '../tipos/usuario'
 import { Esqueleto } from './Esqueleto'
 
 interface LinhaDoTempoOSProps {
@@ -148,7 +149,8 @@ function ItemDaLinha({ evento, custoAnterior, ultimo }: ItemDaLinhaProps) {
         <p className="text-sm font-semibold text-slate-700">{tituloDe(evento)}</p>
         <p className="font-mono text-xs text-slate-500">
           {formatarDataHora(evento.ocorridoEm)}
-          {evento.usuarioPerfil && ` · ${evento.usuarioPerfil}`}
+          {evento.usuarioPerfil &&
+            ` · ${ROTULO_PERFIL[evento.usuarioPerfil as keyof typeof ROTULO_PERFIL] ?? evento.usuarioPerfil}`}
           {evento.tipo === 'aberta' && detalhes?.origem && ` · ${ORIGEM_ABERTURA[detalhes.origem]}`}
         </p>
 

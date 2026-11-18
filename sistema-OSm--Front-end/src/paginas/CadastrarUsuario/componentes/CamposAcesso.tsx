@@ -56,7 +56,7 @@ export function CamposAcesso({
   if (perfil === 'administrador') {
     return (
       <p className={`rounded-xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm text-slate-600 ${className}`}>
-        Administrador tem acesso total ao tenant, sem restrição de loja ou setor.
+        Administrador tem acesso a todas as lojas e setores, sem restrição de loja ou setor.
       </p>
     )
   }

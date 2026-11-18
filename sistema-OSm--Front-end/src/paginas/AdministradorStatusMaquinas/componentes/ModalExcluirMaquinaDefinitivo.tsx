@@ -70,7 +70,7 @@ export function ModalExcluirMaquinaDefinitivo({
           }}
         >
           <p className="text-sm text-slate-600">
-            <strong>{maquina.nome}</strong> será apagada do banco junto com todo o histórico
+            <strong>{maquina.nome}</strong> será apagada do sistema junto com todo o histórico
             dela. <strong>Não há como desfazer.</strong>
           </p>
 

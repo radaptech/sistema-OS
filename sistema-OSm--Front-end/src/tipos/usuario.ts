@@ -45,3 +45,10 @@ export interface AtualizarUsuarioPayload extends Omit<NovoUsuarioPayload, 'senha
   id: number
   senha?: string
 }
+
+export const ROTULO_PERFIL: Record<Usuario['perfil'], string> = {
+  solicitante: 'Solicitante',
+  tecnico: 'Técnico',
+  gestor: 'Gestor',
+  administrador: 'Administrador',
+}

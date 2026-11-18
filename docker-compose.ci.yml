@@ -1,0 +1,35 @@
+# Override do e2e no CI: troca o R2 da Cloudflare por um S3 falso local (S3Mock),
+# pra rodada não depender de chave nem gravar foto no bucket de verdade.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d traefik postgres api front s3
+#
+# A foto é gravada pela API (dentro do container) e lida pelo navegador do teste
+# (fora) num link assinado -- o host entra na assinatura, então os dois precisam
+# usar o MESMO nome: s3.localhost:9090. O Chromium já resolve *.localhost para
+# 127.0.0.1; a API chega lá pelo host-gateway.
+# (A imagem do MinIO deixou de ser pública, por isso o S3Mock.)
+
+services:
+  s3:
+    image: adobe/s3mock:4.7.0
+    container_name: s3_sistema-OS
+    ports:
+      - "9090:9090"
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: e2e-maquinario,e2e-reparos,e2e-os,e2e-lojas,e2e-setores,e2e-terceirizados
+
+  api:
+    depends_on:
+      - s3
+    extra_hosts:
+      - "s3.localhost:host-gateway"
+    environment:
+      R2_ENDPOINT: http://s3.localhost:9090
+      R2_KEYID: e2e
+      R2_SECRETKEY: e2e
+      R2_BUCKET_NAME_MAQUINARIO: e2e-maquinario
+      R2_BUCKET_NAME_PEQUENOS_REPAROS: e2e-reparos
+      R2_BUCKET_NAME_OS_SERVICO: e2e-os
+      R2_BUCKET_NAME_IMG_LOJAS: e2e-lojas
+      R2_BUCKET_NAME_IMG_SETORES: e2e-setores
+      R2_BUCKET_NAME_IMG_TERCERIZADOS: e2e-terceirizados

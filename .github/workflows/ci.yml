@@ -76,9 +76,70 @@ jobs:
       - name: build
         run: npm run build
 
-  # Imagem só da master, e só com back E front verdes. PR e dev param nos testes.
-  docker:
+  # O fluxo inteiro nos 4 aparelhos (e2e/), front e back de verdade. Só na
+  # master (push ou PR pra ela): é a trava antes do deploy, e na dev os ~6 min a
+  # mais por push não compensam. Foto vai pro S3Mock (docker-compose.ci.yml).
+  e2e:
     needs: [back, front]
+    if: github.ref == 'refs/heads/master' || github.base_ref == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .env do CI
+        working-directory: sistema-OSm--Back-end
+        run: cp .env-example .env
+
+      - name: Chaves VAPID (o e2e testa a inscrição do push)
+        run: |
+          docker compose build api
+          docker compose run --rm --no-deps --entrypoint "go run . chaves-vapid" api \
+            | grep '^VAPID_' >> sistema-OSm--Back-end/.env
+
+      - name: Sobe o sistema
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d traefik postgres api front s3
+          # API pronta = 401 sem cookie; front pronto = 200 na página (npm install + Vite).
+          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/api/autenticacao/sessao)" = 401 ]; do sleep 3; done'
+          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/login)" = 200 ]; do sleep 3; done'
+
+      - name: Tenants teste e demo
+        run: |
+          docker exec api_sistema-OS ./main provisionar-admin -subdominio=teste -empresa='Empresa Teste' \
+            -nome='Admin Teste' -email=admin@teste.com -senha=Teste@123
+          docker exec api_sistema-OS ./main provisionar-admin -subdominio=demo -empresa='Empresa Demo' \
+            -nome='Admin Demo' -email=admin@demo.com -senha=Demo@12345
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Playwright
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - name: Relatório do Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
+
+      - name: Log da API
+        if: failure()
+        run: docker logs api_sistema-OS 2>&1 | tail -200
+
+  # Imagem só da master, e só com back, front e e2e verdes. PR e dev param nos testes.
+  docker:
+    needs: [back, front, e2e]
     if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     # Dois pushes seguidos na master: o segundo espera o primeiro, senão o
     # latest podia terminar apontando pra imagem mais velha.

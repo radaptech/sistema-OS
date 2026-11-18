@@ -14,14 +14,8 @@ import { useLojas } from '../../hooks/useLojas'
 import { useSetores } from '../../hooks/useSetores'
 import { useUsuarios } from '../../hooks/useUsuarios'
 import { servicoUsuarios } from '../../servicos/servicoUsuarios'
-import type { Usuario } from '../../tipos/usuario'
+import { ROTULO_PERFIL, type Usuario } from '../../tipos/usuario'
 
-const ROTULO_PERFIL: Record<Usuario['perfil'], string> = {
-  solicitante: 'Solicitante',
-  tecnico: 'Técnico',
-  gestor: 'Gestor',
-  administrador: 'Administrador',
-}
 
 export function AdministradorUsuarios() {
   const navegar = useNavigate()

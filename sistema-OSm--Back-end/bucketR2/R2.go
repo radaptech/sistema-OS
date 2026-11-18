@@ -49,7 +49,15 @@ func InitR2_cloudflare(ctx context.Context) {
 		os.Exit(1)
 	}
 
+	// R2_ENDPOINT troca o R2 por outro S3 (o MinIO do e2e no CI). Vazio em
+	// produção. MinIO exige path-style: bucket no caminho, não no subdomínio.
+	endpoint := os.Getenv("R2_ENDPOINT")
 	s3Client = s3.NewFromConfig(config, func(o *s3.Options) {
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+			o.UsePathStyle = true
+			return
+		}
 		o.BaseEndpoint = aws.String(fmt.Sprintf("https://%s.r2.cloudflarestorage.com", idconta))
 	})
 	presignClient = s3.NewPresignClient(s3Client)

@@ -52,7 +52,7 @@ export function SeletorLoja({ lojas, aoSelecionar }: SeletorLojaProps) {
               <p className="font-mono text-xs font-semibold tracking-wide text-slate-500 uppercase">
                 {resumo.acessoTotal
                   ? 'Todos os setores'
-                  : `${resumo.quantidadeSetores} ${resumo.quantidadeSetores === 1 ? 'setor' : 'setores'} no seu escopo`}
+                  : `${resumo.quantidadeSetores} ${resumo.quantidadeSetores === 1 ? 'setor liberado' : 'setores liberados'} para você`}
               </p>
             </div>
             <ChevronRight

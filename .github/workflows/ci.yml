@@ -102,8 +102,10 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d traefik postgres api front s3
           # API pronta = 401 sem cookie; front pronto = 200 na página (npm install + Vite).
-          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/api/autenticacao/sessao)" = 401 ]; do sleep 3; done'
-          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/login)" = 200 ]; do sleep 3; done'
+          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/api/autenticacao/sessao)" = 401 ]; do sleep 3; done' \
+            || { echo "::error::API não respondeu em 5 min (log no último passo)"; exit 1; }
+          timeout 300 sh -c 'until [ "$(curl -s -o /dev/null -w %{http_code} -H "Host: teste.localhost" http://127.0.0.1:8090/login)" = 200 ]; do sleep 3; done' \
+            || { echo "::error::Front não respondeu em 5 min (log no último passo)"; exit 1; }
 
       - name: Tenants teste e demo
         run: |
@@ -133,9 +135,17 @@ jobs:
           path: e2e/playwright-report/
           retention-days: 7
 
-      - name: Log da API
+      # Também cobre a falha antes do Playwright (sistema não subiu): sem isto o
+      # timeout do "Sobe o sistema" só diz "Terminated".
+      - name: Logs dos containers
         if: failure()
-        run: docker logs api_sistema-OS 2>&1 | tail -200
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+          for c in api_sistema-OS front_sistema-OS s3_sistema-OS; do
+            echo "::group::$c"
+            docker logs "$c" 2>&1 | tail -200
+            echo "::endgroup::"
+          done
 
   # Imagem só da master, e só com back, front e e2e verdes. PR e dev param nos testes.
   docker:
